@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
@@ -52,6 +53,7 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
       address: "",
       stripeAccountId: "",
       bankAccountLast4: "",
+      taxRegistrationNumber: "",
       notes: "",
     },
   });
@@ -67,6 +69,7 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
         address: vendor.address || "",
         stripeAccountId: vendor.stripeAccountId || "",
         bankAccountLast4: vendor.bankAccountLast4 || "",
+        taxRegistrationNumber: vendor.taxRegistrationNumber || "",
         notes: vendor.notes || "",
       });
     } else {
@@ -79,6 +82,7 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
         address: "",
         stripeAccountId: "",
         bankAccountLast4: "",
+        taxRegistrationNumber: "",
         notes: "",
       });
     }
@@ -134,119 +138,147 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Name *</FormLabel>
-                    <FormControl>
-                      <Input placeholder="John Doe" {...field} data-testid="input-name" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="company"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Company</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Acme Corp" {...field} data-testid="input-company" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input type="email" placeholder="vendor@example.com" {...field} data-testid="input-email" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="phone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Phone</FormLabel>
-                    <FormControl>
-                      <Input placeholder="+1 (555) 123-4567" {...field} data-testid="input-phone" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <FormField
-              control={form.control}
-              name="address"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Address</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="123 Main St, City, State ZIP" {...field} data-testid="input-address" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="stripeAccountId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Stripe Account ID</FormLabel>
-                    <FormControl>
-                      <Input placeholder="acct_..." {...field} data-testid="input-stripe-account-id" />
-                    </FormControl>
-                    <FormDescription className="text-xs">
-                      For Stripe Connect payments
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="bankAccountLast4"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Bank Account Last 4</FormLabel>
-                    <FormControl>
-                      <Input placeholder="1234" maxLength={4} {...field} data-testid="input-bank-last4" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <FormField
-              control={form.control}
-              name="notes"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Notes</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="Additional notes..." {...field} data-testid="input-notes" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <Tabs defaultValue="basic" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="basic" data-testid="tab-basic-details">Basic Details</TabsTrigger>
+                <TabsTrigger value="payment" data-testid="tab-payment-info">Payment Info</TabsTrigger>
+                <TabsTrigger value="additional" data-testid="tab-additional">Additional</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="basic" className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Name *</FormLabel>
+                        <FormControl>
+                          <Input placeholder="John Doe" {...field} data-testid="input-name" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="company"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Company</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Acme Corp" {...field} data-testid="input-company" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input type="email" placeholder="vendor@example.com" {...field} data-testid="input-email" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="phone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone</FormLabel>
+                        <FormControl>
+                          <Input placeholder="+1 (555) 123-4567" {...field} data-testid="input-phone" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="taxRegistrationNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tax Registration Number (TRN)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Enter vendor's tax registration number" {...field} data-testid="input-vendor-tax-registration-number" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </TabsContent>
+
+              <TabsContent value="payment" className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="stripeAccountId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Stripe Account ID</FormLabel>
+                      <FormControl>
+                        <Input placeholder="acct_..." {...field} data-testid="input-stripe-account-id" />
+                      </FormControl>
+                      <FormDescription className="text-xs">
+                        For Stripe Connect payments
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="bankAccountLast4"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Bank Account Last 4</FormLabel>
+                      <FormControl>
+                        <Input placeholder="1234" maxLength={4} {...field} data-testid="input-bank-last4" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </TabsContent>
+
+              <TabsContent value="additional" className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="address"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Address</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="123 Main St, City, State ZIP" {...field} data-testid="input-address" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Notes</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="Additional notes..." {...field} data-testid="input-notes" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </TabsContent>
+            </Tabs>
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel

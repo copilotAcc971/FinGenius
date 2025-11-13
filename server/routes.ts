@@ -1835,6 +1835,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/bills/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const bill = await storage.getBillById(id, tenantId);
+      if (!bill) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+      res.json(bill);
+    } catch (error) {
+      console.error("Error fetching bill:", error);
+      res.status(500).json({ message: "Failed to fetch bill" });
+    }
+  });
+
+  app.post('/api/bills', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const validated = billPayloadSchema.parse(req.body);
+      const bill = await storage.createBillWithItems(validated);
+      res.status(201).json(bill);
+    } catch (error: any) {
+      console.error("Error creating bill:", error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Invalid bill data', errors: error.errors });
+      }
+      res.status(400).json({ message: error.message || "Failed to create bill" });
+    }
+  });
+
+  app.patch('/api/bills/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const validated = billPayloadSchema.parse(req.body);
+      const bill = await storage.updateBillWithItems(id, tenantId, validated);
+      res.json(bill);
+    } catch (error: any) {
+      console.error("Error updating bill:", error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Invalid bill data', errors: error.errors });
+      }
+      res.status(400).json({ message: error.message || "Failed to update bill" });
+    }
+  });
+
+  app.delete('/api/bills/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deleteBill(id, tenantId);
+      res.json({ message: "Bill deleted" });
+    } catch (error: any) {
+      console.error("Error deleting bill:", error);
+      res.status(500).json({ message: error.message || "Failed to delete bill" });
+    }
+  });
+
+  app.get('/api/bills/:id/line-items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const lineItems = await storage.getBillLineItems(id);
+      res.json(lineItems);
+    } catch (error) {
+      console.error("Error fetching bill line items:", error);
+      res.status(500).json({ message: "Failed to fetch bill line items" });
+    }
+  });
+
+  app.post('/api/bills/extract', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { image } = req.body;
+      if (!image) {
+        return res.status(400).json({ message: "No image provided" });
+      }
+      const { extractBillData } = await import('./ai-bill-extractor');
+      const extractedData = await extractBillData(image);
+      res.json(extractedData);
+    } catch (error: any) {
+      console.error("Error extracting bill data:", error);
+      res.status(500).json({ message: error.message || "Failed to extract bill data" });
+    }
+  });
+
   // Expense routes
   app.get('/api/expenses', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {

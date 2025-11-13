@@ -160,6 +160,7 @@ export interface IStorage {
   // Bill operations
   getBillsByTenant(tenantId: string): Promise<Bill[]>;
   getBill(id: string): Promise<Bill | undefined>;
+  getBillById(id: string, tenantId: string): Promise<Bill | null>;
   getBillLineItems(billId: string): Promise<BillLineItem[]>;
   createBillWithItems(payload: BillPayload): Promise<Bill>;
   updateBillWithItems(id: string, tenantId: string, payload: BillPayload): Promise<Bill>;
@@ -889,6 +890,21 @@ export class DatabaseStorage implements IStorage {
     return bill;
   }
 
+  async getBillById(id: string, tenantId: string): Promise<Bill | null> {
+    const [bill] = await db
+      .select()
+      .from(bills)
+      .where(
+        and(
+          eq(bills.id, id),
+          eq(bills.tenantId, tenantId)
+        )
+      )
+      .limit(1);
+    
+    return bill || null;
+  }
+
   async getBillLineItems(billId: string): Promise<BillLineItem[]> {
     return await db
       .select()
@@ -908,14 +924,58 @@ export class DatabaseStorage implements IStorage {
       if (!vendor.length) {
         throw new Error("Vendor not found or doesn't belong to this tenant");
       }
+
+      // Auto-generate bill number if not provided (BILL-0001 format)
+      let billNumber = payload.bill.billNumber;
+      if (!billNumber) {
+        const lastBill = await tx
+          .select({ billNumber: bills.billNumber })
+          .from(bills)
+          .where(eq(bills.tenantId, payload.bill.tenantId))
+          .orderBy(desc(bills.createdAt))
+          .limit(1);
+        
+        const lastNumber = lastBill[0]?.billNumber;
+        const nextNumber = lastNumber 
+          ? parseInt(lastNumber.replace('BILL-', '')) + 1 
+          : 1;
+        billNumber = `BILL-${nextNumber.toString().padStart(4, '0')}`;
+      }
+
+      // Server-side calculation: Calculate each line item's amount
+      const lineItemsWithCalculatedAmounts = payload.lineItems.map(item => {
+        const quantity = parseFloat(item.quantity);
+        const unitPrice = parseFloat(item.unitPrice);
+        const calculatedAmount = quantity * unitPrice;
+        
+        return {
+          ...item,
+          amount: calculatedAmount.toFixed(2),
+        };
+      });
+
+      // Calculate subtotal from calculated amounts
+      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+        return sum + parseFloat(item.amount);
+      }, 0);
+
+      // Use taxAmount from payload (could be enhanced to fetch tax rates from database)
+      const taxAmount = parseFloat(payload.bill.taxAmount);
+      const total = subtotal + taxAmount;
       
       const [bill] = await tx
         .insert(bills)
-        .values(payload.bill)
+        .values({
+          ...payload.bill,
+          billNumber,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
+        })
         .returning();
       
-      if (payload.lineItems.length > 0) {
-        const lineItemsWithBillId = payload.lineItems.map(item => ({
+      if (lineItemsWithCalculatedAmounts.length > 0) {
+        const lineItemsWithBillId = lineItemsWithCalculatedAmounts.map(item => ({
           ...item,
           billId: bill.id,
           tenantId: payload.bill.tenantId,
@@ -3381,6 +3441,11 @@ export class MemStorage implements IStorage {
 
   async getBill(id: string): Promise<Bill | undefined> {
     return this.bills.find(b => b.id === id);
+  }
+
+  async getBillById(id: string, tenantId: string): Promise<Bill | null> {
+    const bill = this.bills.find(b => b.id === id && b.tenantId === tenantId);
+    return bill || null;
   }
 
   async getBillLineItems(billId: string): Promise<BillLineItem[]> {
