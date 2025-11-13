@@ -23,10 +23,12 @@ import {
   type InsertInvoice,
   type InvoiceLineItem,
   type InsertInvoiceLineItem,
+  type InvoicePayload,
   type Bill,
   type InsertBill,
   type BillLineItem,
   type InsertBillLineItem,
+  type BillPayload,
   type Expense,
   type InsertExpense,
   type Payment,
@@ -65,14 +67,18 @@ export interface IStorage {
   // Invoice operations
   getInvoicesByTenant(tenantId: string): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
-  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
-  updateInvoice(id: string, tenantId: string, invoice: Partial<InsertInvoice>): Promise<Invoice>;
+  getInvoiceLineItems(invoiceId: string): Promise<InvoiceLineItem[]>;
+  createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice>;
+  updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice>;
+  deleteInvoice(id: string, tenantId: string): Promise<void>;
 
   // Bill operations
   getBillsByTenant(tenantId: string): Promise<Bill[]>;
   getBill(id: string): Promise<Bill | undefined>;
-  createBill(bill: InsertBill): Promise<Bill>;
-  updateBill(id: string, tenantId: string, bill: Partial<InsertBill>): Promise<Bill>;
+  getBillLineItems(billId: string): Promise<BillLineItem[]>;
+  createBillWithItems(payload: BillPayload): Promise<Bill>;
+  updateBillWithItems(id: string, tenantId: string, payload: BillPayload): Promise<Bill>;
+  deleteBill(id: string, tenantId: string): Promise<void>;
 
   // Expense operations
   getExpensesByTenant(tenantId: string): Promise<Expense[]>;
@@ -259,26 +265,103 @@ export class DatabaseStorage implements IStorage {
     return invoice;
   }
 
-  async createInvoice(invoiceData: InsertInvoice): Promise<Invoice> {
-    const [invoice] = await db
-      .insert(invoices)
-      .values(invoiceData)
-      .returning();
-    return invoice;
+  async getInvoiceLineItems(invoiceId: string): Promise<InvoiceLineItem[]> {
+    return await db
+      .select()
+      .from(invoiceLineItems)
+      .where(eq(invoiceLineItems.invoiceId, invoiceId));
   }
 
-  async updateInvoice(id: string, tenantId: string, invoiceData: Partial<InsertInvoice>): Promise<Invoice> {
+  async createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice> {
+    return await db.transaction(async (tx) => {
+      const customer = await tx.select().from(customers)
+        .where(and(
+          eq(customers.id, payload.invoice.customerId),
+          eq(customers.tenantId, payload.invoice.tenantId)
+        ))
+        .limit(1);
+      
+      if (!customer.length) {
+        throw new Error("Customer not found or doesn't belong to this tenant");
+      }
+      
+      const [invoice] = await tx
+        .insert(invoices)
+        .values(payload.invoice)
+        .returning();
+      
+      if (payload.lineItems.length > 0) {
+        const lineItemsWithInvoiceId = payload.lineItems.map(item => ({
+          ...item,
+          invoiceId: invoice.id,
+          tenantId: payload.invoice.tenantId,
+        }));
+        await tx.insert(invoiceLineItems).values(lineItemsWithInvoiceId);
+      }
+      
+      return invoice;
+    });
+  }
+
+  async updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice> {
     const invoice = await this.getInvoice(id);
     if (!invoice || invoice.tenantId !== tenantId) {
       throw new Error("Invoice not found");
     }
     
-    const [updatedInvoice] = await db
-      .update(invoices)
-      .set({ ...invoiceData, updatedAt: new Date() })
-      .where(eq(invoices.id, id))
-      .returning();
-    return updatedInvoice;
+    return await db.transaction(async (tx) => {
+      const customer = await tx.select().from(customers)
+        .where(and(
+          eq(customers.id, payload.invoice.customerId),
+          eq(customers.tenantId, tenantId)
+        ))
+        .limit(1);
+      
+      if (!customer.length) {
+        throw new Error("Customer not found or doesn't belong to this tenant");
+      }
+      
+      const { tenantId: _, ...safeInvoiceData } = payload.invoice;
+      
+      const [updatedInvoice] = await tx
+        .update(invoices)
+        .set({ 
+          ...safeInvoiceData, 
+          tenantId: invoice.tenantId,
+          updatedAt: new Date() 
+        })
+        .where(eq(invoices.id, id))
+        .returning();
+      
+      if (!updatedInvoice) {
+        throw new Error("Invoice was deleted during update");
+      }
+      
+      await tx.delete(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, id));
+      
+      if (payload.lineItems.length > 0) {
+        const lineItemsWithInvoiceId = payload.lineItems.map(item => ({
+          ...item,
+          invoiceId: id,
+          tenantId: invoice.tenantId,
+        }));
+        await tx.insert(invoiceLineItems).values(lineItemsWithInvoiceId);
+      }
+      
+      return updatedInvoice;
+    });
+  }
+
+  async deleteInvoice(id: string, tenantId: string): Promise<void> {
+    const invoice = await this.getInvoice(id);
+    if (!invoice || invoice.tenantId !== tenantId) {
+      throw new Error("Invoice not found");
+    }
+    
+    await db.transaction(async (tx) => {
+      await tx.delete(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, id));
+      await tx.delete(invoices).where(eq(invoices.id, id));
+    });
   }
 
   // Bill operations
@@ -295,26 +378,103 @@ export class DatabaseStorage implements IStorage {
     return bill;
   }
 
-  async createBill(billData: InsertBill): Promise<Bill> {
-    const [bill] = await db
-      .insert(bills)
-      .values(billData)
-      .returning();
-    return bill;
+  async getBillLineItems(billId: string): Promise<BillLineItem[]> {
+    return await db
+      .select()
+      .from(billLineItems)
+      .where(eq(billLineItems.billId, billId));
   }
 
-  async updateBill(id: string, tenantId: string, billData: Partial<InsertBill>): Promise<Bill> {
+  async createBillWithItems(payload: BillPayload): Promise<Bill> {
+    return await db.transaction(async (tx) => {
+      const vendor = await tx.select().from(vendors)
+        .where(and(
+          eq(vendors.id, payload.bill.vendorId),
+          eq(vendors.tenantId, payload.bill.tenantId)
+        ))
+        .limit(1);
+      
+      if (!vendor.length) {
+        throw new Error("Vendor not found or doesn't belong to this tenant");
+      }
+      
+      const [bill] = await tx
+        .insert(bills)
+        .values(payload.bill)
+        .returning();
+      
+      if (payload.lineItems.length > 0) {
+        const lineItemsWithBillId = payload.lineItems.map(item => ({
+          ...item,
+          billId: bill.id,
+          tenantId: payload.bill.tenantId,
+        }));
+        await tx.insert(billLineItems).values(lineItemsWithBillId);
+      }
+      
+      return bill;
+    });
+  }
+
+  async updateBillWithItems(id: string, tenantId: string, payload: BillPayload): Promise<Bill> {
     const bill = await this.getBill(id);
     if (!bill || bill.tenantId !== tenantId) {
       throw new Error("Bill not found");
     }
     
-    const [updatedBill] = await db
-      .update(bills)
-      .set({ ...billData, updatedAt: new Date() })
-      .where(eq(bills.id, id))
-      .returning();
-    return updatedBill;
+    return await db.transaction(async (tx) => {
+      const vendor = await tx.select().from(vendors)
+        .where(and(
+          eq(vendors.id, payload.bill.vendorId),
+          eq(vendors.tenantId, tenantId)
+        ))
+        .limit(1);
+      
+      if (!vendor.length) {
+        throw new Error("Vendor not found or doesn't belong to this tenant");
+      }
+      
+      const { tenantId: _, ...safeBillData } = payload.bill;
+      
+      const [updatedBill] = await tx
+        .update(bills)
+        .set({ 
+          ...safeBillData, 
+          tenantId: bill.tenantId,
+          updatedAt: new Date() 
+        })
+        .where(eq(bills.id, id))
+        .returning();
+      
+      if (!updatedBill) {
+        throw new Error("Bill was deleted during update");
+      }
+      
+      await tx.delete(billLineItems).where(eq(billLineItems.billId, id));
+      
+      if (payload.lineItems.length > 0) {
+        const lineItemsWithBillId = payload.lineItems.map(item => ({
+          ...item,
+          billId: id,
+          tenantId: bill.tenantId,
+        }));
+        await tx.insert(billLineItems).values(lineItemsWithBillId);
+      }
+      
+      return updatedBill;
+    });
+  }
+
+  async deleteBill(id: string, tenantId: string): Promise<void> {
+    const bill = await this.getBill(id);
+    if (!bill || bill.tenantId !== tenantId) {
+      throw new Error("Bill not found");
+    }
+    
+    await db.transaction(async (tx) => {
+      await tx.delete(billLineItems).where(eq(billLineItems.billId, id));
+      await tx.delete(bills).where(eq(bills.id, id));
+    });
   }
 
   // Expense operations

@@ -9,7 +9,9 @@ import {
   insertCustomerSchema,
   insertVendorSchema,
   insertInvoiceSchema,
+  invoicePayloadSchema,
   insertBillSchema,
+  billPayloadSchema,
   insertExpenseSchema,
   insertPaymentSchema,
   insertDocumentSchema,
@@ -266,6 +268,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching invoices:", error);
       res.status(500).json({ message: "Failed to fetch invoices" });
+    }
+  });
+
+  app.get('/api/invoices/:id/line-items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.claims.sub;
+      
+      const invoice = await storage.getInvoice(id);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+      
+      const tenant = await storage.getTenant(invoice.tenantId);
+      if (!tenant || tenant.ownerId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const lineItems = await storage.getInvoiceLineItems(id);
+      res.json(lineItems);
+    } catch (error) {
+      console.error("Error fetching invoice line items:", error);
+      res.status(500).json({ message: "Failed to fetch invoice line items" });
+    }
+  });
+
+  app.post('/api/invoices', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const parsed = invoicePayloadSchema.parse({
+        invoice: { ...req.body.invoice, tenantId: req.tenantId },
+        lineItems: req.body.lineItems || [],
+      });
+      const invoice = await storage.createInvoiceWithItems(parsed);
+      res.json(invoice);
+    } catch (error: any) {
+      console.error("Error creating invoice:", error);
+      res.status(400).json({ message: error.message || "Failed to create invoice" });
+    }
+  });
+
+  app.patch('/api/invoices/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.claims.sub;
+      
+      const invoice = await storage.getInvoice(id);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+      
+      const tenant = await storage.getTenant(invoice.tenantId);
+      if (!tenant || tenant.ownerId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const parsed = invoicePayloadSchema.parse({
+        invoice: { ...req.body.invoice, tenantId: invoice.tenantId },
+        lineItems: req.body.lineItems || [],
+      });
+      
+      const updated = await storage.updateInvoiceWithItems(id, invoice.tenantId, parsed);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating invoice:", error);
+      res.status(400).json({ message: error.message || "Failed to update invoice" });
+    }
+  });
+
+  app.delete('/api/invoices/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.claims.sub;
+      
+      const invoice = await storage.getInvoice(id);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+      
+      const tenant = await storage.getTenant(invoice.tenantId);
+      if (!tenant || tenant.ownerId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      await storage.deleteInvoice(id, invoice.tenantId);
+      res.json({ message: "Invoice deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting invoice:", error);
+      res.status(400).json({ message: error.message || "Failed to delete invoice" });
     }
   });
 

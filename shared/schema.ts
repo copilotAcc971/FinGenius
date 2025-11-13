@@ -164,7 +164,17 @@ export const invoices = pgTable("invoices", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertInvoiceSchema = createInsertSchema(invoices).omit({
+// Helper to preprocess decimal values (accept both string and number)
+const decimalString = z.preprocess(
+  (val) => (typeof val === 'number' ? val.toString() : val),
+  z.string()
+);
+
+export const insertInvoiceSchema = createInsertSchema(invoices, {
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -176,6 +186,7 @@ export type Invoice = typeof invoices.$inferSelect;
 // Invoice Line Items
 export const invoiceLineItems = pgTable("invoice_line_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   invoiceId: varchar("invoice_id").notNull().references(() => invoices.id),
   description: text("description").notNull(),
   quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
@@ -185,13 +196,35 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertInvoiceLineItemSchema = createInsertSchema(invoiceLineItems).omit({
+export const insertInvoiceLineItemSchema = createInsertSchema(invoiceLineItems, {
+  quantity: decimalString,
+  unitPrice: decimalString,
+  amount: decimalString,
+}).omit({
   id: true,
+  tenantId: true,
   createdAt: true,
 });
 
 export type InsertInvoiceLineItem = z.infer<typeof insertInvoiceLineItemSchema>;
 export type InvoiceLineItem = typeof invoiceLineItems.$inferSelect;
+
+// Invoice Payload (for transactional create/update with line items)
+export const invoicePayloadSchema = z.object({
+  invoice: insertInvoiceSchema.partial().required({ 
+    customerId: true,
+    invoiceNumber: true,
+    invoiceDate: true,
+    dueDate: true,
+    status: true,
+    subtotal: true,
+    taxAmount: true,
+    total: true,
+  }),
+  lineItems: z.array(insertInvoiceLineItemSchema.omit({ invoiceId: true })).min(1, "At least one line item is required"),
+});
+
+export type InvoicePayload = z.infer<typeof invoicePayloadSchema>;
 
 // Bills (Purchases from Vendors)
 export const bills = pgTable("bills", {
@@ -211,7 +244,11 @@ export const bills = pgTable("bills", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertBillSchema = createInsertSchema(bills).omit({
+export const insertBillSchema = createInsertSchema(bills, {
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -223,6 +260,7 @@ export type Bill = typeof bills.$inferSelect;
 // Bill Line Items
 export const billLineItems = pgTable("bill_line_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   billId: varchar("bill_id").notNull().references(() => bills.id),
   description: text("description").notNull(),
   quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
@@ -232,13 +270,35 @@ export const billLineItems = pgTable("bill_line_items", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertBillLineItemSchema = createInsertSchema(billLineItems).omit({
+export const insertBillLineItemSchema = createInsertSchema(billLineItems, {
+  quantity: decimalString,
+  unitPrice: decimalString,
+  amount: decimalString,
+}).omit({
   id: true,
+  tenantId: true,
   createdAt: true,
 });
 
 export type InsertBillLineItem = z.infer<typeof insertBillLineItemSchema>;
 export type BillLineItem = typeof billLineItems.$inferSelect;
+
+// Bill Payload (for transactional create/update with line items)
+export const billPayloadSchema = z.object({
+  bill: insertBillSchema.partial().required({ 
+    vendorId: true,
+    billNumber: true,
+    billDate: true,
+    dueDate: true,
+    status: true,
+    subtotal: true,
+    taxAmount: true,
+    total: true,
+  }),
+  lineItems: z.array(insertBillLineItemSchema.omit({ billId: true })).min(1, "At least one line item is required"),
+});
+
+export type BillPayload = z.infer<typeof billPayloadSchema>;
 
 // Expenses
 export const expenses = pgTable("expenses", {
@@ -257,7 +317,9 @@ export const expenses = pgTable("expenses", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertExpenseSchema = createInsertSchema(expenses).omit({
+export const insertExpenseSchema = createInsertSchema(expenses, {
+  amount: decimalString,
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -286,7 +348,9 @@ export const payments = pgTable("payments", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertPaymentSchema = createInsertSchema(payments).omit({
+export const insertPaymentSchema = createInsertSchema(payments, {
+  amount: decimalString,
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
