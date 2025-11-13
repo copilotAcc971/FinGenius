@@ -135,6 +135,8 @@ export const insertCustomerSchema = createInsertSchema(customers, {
   updatedAt: true,
 });
 
+export const updateCustomerSchema = insertCustomerSchema.omit({ tenantId: true }).partial();
+
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type Customer = typeof customers.$inferSelect;
 

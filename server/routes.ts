@@ -7,6 +7,7 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import {
   insertTenantSchema,
   insertCustomerSchema,
+  updateCustomerSchema,
   insertVendorSchema,
   insertItemSchema,
   insertTaxSchema,
@@ -154,8 +155,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied" });
       }
       
+      // Validate the update payload
+      const parsed = updateCustomerSchema.parse(req.body);
+      
       // Now perform the update
-      const updated = await storage.updateCustomer(id, customer.tenantId, req.body);
+      const updated = await storage.updateCustomer(id, customer.tenantId, parsed);
       res.json(updated);
     } catch (error: any) {
       console.error("Error updating customer:", error);
