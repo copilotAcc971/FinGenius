@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   FileText,
   Users,
+  Package,
   Receipt,
   ShoppingCart,
   CreditCard,
@@ -27,6 +28,7 @@ import { Link, useLocation } from "wouter";
 const salesItems = [
   { title: "Invoices", url: "/invoices", icon: FileText },
   { title: "Customers", url: "/customers", icon: Users },
+  { title: "Items", url: "/items", icon: Package },
 ];
 
 const purchasesItems = [

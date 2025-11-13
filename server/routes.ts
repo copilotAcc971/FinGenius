@@ -8,6 +8,7 @@ import {
   insertTenantSchema,
   insertCustomerSchema,
   insertVendorSchema,
+  insertItemSchema,
   insertInvoiceSchema,
   invoicePayloadSchema,
   insertBillSchema,
@@ -257,6 +258,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error deleting vendor:", error);
       res.status(400).json({ message: error.message || "Failed to delete vendor" });
+    }
+  });
+
+  // Item routes
+  app.get('/api/items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const items = await storage.getItems(req.tenantId);
+      res.json(items);
+    } catch (error) {
+      console.error("Error fetching items:", error);
+      res.status(500).json({ message: "Failed to fetch items" });
+    }
+  });
+
+  app.post('/api/items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      
+      // Parse req.body - insertItemSchema.omit strips tenantId
+      const parsed = insertItemSchema.parse(req.body);
+      
+      // Add verified tenantId back AFTER parsing
+      const item = await storage.createItem({ ...parsed, tenantId });
+      res.status(201).json(item);
+    } catch (error: any) {
+      console.error("Error creating item:", error);
+      res.status(400).json({ message: error.message || "Failed to create item" });
+    }
+  });
+
+  app.patch('/api/items/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Verify item exists and belongs to this tenant
+      const existingItem = await storage.getItem(id);
+      if (!existingItem) {
+        return res.status(404).json({ message: "Item not found" });
+      }
+      
+      // Verify the item belongs to the tenant the user has access to
+      if (existingItem.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Item not found" });
+      }
+      
+      // STRIP tenantId from payload - NEVER trust client
+      const { tenantId: _, ...sanitizedPayload } = req.body;
+      
+      // Validate sanitized payload
+      const parsed = insertItemSchema.partial().parse(sanitizedPayload);
+      
+      // Update with VERIFIED tenantId
+      const updated = await storage.updateItem(id, tenantId, parsed);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating item:", error);
+      res.status(400).json({ message: error.message || "Failed to update item" });
+    }
+  });
+
+  app.delete('/api/items/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Verify item exists and belongs to this tenant
+      const existingItem = await storage.getItem(id);
+      if (!existingItem) {
+        return res.status(404).json({ message: "Item not found" });
+      }
+      
+      // Verify the item belongs to the tenant the user has access to
+      if (existingItem.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Item not found" });
+      }
+      
+      // Delete using VERIFIED tenantId from middleware
+      await storage.deleteItem(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting item:", error);
+      res.status(400).json({ message: error.message || "Failed to delete item" });
     }
   });
 

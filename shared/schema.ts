@@ -147,6 +147,41 @@ export const insertAccountSchema = createInsertSchema(accounts).omit({
 export type InsertAccount = z.infer<typeof insertAccountSchema>;
 export type Account = typeof accounts.$inferSelect;
 
+// Helper to preprocess decimal values (accept both string and number)
+const decimalString = z.preprocess(
+  (val) => (typeof val === 'number' ? val.toString() : val),
+  z.string()
+);
+
+// Items/Products
+export const items = pgTable("items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  sku: varchar("sku", { length: 100 }),
+  rate: decimal("rate", { precision: 12, scale: 2 }).notNull(),
+  unit: varchar("unit", { length: 50 }),
+  type: varchar("type", { length: 50 }).notNull(),
+  accountId: varchar("account_id").references(() => accounts.id),
+  taxId: varchar("tax_id"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("createdAt").defaultNow(),
+  updatedAt: timestamp("updatedAt").defaultNow(),
+});
+
+export const insertItemSchema = createInsertSchema(items, {
+  rate: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  tenantId: true,
+});
+
+export type InsertItem = z.infer<typeof insertItemSchema>;
+export type Item = typeof items.$inferSelect;
+
 // Invoices (Sales)
 export const invoices = pgTable("invoices", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -163,12 +198,6 @@ export const invoices = pgTable("invoices", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
-
-// Helper to preprocess decimal values (accept both string and number)
-const decimalString = z.preprocess(
-  (val) => (typeof val === 'number' ? val.toString() : val),
-  z.string()
-);
 
 export const insertInvoiceSchema = createInsertSchema(invoices, {
   subtotal: decimalString,

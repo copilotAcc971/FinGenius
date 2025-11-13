@@ -4,6 +4,7 @@ import {
   tenantMembers,
   customers,
   vendors,
+  items,
   invoices,
   invoiceLineItems,
   bills,
@@ -19,6 +20,8 @@ import {
   type InsertCustomer,
   type Vendor,
   type InsertVendor,
+  type Item,
+  type InsertItem,
   type Invoice,
   type InsertInvoice,
   type InvoiceLineItem,
@@ -63,6 +66,13 @@ export interface IStorage {
   createVendor(vendor: InsertVendor): Promise<Vendor>;
   updateVendor(id: string, tenantId: string, vendor: Partial<InsertVendor>): Promise<Vendor>;
   deleteVendor(id: string, tenantId: string): Promise<void>;
+
+  // Item operations
+  getItems(tenantId: string): Promise<Item[]>;
+  getItem(id: string): Promise<Item | undefined>;
+  createItem(item: InsertItem & { tenantId: string }): Promise<Item>;
+  updateItem(id: string, tenantId: string, item: Partial<InsertItem>): Promise<Item>;
+  deleteItem(id: string, tenantId: string): Promise<void>;
 
   // Invoice operations
   getInvoicesByTenant(tenantId: string): Promise<Invoice[]>;
@@ -249,6 +259,50 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Vendor not found");
     }
     await db.delete(vendors).where(eq(vendors.id, id));
+  }
+
+  // Item operations
+  async getItems(tenantId: string): Promise<Item[]> {
+    return await db
+      .select()
+      .from(items)
+      .where(eq(items.tenantId, tenantId))
+      .orderBy(desc(items.createdAt));
+  }
+
+  async getItem(id: string): Promise<Item | undefined> {
+    const [item] = await db.select().from(items).where(eq(items.id, id));
+    return item;
+  }
+
+  async createItem(itemData: InsertItem & { tenantId: string }): Promise<Item> {
+    const [item] = await db
+      .insert(items)
+      .values(itemData)
+      .returning();
+    return item;
+  }
+
+  async updateItem(id: string, tenantId: string, itemData: Partial<InsertItem>): Promise<Item> {
+    const item = await this.getItem(id);
+    if (!item || item.tenantId !== tenantId) {
+      throw new Error("Item not found");
+    }
+    
+    const [updatedItem] = await db
+      .update(items)
+      .set({ ...itemData, updatedAt: new Date() })
+      .where(and(eq(items.id, id), eq(items.tenantId, tenantId)))
+      .returning();
+    return updatedItem;
+  }
+
+  async deleteItem(id: string, tenantId: string): Promise<void> {
+    const item = await this.getItem(id);
+    if (!item || item.tenantId !== tenantId) {
+      throw new Error("Item not found");
+    }
+    await db.delete(items).where(and(eq(items.id, id), eq(items.tenantId, tenantId)));
   }
 
   // Invoice operations
