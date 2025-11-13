@@ -5,6 +5,7 @@ import {
   tenantCompanyProfiles,
   customers,
   vendors,
+  accounts,
   items,
   taxes,
   invoices,
@@ -13,6 +14,9 @@ import {
   invoiceAuditLogs,
   bills,
   billLineItems,
+  purchaseOrders,
+  purchaseOrderLineItems,
+  purchaseOrderSequences,
   expenses,
   payments,
   documents,
@@ -28,6 +32,15 @@ import {
   recurringInvoiceLineItems,
   retainerInvoices,
   retainerInvoiceLineItems,
+  journalEntries,
+  journalEntryLegs,
+  journalEntrySequences,
+  assets,
+  assetDepreciationSchedules,
+  assetSequences,
+  accountSequences,
+  bankReconciliations,
+  bankReconciliationItems,
   type User,
   type UpsertUser,
   type Tenant,
@@ -38,6 +51,8 @@ import {
   type InsertCustomer,
   type Vendor,
   type InsertVendor,
+  type Account,
+  type InsertAccount,
   type Item,
   type InsertItem,
   type Tax,
@@ -53,6 +68,11 @@ import {
   type BillLineItem,
   type InsertBillLineItem,
   type BillPayload,
+  type PurchaseOrder,
+  type InsertPurchaseOrder,
+  type PurchaseOrderLineItem,
+  type InsertPurchaseOrderLineItem,
+  type PurchaseOrderPayload,
   type Expense,
   type InsertExpense,
   type Payment,
@@ -81,9 +101,27 @@ import {
   type InsertRetainerInvoice,
   type RetainerInvoiceLineItem,
   type InsertRetainerInvoiceLineItem,
+  type JournalEntry,
+  type InsertJournalEntry,
+  type JournalEntryLeg,
+  type InsertJournalEntryLeg,
+  type JournalEntryPayload,
+  type Asset,
+  type InsertAsset,
+  type AssetDepreciationSchedule,
+  type InsertAssetDepreciationSchedule,
+  type BankReconciliation,
+  type InsertBankReconciliation,
+  type BankReconciliationItem,
+  type InsertBankReconciliationItem,
+  type BankReconciliationPayload,
+  type ProfitLossReport,
+  type BalanceSheetReport,
+  type TrialBalanceReport,
+  type CashFlowReport,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, ne, isNull } from "drizzle-orm";
+import { eq, and, desc, ne, isNull, sum, gte, lte, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -116,6 +154,14 @@ export interface IStorage {
   createVendor(vendor: InsertVendor): Promise<Vendor>;
   updateVendor(id: string, tenantId: string, vendor: Partial<InsertVendor>): Promise<Vendor>;
   deleteVendor(id: string, tenantId: string): Promise<void>;
+
+  // Account operations
+  getAccounts(tenantId: string): Promise<Account[]>;
+  getAccount(id: string): Promise<Account | undefined>;
+  createAccount(account: InsertAccount & { tenantId: string }): Promise<Account>;
+  updateAccount(id: string, tenantId: string, account: Partial<InsertAccount>): Promise<Account>;
+  deleteAccount(id: string, tenantId: string): Promise<void>;
+  getNextAccountNumber(tenantId: string): Promise<string>;
 
   // Item operations
   getItems(tenantId: string): Promise<Item[]>;
@@ -165,6 +211,15 @@ export interface IStorage {
   createBillWithItems(payload: BillPayload, tenantId: string): Promise<Bill>;
   updateBillWithItems(id: string, tenantId: string, payload: BillPayload): Promise<Bill>;
   deleteBill(id: string, tenantId: string): Promise<void>;
+
+  // Purchase Order operations
+  getPurchaseOrders(tenantId: string): Promise<PurchaseOrder[]>;
+  getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined>;
+  getPurchaseOrderLineItems(purchaseOrderId: string, tenantId: string): Promise<PurchaseOrderLineItem[]>;
+  createPurchaseOrderWithItems(payload: PurchaseOrderPayload): Promise<PurchaseOrder>;
+  updatePurchaseOrderWithItems(id: string, tenantId: string, payload: PurchaseOrderPayload): Promise<PurchaseOrder>;
+  deletePurchaseOrder(id: string, tenantId: string): Promise<void>;
+  getNextPurchaseOrderNumber(tenantId: string): Promise<string>;
 
   // Expense operations
   getExpensesByTenant(tenantId: string): Promise<Expense[]>;
@@ -235,6 +290,39 @@ export interface IStorage {
   deleteRetainerInvoice(id: string, tenantId: string): Promise<void>;
   getRetainerInvoiceLineItems(retainerInvoiceId: string, tenantId: string): Promise<RetainerInvoiceLineItem[]>;
   getNextRetainerNumber(tenantId: string): Promise<string>;
+
+  // Journal Entry operations
+  getJournalEntries(tenantId: string): Promise<JournalEntry[]>;
+  getJournalEntry(id: string): Promise<JournalEntry | undefined>;
+  getJournalEntryLegs(journalEntryId: string, tenantId: string): Promise<JournalEntryLeg[]>;
+  createJournalEntryWithLegs(payload: JournalEntryPayload): Promise<JournalEntry>;
+  updateJournalEntryWithLegs(id: string, tenantId: string, payload: JournalEntryPayload): Promise<JournalEntry>;
+  deleteJournalEntry(id: string, tenantId: string): Promise<void>;
+  getNextJournalEntryNumber(tenantId: string): Promise<string>;
+
+  // Asset operations
+  getAssets(tenantId: string): Promise<Asset[]>;
+  getAsset(id: string): Promise<Asset | undefined>;
+  getAssetDepreciationSchedules(assetId: string, tenantId: string): Promise<AssetDepreciationSchedule[]>;
+  createAsset(asset: InsertAsset & { tenantId: string }): Promise<Asset>;
+  updateAsset(id: string, tenantId: string, asset: Partial<InsertAsset>): Promise<Asset>;
+  deleteAsset(id: string, tenantId: string): Promise<void>;
+  getNextAssetNumber(tenantId: string): Promise<string>;
+
+  // Bank Reconciliation operations
+  getBankReconciliations(tenantId: string): Promise<BankReconciliation[]>;
+  getBankReconciliation(id: string): Promise<BankReconciliation | undefined>;
+  getBankReconciliationItems(reconciliationId: string, tenantId: string): Promise<BankReconciliationItem[]>;
+  createBankReconciliationWithItems(payload: BankReconciliationPayload): Promise<BankReconciliation>;
+  updateBankReconciliationWithItems(id: string, tenantId: string, payload: BankReconciliationPayload): Promise<BankReconciliation>;
+  deleteBankReconciliation(id: string, tenantId: string): Promise<void>;
+  matchReconciliationItem(itemId: string, journalEntryId: string, tenantId: string): Promise<void>;
+
+  // Financial Reports (READ-ONLY)
+  getProfitLossReport(tenantId: string, startDate: Date, endDate: Date): Promise<ProfitLossReport>;
+  getBalanceSheetReport(tenantId: string, asOfDate: Date): Promise<BalanceSheetReport>;
+  getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport>;
+  getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -465,6 +553,87 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Vendor not found");
     }
     await db.delete(vendors).where(eq(vendors.id, id));
+  }
+
+  // Account operations
+  async getAccounts(tenantId: string): Promise<Account[]> {
+    return await db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.tenantId, tenantId))
+      .orderBy(desc(accounts.createdAt));
+  }
+
+  async getAccount(id: string): Promise<Account | undefined> {
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, id));
+    return account;
+  }
+
+  async createAccount(accountData: InsertAccount & { tenantId: string }): Promise<Account> {
+    const [account] = await db
+      .insert(accounts)
+      .values(accountData)
+      .returning();
+    return account;
+  }
+
+  async updateAccount(id: string, tenantId: string, accountData: Partial<InsertAccount>): Promise<Account> {
+    const account = await this.getAccount(id);
+    if (!account || account.tenantId !== tenantId) {
+      throw new Error("Account not found");
+    }
+    
+    const [updatedAccount] = await db
+      .update(accounts)
+      .set({ ...accountData, updatedAt: new Date() })
+      .where(and(eq(accounts.id, id), eq(accounts.tenantId, tenantId)))
+      .returning();
+    return updatedAccount;
+  }
+
+  async deleteAccount(id: string, tenantId: string): Promise<void> {
+    const account = await this.getAccount(id);
+    if (!account || account.tenantId !== tenantId) {
+      throw new Error("Account not found");
+    }
+    await db.delete(accounts).where(and(eq(accounts.id, id), eq(accounts.tenantId, tenantId)));
+  }
+
+  async getNextAccountNumber(tenantId: string): Promise<string> {
+    return await db.transaction(async (tx) => {
+      // Get or create sequence
+      let [sequence] = await tx
+        .select()
+        .from(accountSequences)
+        .where(eq(accountSequences.tenantId, tenantId))
+        .limit(1);
+      
+      if (!sequence) {
+        // Create initial sequence
+        [sequence] = await tx
+          .insert(accountSequences)
+          .values({
+            tenantId,
+            lastNumber: 1,
+            prefix: "ACC-",
+          })
+          .returning();
+        
+        return `${sequence.prefix}${String(sequence.lastNumber).padStart(4, '0')}`;
+      }
+      
+      // Increment sequence
+      const nextNumber = sequence.lastNumber + 1;
+      await tx
+        .update(accountSequences)
+        .set({ 
+          lastNumber: nextNumber,
+          updatedAt: new Date(),
+        })
+        .where(eq(accountSequences.tenantId, tenantId));
+      
+      return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
+    });
   }
 
   // Item operations
@@ -1093,6 +1262,257 @@ export class DatabaseStorage implements IStorage {
     await db.transaction(async (tx) => {
       await tx.delete(billLineItems).where(eq(billLineItems.billId, id));
       await tx.delete(bills).where(eq(bills.id, id));
+    });
+  }
+
+  // Purchase Order operations
+  async getPurchaseOrders(tenantId: string): Promise<PurchaseOrder[]> {
+    return await db
+      .select()
+      .from(purchaseOrders)
+      .where(
+        and(
+          eq(purchaseOrders.tenantId, tenantId),
+          isNull(purchaseOrders.deletedAt)
+        )
+      )
+      .orderBy(desc(purchaseOrders.orderDate));
+  }
+
+  async getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined> {
+    const [po] = await db
+      .select()
+      .from(purchaseOrders)
+      .where(
+        and(
+          eq(purchaseOrders.id, id),
+          isNull(purchaseOrders.deletedAt)
+        )
+      );
+    return po;
+  }
+
+  async getPurchaseOrderLineItems(purchaseOrderId: string, tenantId: string): Promise<PurchaseOrderLineItem[]> {
+    return await db
+      .select()
+      .from(purchaseOrderLineItems)
+      .where(
+        and(
+          eq(purchaseOrderLineItems.purchaseOrderId, purchaseOrderId),
+          eq(purchaseOrderLineItems.tenantId, tenantId)
+        )
+      );
+  }
+
+  async createPurchaseOrderWithItems(payload: PurchaseOrderPayload): Promise<PurchaseOrder> {
+    // Extract tenantId from payload - it's part of purchaseOrder
+    const tenantId = payload.purchaseOrder.tenantId;
+    if (!tenantId) {
+      throw new Error("tenantId is required");
+    }
+
+    return await db.transaction(async (tx) => {
+      // Verify vendor belongs to tenant
+      const vendor = await tx.select().from(vendors)
+        .where(and(
+          eq(vendors.id, payload.purchaseOrder.vendorId),
+          eq(vendors.tenantId, tenantId)
+        ))
+        .limit(1);
+      
+      if (!vendor.length) {
+        throw new Error("Vendor not found or doesn't belong to this tenant");
+      }
+
+      // Auto-generate PO number using sequences table
+      const poNumber = await this.getNextPurchaseOrderNumber(tenantId);
+      
+      // SERVER-SIDE CALCULATIONS - NEVER trust client totals
+      let subtotal = 0;
+      let taxAmount = 0;
+      
+      // Calculate from line items
+      for (const item of payload.lineItems) {
+        const lineAmount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        subtotal += lineAmount;
+        
+        // Fetch tax rate from database if taxId provided
+        if (item.taxId) {
+          const [taxRecord] = await tx
+            .select()
+            .from(taxes)
+            .where(eq(taxes.id, item.taxId))
+            .limit(1);
+          
+          if (taxRecord) {
+            const taxRate = parseFloat(taxRecord.rate);
+            taxAmount += (lineAmount * taxRate / 100);
+          }
+        }
+      }
+      
+      const total = subtotal + taxAmount;
+      
+      // SECURITY: Strip tenantId from payload, FORCE server tenantId
+      const { tenantId: _, ...safePOData } = payload.purchaseOrder;
+      
+      // Create PO with SERVER-CALCULATED totals (ignore client values)
+      const [newPO] = await tx.insert(purchaseOrders).values({
+        ...safePOData,
+        tenantId: tenantId, // FORCE server tenantId
+        poNumber,
+        subtotal: subtotal.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        total: total.toFixed(2),
+      }).returning();
+      
+      // Insert line items with calculated amounts
+      if (payload.lineItems.length > 0) {
+        const lineItemsWithAmounts = payload.lineItems.map(item => {
+          // SECURITY: Strip tenantId from payload, FORCE server tenantId
+          const { tenantId: _itemTenantId, ...safeItemData } = item;
+          return {
+            ...safeItemData,
+            purchaseOrderId: newPO.id,
+            tenantId: tenantId, // FORCE server tenantId
+            amount: (parseFloat(item.quantity) * parseFloat(item.unitPrice)).toFixed(2),
+          };
+        });
+        
+        await tx.insert(purchaseOrderLineItems).values(lineItemsWithAmounts);
+      }
+      
+      return newPO;
+    });
+  }
+
+  async updatePurchaseOrderWithItems(id: string, tenantId: string, payload: PurchaseOrderPayload): Promise<PurchaseOrder> {
+    const po = await this.getPurchaseOrder(id);
+    if (!po || po.tenantId !== tenantId) {
+      throw new Error("Purchase Order not found");
+    }
+    
+    return await db.transaction(async (tx) => {
+      // Verify vendor belongs to tenant
+      const vendor = await tx.select().from(vendors)
+        .where(and(
+          eq(vendors.id, payload.purchaseOrder.vendorId),
+          eq(vendors.tenantId, tenantId)
+        ))
+        .limit(1);
+      
+      if (!vendor.length) {
+        throw new Error("Vendor not found or doesn't belong to this tenant");
+      }
+      
+      // SERVER-SIDE CALCULATIONS - NEVER trust client totals
+      let subtotal = 0;
+      let taxAmount = 0;
+      
+      // Calculate from line items
+      for (const item of payload.lineItems) {
+        const lineAmount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        subtotal += lineAmount;
+        
+        // Fetch tax rate from database if taxId provided
+        if (item.taxId) {
+          const [taxRecord] = await tx
+            .select()
+            .from(taxes)
+            .where(eq(taxes.id, item.taxId))
+            .limit(1);
+          
+          if (taxRecord) {
+            const taxRate = parseFloat(taxRecord.rate);
+            taxAmount += (lineAmount * taxRate / 100);
+          }
+        }
+      }
+      
+      const total = subtotal + taxAmount;
+      
+      // STRIP tenantId from payload - NEVER trust client
+      const { tenantId: _, ...safePOData } = payload.purchaseOrder;
+      
+      // Update PO with SERVER-CALCULATED totals (ignore client values)
+      const [updatedPO] = await tx
+        .update(purchaseOrders)
+        .set({ 
+          ...safePOData,
+          tenantId: po.tenantId,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
+          updatedAt: new Date() 
+        })
+        .where(eq(purchaseOrders.id, id))
+        .returning();
+      
+      if (!updatedPO) {
+        throw new Error("Purchase Order was deleted during update");
+      }
+      
+      // Delete old line items
+      await tx.delete(purchaseOrderLineItems).where(eq(purchaseOrderLineItems.purchaseOrderId, id));
+      
+      // Insert new line items with calculated amounts
+      if (payload.lineItems.length > 0) {
+        const lineItemsWithAmounts = payload.lineItems.map(item => {
+          // SECURITY: Strip tenantId from payload, FORCE server tenantId
+          const { tenantId: _itemTenantId, ...safeItemData } = item;
+          return {
+            ...safeItemData,
+            purchaseOrderId: id,
+            tenantId: po.tenantId, // FORCE server tenantId
+            amount: (parseFloat(item.quantity) * parseFloat(item.unitPrice)).toFixed(2),
+          };
+        });
+        await tx.insert(purchaseOrderLineItems).values(lineItemsWithAmounts);
+      }
+      
+      return updatedPO;
+    });
+  }
+
+  async deletePurchaseOrder(id: string, tenantId: string): Promise<void> {
+    const po = await this.getPurchaseOrder(id);
+    if (!po || po.tenantId !== tenantId) {
+      throw new Error("Purchase Order not found");
+    }
+    
+    // Soft delete
+    await db
+      .update(purchaseOrders)
+      .set({ deletedAt: new Date() })
+      .where(eq(purchaseOrders.id, id));
+  }
+
+  async getNextPurchaseOrderNumber(tenantId: string): Promise<string> {
+    return await db.transaction(async (tx) => {
+      // Get or create sequence for this tenant
+      let [sequence] = await tx
+        .select()
+        .from(purchaseOrderSequences)
+        .where(eq(purchaseOrderSequences.tenantId, tenantId))
+        .limit(1);
+
+      if (!sequence) {
+        // Create new sequence starting at 1
+        [sequence] = await tx
+          .insert(purchaseOrderSequences)
+          .values({ tenantId, currentNumber: 1 })
+          .returning();
+      } else {
+        // Increment sequence
+        [sequence] = await tx
+          .update(purchaseOrderSequences)
+          .set({ currentNumber: sequence.currentNumber + 1 })
+          .where(eq(purchaseOrderSequences.tenantId, tenantId))
+          .returning();
+      }
+
+      // Generate PO number: PO-0001, PO-0002, etc.
+      return `PO-${String(sequence.currentNumber).padStart(4, '0')}`;
     });
   }
 
@@ -3010,6 +3430,930 @@ export class DatabaseStorage implements IStorage {
       
       return `RET-${nextNumber.toString().padStart(4, '0')}`;
     });
+  }
+
+  // Journal Entry operations
+  async getJournalEntries(tenantId: string): Promise<JournalEntry[]> {
+    return await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.tenantId, tenantId))
+      .orderBy(desc(journalEntries.entryDate));
+  }
+
+  async getJournalEntry(id: string): Promise<JournalEntry | undefined> {
+    const [entry] = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.id, id));
+    return entry;
+  }
+
+  async getJournalEntryLegs(journalEntryId: string, tenantId: string): Promise<JournalEntryLeg[]> {
+    return await db
+      .select()
+      .from(journalEntryLegs)
+      .where(
+        and(
+          eq(journalEntryLegs.journalEntryId, journalEntryId),
+          eq(journalEntryLegs.tenantId, tenantId)
+        )
+      );
+  }
+
+  async createJournalEntryWithLegs(payload: JournalEntryPayload): Promise<JournalEntry> {
+    return await db.transaction(async (tx) => {
+      const tenantId = payload.journalEntry.tenantId;
+      if (!tenantId) {
+        throw new Error("Tenant ID is required");
+      }
+
+      // SERVER-SIDE VALIDATION: Validate double-entry balance BEFORE inserting
+      const debits = payload.legs
+        .filter(leg => leg.type === 'Debit')
+        .reduce((sum, leg) => sum + parseFloat(leg.amount.toString()), 0);
+      
+      const credits = payload.legs
+        .filter(leg => leg.type === 'Credit')
+        .reduce((sum, leg) => sum + parseFloat(leg.amount.toString()), 0);
+      
+      if (Math.abs(debits - credits) > 0.01) {
+        throw new Error(`Journal entry is not balanced: Debits (${debits.toFixed(2)}) must equal Credits (${credits.toFixed(2)})`);
+      }
+
+      // ALWAYS generate journal entry number server-side
+      const journalEntryNumber = await this.getNextJournalEntryNumber(tenantId);
+
+      // SECURITY: Strip tenantId from payload, FORCE server tenantId
+      const { tenantId: _, ...safeEntryData } = payload.journalEntry;
+
+      // Create journal entry with auto-generated number
+      const [entry] = await tx
+        .insert(journalEntries)
+        .values({
+          ...safeEntryData,
+          tenantId,
+          journalEntryNumber,
+        })
+        .returning();
+
+      // Insert legs with FORCE server tenantId
+      if (payload.legs.length > 0) {
+        const legsWithEntryId = payload.legs.map(leg => {
+          // SECURITY: Strip any client-provided tenantId
+          const { tenantId: _legTenantId, ...safeLegData } = leg as any;
+          return {
+            ...safeLegData,
+            journalEntryId: entry.id,
+            tenantId, // FORCE server tenantId
+          };
+        });
+        await tx.insert(journalEntryLegs).values(legsWithEntryId);
+      }
+
+      return entry;
+    });
+  }
+
+  async updateJournalEntryWithLegs(id: string, tenantId: string, payload: JournalEntryPayload): Promise<JournalEntry> {
+    return await db.transaction(async (tx) => {
+      // Fetch existing entry to verify ownership
+      const [existingEntry] = await tx
+        .select()
+        .from(journalEntries)
+        .where(
+          and(
+            eq(journalEntries.id, id),
+            eq(journalEntries.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!existingEntry) {
+        throw new Error("Journal entry not found");
+      }
+
+      // SERVER-SIDE VALIDATION: Validate double-entry balance BEFORE updating
+      const debits = payload.legs
+        .filter(leg => leg.type === 'Debit')
+        .reduce((sum, leg) => sum + parseFloat(leg.amount.toString()), 0);
+      
+      const credits = payload.legs
+        .filter(leg => leg.type === 'Credit')
+        .reduce((sum, leg) => sum + parseFloat(leg.amount.toString()), 0);
+      
+      if (Math.abs(debits - credits) > 0.01) {
+        throw new Error(`Journal entry is not balanced: Debits (${debits.toFixed(2)}) must equal Credits (${credits.toFixed(2)})`);
+      }
+
+      // SECURITY: Strip tenantId from payload, FORCE server tenantId
+      const { tenantId: _, ...safeEntryData } = payload.journalEntry;
+
+      // Update journal entry
+      const [updatedEntry] = await tx
+        .update(journalEntries)
+        .set({
+          ...safeEntryData,
+          tenantId: existingEntry.tenantId, // FORCE existing tenantId
+          updatedAt: new Date(),
+        })
+        .where(eq(journalEntries.id, id))
+        .returning();
+
+      if (!updatedEntry) {
+        throw new Error("Failed to update journal entry");
+      }
+
+      // Delete existing legs
+      await tx
+        .delete(journalEntryLegs)
+        .where(eq(journalEntryLegs.journalEntryId, id));
+
+      // Insert new legs with FORCE server tenantId
+      if (payload.legs.length > 0) {
+        const legsWithEntryId = payload.legs.map(leg => {
+          // SECURITY: Strip any client-provided tenantId
+          const { tenantId: _legTenantId, ...safeLegData } = leg as any;
+          return {
+            ...safeLegData,
+            journalEntryId: id,
+            tenantId: existingEntry.tenantId, // FORCE server tenantId
+          };
+        });
+        await tx.insert(journalEntryLegs).values(legsWithEntryId);
+      }
+
+      return updatedEntry;
+    });
+  }
+
+  async deleteJournalEntry(id: string, tenantId: string): Promise<void> {
+    await db.transaction(async (tx) => {
+      // Verify ownership
+      const [entry] = await tx
+        .select()
+        .from(journalEntries)
+        .where(
+          and(
+            eq(journalEntries.id, id),
+            eq(journalEntries.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!entry) {
+        throw new Error("Journal entry not found");
+      }
+
+      // Delete legs first
+      await tx
+        .delete(journalEntryLegs)
+        .where(eq(journalEntryLegs.journalEntryId, id));
+
+      // Delete entry
+      await tx
+        .delete(journalEntries)
+        .where(eq(journalEntries.id, id));
+    });
+  }
+
+  async getNextJournalEntryNumber(tenantId: string): Promise<string> {
+    return await db.transaction(async (tx) => {
+      // Get or create sequence record
+      let [sequence] = await tx
+        .select()
+        .from(journalEntrySequences)
+        .where(eq(journalEntrySequences.tenantId, tenantId))
+        .limit(1);
+
+      if (!sequence) {
+        // Create initial sequence
+        [sequence] = await tx
+          .insert(journalEntrySequences)
+          .values({
+            tenantId,
+            lastNumber: 1,
+            prefix: "JE-",
+          })
+          .returning();
+        
+        return `JE-${String(1).padStart(4, '0')}`;
+      }
+
+      // Increment and update
+      const nextNumber = sequence.lastNumber + 1;
+      await tx
+        .update(journalEntrySequences)
+        .set({
+          lastNumber: nextNumber,
+          updatedAt: new Date(),
+        })
+        .where(eq(journalEntrySequences.tenantId, tenantId));
+
+      return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
+    });
+  }
+
+  // Asset operations
+  async getAssets(tenantId: string): Promise<Asset[]> {
+    return await db
+      .select()
+      .from(assets)
+      .where(eq(assets.tenantId, tenantId))
+      .orderBy(desc(assets.createdAt));
+  }
+
+  async getAsset(id: string): Promise<Asset | undefined> {
+    const [asset] = await db.select().from(assets).where(eq(assets.id, id));
+    return asset;
+  }
+
+  async getAssetDepreciationSchedules(assetId: string, tenantId: string): Promise<AssetDepreciationSchedule[]> {
+    return await db
+      .select()
+      .from(assetDepreciationSchedules)
+      .where(
+        and(
+          eq(assetDepreciationSchedules.assetId, assetId),
+          eq(assetDepreciationSchedules.tenantId, tenantId)
+        )
+      )
+      .orderBy(assetDepreciationSchedules.periodDate);
+  }
+
+  async createAsset(assetData: InsertAsset & { tenantId: string }): Promise<Asset> {
+    return await db.transaction(async (tx) => {
+      // Generate asset number using sequence
+      const assetNumber = await this.getNextAssetNumber(assetData.tenantId);
+
+      // SECURITY: Strip tenantId from payload, FORCE server tenantId
+      const { tenantId: _, ...safeAssetData } = assetData;
+
+      // Create asset with auto-generated number
+      const [asset] = await tx
+        .insert(assets)
+        .values({
+          ...safeAssetData,
+          tenantId: assetData.tenantId, // FORCE server tenantId
+          assetNumber,
+        })
+        .returning();
+
+      return asset;
+    });
+  }
+
+  async updateAsset(id: string, tenantId: string, assetData: Partial<InsertAsset>): Promise<Asset> {
+    const asset = await this.getAsset(id);
+    if (!asset || asset.tenantId !== tenantId) {
+      throw new Error("Asset not found");
+    }
+
+    // STRIP tenantId from payload - NEVER trust client
+    const { tenantId: _, ...safeAssetData } = assetData as any;
+
+    const [updatedAsset] = await db
+      .update(assets)
+      .set({
+        ...safeAssetData,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(assets.id, id),
+          eq(assets.tenantId, tenantId)
+        )
+      )
+      .returning();
+
+    if (!updatedAsset) {
+      throw new Error("Asset not found");
+    }
+
+    return updatedAsset;
+  }
+
+  async deleteAsset(id: string, tenantId: string): Promise<void> {
+    const asset = await this.getAsset(id);
+    if (!asset || asset.tenantId !== tenantId) {
+      throw new Error("Asset not found");
+    }
+
+    await db.transaction(async (tx) => {
+      // Delete depreciation schedules first
+      await tx
+        .delete(assetDepreciationSchedules)
+        .where(eq(assetDepreciationSchedules.assetId, id));
+
+      // Delete asset
+      await tx
+        .delete(assets)
+        .where(eq(assets.id, id));
+    });
+  }
+
+  async getNextAssetNumber(tenantId: string): Promise<string> {
+    return await db.transaction(async (tx) => {
+      // Get or create sequence record
+      let [sequence] = await tx
+        .select()
+        .from(assetSequences)
+        .where(eq(assetSequences.tenantId, tenantId))
+        .limit(1);
+
+      if (!sequence) {
+        // Create initial sequence
+        [sequence] = await tx
+          .insert(assetSequences)
+          .values({
+            tenantId,
+            lastNumber: 1,
+            prefix: "ASSET-",
+          })
+          .returning();
+
+        return `ASSET-${String(1).padStart(4, '0')}`;
+      }
+
+      // Increment and update
+      const nextNumber = sequence.lastNumber + 1;
+      await tx
+        .update(assetSequences)
+        .set({
+          lastNumber: nextNumber,
+          updatedAt: new Date(),
+        })
+        .where(eq(assetSequences.tenantId, tenantId));
+
+      return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
+    });
+  }
+
+  // Bank Reconciliation operations
+  async getBankReconciliations(tenantId: string): Promise<BankReconciliation[]> {
+    return await db
+      .select()
+      .from(bankReconciliations)
+      .where(eq(bankReconciliations.tenantId, tenantId))
+      .orderBy(desc(bankReconciliations.reconciliationDate));
+  }
+
+  async getBankReconciliation(id: string): Promise<BankReconciliation | undefined> {
+    const [reconciliation] = await db
+      .select()
+      .from(bankReconciliations)
+      .where(eq(bankReconciliations.id, id));
+    return reconciliation;
+  }
+
+  async getBankReconciliationItems(reconciliationId: string, tenantId: string): Promise<BankReconciliationItem[]> {
+    return await db
+      .select()
+      .from(bankReconciliationItems)
+      .where(
+        and(
+          eq(bankReconciliationItems.reconciliationId, reconciliationId),
+          eq(bankReconciliationItems.tenantId, tenantId)
+        )
+      );
+  }
+
+  async createBankReconciliationWithItems(payload: BankReconciliationPayload): Promise<BankReconciliation> {
+    return await db.transaction(async (tx) => {
+      // Validate tenantId exists
+      const tenantId = payload.reconciliation.tenantId;
+      if (!tenantId) {
+        throw new Error("Tenant ID is required");
+      }
+
+      // Validate account belongs to tenant
+      const [account] = await tx
+        .select()
+        .from(accounts)
+        .where(
+          and(
+            eq(accounts.id, payload.reconciliation.accountId),
+            eq(accounts.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!account) {
+        throw new Error("Account not found or doesn't belong to this tenant");
+      }
+
+      // SERVER-SIDE CALCULATION: difference = statementBalance - bookBalance
+      const statementBalance = parseFloat(payload.reconciliation.statementBalance);
+      const bookBalance = parseFloat(payload.reconciliation.bookBalance);
+      const difference = (statementBalance - bookBalance).toFixed(2);
+
+      // SECURITY: Strip tenantId from payload, FORCE server tenantId
+      const { tenantId: _, ...safeReconciliationData } = payload.reconciliation;
+
+      // Create reconciliation with SERVER-CALCULATED difference
+      const [reconciliation] = await tx
+        .insert(bankReconciliations)
+        .values({
+          ...safeReconciliationData,
+          tenantId, // FORCE server tenantId
+          difference, // SERVER-CALCULATED
+        })
+        .returning();
+
+      // Create reconciliation items
+      if (payload.items.length > 0) {
+        const itemsWithReconciliationId = payload.items.map(item => ({
+          ...item,
+          reconciliationId: reconciliation.id,
+          tenantId, // CRITICAL: FORCE server tenantId on items
+        }));
+        await tx.insert(bankReconciliationItems).values(itemsWithReconciliationId);
+      }
+
+      return reconciliation;
+    });
+  }
+
+  async updateBankReconciliationWithItems(id: string, tenantId: string, payload: BankReconciliationPayload): Promise<BankReconciliation> {
+    return await db.transaction(async (tx) => {
+      // Fetch existing reconciliation
+      const [existingReconciliation] = await tx
+        .select()
+        .from(bankReconciliations)
+        .where(
+          and(
+            eq(bankReconciliations.id, id),
+            eq(bankReconciliations.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!existingReconciliation) {
+        throw new Error("Bank reconciliation not found");
+      }
+
+      // Validate account belongs to tenant
+      const [account] = await tx
+        .select()
+        .from(accounts)
+        .where(
+          and(
+            eq(accounts.id, payload.reconciliation.accountId),
+            eq(accounts.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!account) {
+        throw new Error("Account not found or doesn't belong to this tenant");
+      }
+
+      // SERVER-SIDE CALCULATION: difference = statementBalance - bookBalance
+      const statementBalance = parseFloat(payload.reconciliation.statementBalance);
+      const bookBalance = parseFloat(payload.reconciliation.bookBalance);
+      const difference = (statementBalance - bookBalance).toFixed(2);
+
+      // SECURITY: Strip tenantId from payload
+      const { tenantId: _, ...safeReconciliationData } = payload.reconciliation;
+
+      // Update reconciliation with SERVER-CALCULATED difference
+      const [updatedReconciliation] = await tx
+        .update(bankReconciliations)
+        .set({
+          ...safeReconciliationData,
+          tenantId: existingReconciliation.tenantId, // FORCE server tenantId
+          difference, // SERVER-CALCULATED
+          updatedAt: new Date(),
+        })
+        .where(eq(bankReconciliations.id, id))
+        .returning();
+
+      if (!updatedReconciliation) {
+        throw new Error("Bank reconciliation was deleted during update");
+      }
+
+      // Delete existing items
+      await tx
+        .delete(bankReconciliationItems)
+        .where(eq(bankReconciliationItems.reconciliationId, id));
+
+      // Create new items
+      if (payload.items.length > 0) {
+        const itemsWithReconciliationId = payload.items.map(item => ({
+          ...item,
+          reconciliationId: id,
+          tenantId: existingReconciliation.tenantId, // CRITICAL: FORCE server tenantId on items
+        }));
+        await tx.insert(bankReconciliationItems).values(itemsWithReconciliationId);
+      }
+
+      return updatedReconciliation;
+    });
+  }
+
+  async deleteBankReconciliation(id: string, tenantId: string): Promise<void> {
+    const reconciliation = await this.getBankReconciliation(id);
+    if (!reconciliation || reconciliation.tenantId !== tenantId) {
+      throw new Error("Bank reconciliation not found");
+    }
+
+    await db.transaction(async (tx) => {
+      // Delete items first
+      await tx
+        .delete(bankReconciliationItems)
+        .where(eq(bankReconciliationItems.reconciliationId, id));
+
+      // Delete reconciliation
+      await tx
+        .delete(bankReconciliations)
+        .where(eq(bankReconciliations.id, id));
+    });
+  }
+
+  async matchReconciliationItem(itemId: string, journalEntryId: string, tenantId: string): Promise<void> {
+    // Validate item belongs to tenant
+    const [item] = await db
+      .select()
+      .from(bankReconciliationItems)
+      .where(
+        and(
+          eq(bankReconciliationItems.id, itemId),
+          eq(bankReconciliationItems.tenantId, tenantId)
+        )
+      )
+      .limit(1);
+
+    if (!item) {
+      throw new Error("Reconciliation item not found");
+    }
+
+    // Validate journal entry belongs to tenant
+    const [journalEntry] = await db
+      .select()
+      .from(journalEntries)
+      .where(
+        and(
+          eq(journalEntries.id, journalEntryId),
+          eq(journalEntries.tenantId, tenantId)
+        )
+      )
+      .limit(1);
+
+    if (!journalEntry) {
+      throw new Error("Journal entry not found");
+    }
+
+    // Update item with journalEntryId and mark as matched
+    await db
+      .update(bankReconciliationItems)
+      .set({
+        journalEntryId,
+        isMatched: true,
+      })
+      .where(eq(bankReconciliationItems.id, itemId));
+  }
+
+  // ====================================
+  // FINANCIAL REPORTS (READ-ONLY)
+  // ====================================
+
+  async getProfitLossReport(tenantId: string, startDate: Date, endDate: Date): Promise<ProfitLossReport> {
+    // Get all income accounts (revenue)
+    const incomeAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.type, 'income'),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Get all expense accounts
+    const expenseAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.type, 'expense'),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Calculate revenue from journal entries within date range
+    const revenueAccountLines = await Promise.all(
+      incomeAccounts.map(async (account) => {
+        const result = await db
+          .select({
+            total: sum(sql`CASE WHEN ${journalEntryLegs.type} = 'Credit' THEN ${journalEntryLegs.amount} ELSE -${journalEntryLegs.amount} END`),
+          })
+          .from(journalEntryLegs)
+          .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+          .where(
+            and(
+              eq(journalEntryLegs.tenantId, tenantId),
+              eq(journalEntryLegs.accountId, account.id),
+              gte(journalEntries.entryDate, startDate),
+              lte(journalEntries.entryDate, endDate),
+              eq(journalEntries.status, 'posted')
+            )
+          );
+
+        const balance = result[0]?.total || '0';
+
+        return {
+          accountId: account.id,
+          accountCode: account.code,
+          accountName: account.name,
+          balance: balance.toString(),
+        };
+      })
+    );
+
+    // Calculate expenses from journal entries within date range
+    const expenseAccountLines = await Promise.all(
+      expenseAccounts.map(async (account) => {
+        const result = await db
+          .select({
+            total: sum(sql`CASE WHEN ${journalEntryLegs.type} = 'Debit' THEN ${journalEntryLegs.amount} ELSE -${journalEntryLegs.amount} END`),
+          })
+          .from(journalEntryLegs)
+          .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+          .where(
+            and(
+              eq(journalEntryLegs.tenantId, tenantId),
+              eq(journalEntryLegs.accountId, account.id),
+              gte(journalEntries.entryDate, startDate),
+              lte(journalEntries.entryDate, endDate),
+              eq(journalEntries.status, 'posted')
+            )
+          );
+
+        const balance = result[0]?.total || '0';
+
+        return {
+          accountId: account.id,
+          accountCode: account.code,
+          accountName: account.name,
+          balance: balance.toString(),
+        };
+      })
+    );
+
+    // Calculate totals
+    const totalRevenue = revenueAccountLines.reduce((sum, line) => sum + parseFloat(line.balance), 0);
+    const totalExpenses = expenseAccountLines.reduce((sum, line) => sum + parseFloat(line.balance), 0);
+    const netProfit = totalRevenue - totalExpenses;
+
+    return {
+      tenantId,
+      startDate,
+      endDate,
+      revenueAccounts: revenueAccountLines,
+      totalRevenue: totalRevenue.toFixed(2),
+      expenseAccounts: expenseAccountLines,
+      totalExpenses: totalExpenses.toFixed(2),
+      netProfit: netProfit.toFixed(2),
+    };
+  }
+
+  async getBalanceSheetReport(tenantId: string, asOfDate: Date): Promise<BalanceSheetReport> {
+    // Get all asset accounts
+    const assetAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.type, 'asset'),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Get all liability accounts
+    const liabilityAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.type, 'liability'),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Get all equity accounts
+    const equityAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.type, 'equity'),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Map asset accounts with current balance
+    const assetAccountLines = assetAccounts.map((account) => ({
+      accountId: account.id,
+      accountCode: account.code,
+      accountName: account.name,
+      balance: account.currentBalance,
+    }));
+
+    // Map liability accounts with current balance
+    const liabilityAccountLines = liabilityAccounts.map((account) => ({
+      accountId: account.id,
+      accountCode: account.code,
+      accountName: account.name,
+      balance: account.currentBalance,
+    }));
+
+    // Map equity accounts with current balance
+    const equityAccountLines = equityAccounts.map((account) => ({
+      accountId: account.id,
+      accountCode: account.code,
+      accountName: account.name,
+      balance: account.currentBalance,
+    }));
+
+    // Calculate totals
+    const totalAssets = assetAccountLines.reduce((sum, line) => sum + parseFloat(line.balance), 0);
+    const totalLiabilities = liabilityAccountLines.reduce((sum, line) => sum + parseFloat(line.balance), 0);
+    const totalEquity = equityAccountLines.reduce((sum, line) => sum + parseFloat(line.balance), 0);
+    const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
+    const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01;
+
+    return {
+      tenantId,
+      asOfDate,
+      assetAccounts: assetAccountLines,
+      totalAssets: totalAssets.toFixed(2),
+      liabilityAccounts: liabilityAccountLines,
+      totalLiabilities: totalLiabilities.toFixed(2),
+      equityAccounts: equityAccountLines,
+      totalEquity: totalEquity.toFixed(2),
+      totalLiabilitiesAndEquity: totalLiabilitiesAndEquity.toFixed(2),
+      isBalanced,
+    };
+  }
+
+  async getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport> {
+    // Get all active accounts for tenant
+    const allAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Map accounts to trial balance format
+    const accountLines = allAccounts.map((account) => {
+      const balance = parseFloat(account.currentBalance);
+      
+      // Determine debit/credit based on account type and balance
+      // Assets and Expenses have debit normal balance
+      // Liabilities, Equity, and Income have credit normal balance
+      let debit = '0.00';
+      let credit = '0.00';
+
+      if (account.type === 'asset' || account.type === 'expense') {
+        if (balance >= 0) {
+          debit = balance.toFixed(2);
+        } else {
+          credit = Math.abs(balance).toFixed(2);
+        }
+      } else {
+        if (balance >= 0) {
+          credit = balance.toFixed(2);
+        } else {
+          debit = Math.abs(balance).toFixed(2);
+        }
+      }
+
+      return {
+        accountId: account.id,
+        accountCode: account.code,
+        accountName: account.name,
+        accountType: account.type,
+        debit,
+        credit,
+      };
+    });
+
+    // Calculate totals
+    const totalDebits = accountLines.reduce((sum, line) => sum + parseFloat(line.debit), 0);
+    const totalCredits = accountLines.reduce((sum, line) => sum + parseFloat(line.credit), 0);
+    const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
+
+    return {
+      tenantId,
+      asOfDate,
+      accounts: accountLines,
+      totalDebits: totalDebits.toFixed(2),
+      totalCredits: totalCredits.toFixed(2),
+      isBalanced,
+    };
+  }
+
+  async getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport> {
+    // Simplified Cash Flow Report
+    // Operating activities: income and expense accounts
+    const incomeAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.type, 'income'),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    const expenseAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.type, 'expense'),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Calculate operating activities
+    const operatingAccountLines = await Promise.all(
+      [...incomeAccounts, ...expenseAccounts].map(async (account) => {
+        const result = await db
+          .select({
+            total: sum(sql`CASE 
+              WHEN ${journalEntryLegs.type} = 'Debit' AND ${accounts.type} = 'expense' THEN ${journalEntryLegs.amount}
+              WHEN ${journalEntryLegs.type} = 'Credit' AND ${accounts.type} = 'income' THEN ${journalEntryLegs.amount}
+              ELSE -${journalEntryLegs.amount}
+            END`),
+          })
+          .from(journalEntryLegs)
+          .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+          .innerJoin(accounts, eq(journalEntryLegs.accountId, accounts.id))
+          .where(
+            and(
+              eq(journalEntryLegs.tenantId, tenantId),
+              eq(journalEntryLegs.accountId, account.id),
+              gte(journalEntries.entryDate, startDate),
+              lte(journalEntries.entryDate, endDate),
+              eq(journalEntries.status, 'posted')
+            )
+          );
+
+        const balance = result[0]?.total || '0';
+
+        return {
+          accountId: account.id,
+          accountCode: account.code,
+          accountName: account.name,
+          balance: balance.toString(),
+        };
+      })
+    );
+
+    const operatingTotal = operatingAccountLines.reduce((sum, line) => sum + parseFloat(line.balance), 0);
+
+    // Investing activities (simplified - asset purchases/sales)
+    // For simplicity, we'll leave this empty for now
+    const investingAccountLines: any[] = [];
+    const investingTotal = 0;
+
+    // Financing activities (simplified - equity and long-term liabilities)
+    // For simplicity, we'll leave this empty for now
+    const financingAccountLines: any[] = [];
+    const financingTotal = 0;
+
+    const netCashFlow = operatingTotal + investingTotal + financingTotal;
+
+    return {
+      tenantId,
+      startDate,
+      endDate,
+      operatingActivities: {
+        accounts: operatingAccountLines,
+        total: operatingTotal.toFixed(2),
+      },
+      investingActivities: {
+        accounts: investingAccountLines,
+        total: investingTotal.toFixed(2),
+      },
+      financingActivities: {
+        accounts: financingAccountLines,
+        total: financingTotal.toFixed(2),
+      },
+      netCashFlow: netCashFlow.toFixed(2),
+    };
   }
 }
 

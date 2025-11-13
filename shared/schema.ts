@@ -286,6 +286,9 @@ export const insertAccountSchema = createInsertSchema(accounts, {
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  // Explicitly make code optional (server-generated)
+  code: z.string().max(50).optional(),
 });
 
 export type InsertAccount = z.infer<typeof insertAccountSchema>;
@@ -532,6 +535,16 @@ export const assetSequences = pgTable("asset_sequences", {
 });
 
 export type AssetSequence = typeof assetSequences.$inferSelect;
+
+// Account Number Sequencing (per tenant)
+export const accountSequences = pgTable("account_sequences", {
+  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id),
+  lastNumber: integer("last_number").notNull().default(0),
+  prefix: varchar("prefix", { length: 20 }).default("ACC-"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type AccountSequence = typeof accountSequences.$inferSelect;
 
 // Bills (Purchases from Vendors)
 export const bills = pgTable("bills", {
@@ -1397,29 +1410,43 @@ export const purchaseOrders = pgTable("purchase_orders", {
   poNumber: varchar("po_number", { length: 100 }),
   orderDate: timestamp("order_date").notNull(),
   expectedDate: timestamp("expected_date"),
-  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, approved, sent, partially_received, received, billed, cancelled
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, pending_approval, approved, partially_received, fully_received, closed, cancelled
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
   notes: text("notes"),
   terms: text("terms"),
+  
+  // Approval workflow fields
+  approvedBy: varchar("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  
+  // Conversion tracking (for convert-to-bill functionality)
+  convertedToBillId: varchar("converted_to_bill_id").references(() => bills.id),
+  convertedAt: timestamp("converted_at"),
+  
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   unique("unique_po_number_tenant").on(table.tenantId, table.poNumber),
-  sql`CONSTRAINT check_purchase_order_status CHECK (status IN ('draft', 'approved', 'sent', 'partially_received', 'received', 'billed', 'cancelled'))`,
 ]);
 
 export const insertPurchaseOrderSchema = createInsertSchema(purchaseOrders, {
-  status: z.enum(['draft', 'approved', 'sent', 'partially_received', 'received', 'billed', 'cancelled']),
   subtotal: decimalString,
   taxAmount: decimalString,
   total: decimalString,
 }).omit({
   id: true,
+  deletedAt: true,
   createdAt: true,
   updatedAt: true,
   poNumber: true, // Auto-generated
+  convertedToBillId: true,
+  convertedAt: true,
+}).extend({
+  orderDate: z.coerce.date(),
+  expectedDate: z.coerce.date().optional(),
 });
 
 export type InsertPurchaseOrder = z.infer<typeof insertPurchaseOrderSchema>;
@@ -1598,3 +1625,129 @@ export const insertBankReconciliationItemSchema = createInsertSchema(bankReconci
 
 export type InsertBankReconciliationItem = z.infer<typeof insertBankReconciliationItemSchema>;
 export type BankReconciliationItem = typeof bankReconciliationItems.$inferSelect;
+
+// Bank Reconciliation Payload (for transactional create/update with items)
+export const bankReconciliationPayloadSchema = z.object({
+  reconciliation: insertBankReconciliationSchema.partial().required({
+    accountId: true,
+    reconciliationDate: true,
+    statementDate: true,
+    statementBalance: true,
+    bookBalance: true,
+    status: true,
+  }),
+  items: z.array(insertBankReconciliationItemSchema.omit({ reconciliationId: true })),
+});
+
+export type BankReconciliationPayload = z.infer<typeof bankReconciliationPayloadSchema>;
+
+// ====================================
+// FINANCIAL REPORTS (READ-ONLY)
+// ====================================
+
+// Account line item for reports
+export const reportAccountLineSchema = z.object({
+  accountId: z.string(),
+  accountCode: z.string(),
+  accountName: z.string(),
+  balance: z.string(),
+});
+
+export type ReportAccountLine = z.infer<typeof reportAccountLineSchema>;
+
+// Profit & Loss Report (Income Statement)
+export const profitLossReportSchema = z.object({
+  tenantId: z.string(),
+  startDate: z.date(),
+  endDate: z.date(),
+  
+  // Revenue accounts (income type)
+  revenueAccounts: z.array(reportAccountLineSchema),
+  totalRevenue: z.string(),
+  
+  // Expense accounts
+  expenseAccounts: z.array(reportAccountLineSchema),
+  totalExpenses: z.string(),
+  
+  // Net profit/loss
+  netProfit: z.string(),
+});
+
+export type ProfitLossReport = z.infer<typeof profitLossReportSchema>;
+
+// Balance Sheet Report
+export const balanceSheetReportSchema = z.object({
+  tenantId: z.string(),
+  asOfDate: z.date(),
+  
+  // Assets
+  assetAccounts: z.array(reportAccountLineSchema),
+  totalAssets: z.string(),
+  
+  // Liabilities
+  liabilityAccounts: z.array(reportAccountLineSchema),
+  totalLiabilities: z.string(),
+  
+  // Equity
+  equityAccounts: z.array(reportAccountLineSchema),
+  totalEquity: z.string(),
+  
+  // Balance check (Assets = Liabilities + Equity)
+  totalLiabilitiesAndEquity: z.string(),
+  isBalanced: z.boolean(),
+});
+
+export type BalanceSheetReport = z.infer<typeof balanceSheetReportSchema>;
+
+// Trial Balance Report (All accounts with debit/credit balances)
+export const trialBalanceAccountLineSchema = z.object({
+  accountId: z.string(),
+  accountCode: z.string(),
+  accountName: z.string(),
+  accountType: z.string(),
+  debit: z.string(),
+  credit: z.string(),
+});
+
+export type TrialBalanceAccountLine = z.infer<typeof trialBalanceAccountLineSchema>;
+
+export const trialBalanceReportSchema = z.object({
+  tenantId: z.string(),
+  asOfDate: z.date(),
+  
+  accounts: z.array(trialBalanceAccountLineSchema),
+  
+  totalDebits: z.string(),
+  totalCredits: z.string(),
+  isBalanced: z.boolean(),
+});
+
+export type TrialBalanceReport = z.infer<typeof trialBalanceReportSchema>;
+
+// Cash Flow Report (Simplified)
+export const cashFlowSectionSchema = z.object({
+  accounts: z.array(reportAccountLineSchema),
+  total: z.string(),
+});
+
+export type CashFlowSection = z.infer<typeof cashFlowSectionSchema>;
+
+export const cashFlowReportSchema = z.object({
+  tenantId: z.string(),
+  startDate: z.date(),
+  endDate: z.date(),
+  
+  // Operating activities (revenue and expenses)
+  operatingActivities: cashFlowSectionSchema,
+  
+  // Investing activities (asset purchases/sales)
+  investingActivities: cashFlowSectionSchema,
+  
+  // Financing activities (equity, loans)
+  financingActivities: cashFlowSectionSchema,
+  
+  // Net cash flow
+  netCashFlow: z.string(),
+});
+
+export type CashFlowReport = z.infer<typeof cashFlowReportSchema>;

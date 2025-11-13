@@ -15,6 +15,7 @@ import {
   insertCustomerSchema,
   updateCustomerSchema,
   insertVendorSchema,
+  insertAccountSchema,
   insertItemSchema,
   insertTaxSchema,
   updateTaxSchema,
@@ -22,6 +23,7 @@ import {
   invoicePayloadSchema,
   insertBillSchema,
   billPayloadSchema,
+  purchaseOrderPayloadSchema,
   insertExpenseSchema,
   insertPaymentSchema,
   insertDocumentSchema,
@@ -36,6 +38,11 @@ import {
   insertRecurringInvoiceLineItemSchema,
   insertRetainerInvoiceSchema,
   insertRetainerInvoiceLineItemSchema,
+  insertJournalEntrySchema,
+  journalEntryPayloadSchema,
+  insertAssetSchema,
+  insertBankReconciliationSchema,
+  bankReconciliationPayloadSchema,
 } from "@shared/schema";
 
 // Initialize Stripe and OpenAI only if credentials are available
@@ -334,6 +341,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error deleting vendor:", error);
       res.status(400).json({ message: error.message || "Failed to delete vendor" });
+    }
+  });
+
+  // Account routes
+  app.get('/api/accounts', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const accounts = await storage.getAccounts(req.tenantId);
+      res.json(accounts);
+    } catch (error) {
+      console.error("Error fetching accounts:", error);
+      res.status(500).json({ message: "Failed to fetch accounts" });
+    }
+  });
+
+  app.post('/api/accounts', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      
+      // Parse req.body - insertAccountSchema omits tenantId
+      const parsed = insertAccountSchema.parse(req.body);
+      
+      // Auto-generate account code if not provided
+      const code = parsed.code || await storage.getNextAccountNumber(tenantId);
+      
+      // Add verified tenantId and code back AFTER parsing
+      const account = await storage.createAccount({ ...parsed, code, tenantId });
+      res.status(201).json(account);
+    } catch (error: any) {
+      console.error("Error creating account:", error);
+      res.status(400).json({ message: error.message || "Failed to create account" });
+    }
+  });
+
+  app.patch('/api/accounts/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Verify account exists and belongs to this tenant
+      const existingAccount = await storage.getAccount(id);
+      if (!existingAccount) {
+        return res.status(404).json({ message: "Account not found" });
+      }
+      
+      // Verify the account belongs to the tenant the user has access to
+      if (existingAccount.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Account not found" });
+      }
+      
+      // STRIP tenantId from payload - NEVER trust client
+      const { tenantId: _, ...sanitizedPayload } = req.body;
+      
+      // Validate sanitized payload
+      const parsed = insertAccountSchema.partial().parse(sanitizedPayload);
+      
+      // Update with VERIFIED tenantId
+      const updated = await storage.updateAccount(id, tenantId, parsed);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating account:", error);
+      res.status(400).json({ message: error.message || "Failed to update account" });
+    }
+  });
+
+  app.delete('/api/accounts/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Verify account exists and belongs to this tenant
+      const existingAccount = await storage.getAccount(id);
+      if (!existingAccount) {
+        return res.status(404).json({ message: "Account not found" });
+      }
+      
+      // Verify the account belongs to the tenant the user has access to
+      if (existingAccount.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Account not found" });
+      }
+      
+      // Delete using VERIFIED tenantId from middleware
+      await storage.deleteAccount(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting account:", error);
+      res.status(400).json({ message: error.message || "Failed to delete account" });
     }
   });
 
@@ -1828,6 +1921,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Journal Entry routes
+  app.get("/api/journal-entries", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const journalEntries = await storage.getJournalEntries(tenantId);
+      res.json(journalEntries);
+    } catch (error: any) {
+      console.error('Error fetching journal entries:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/journal-entries/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const journalEntry = await storage.getJournalEntry(id);
+      if (!journalEntry) {
+        return res.status(404).json({ message: "Journal entry not found" });
+      }
+      res.json(journalEntry);
+    } catch (error: any) {
+      console.error('Error fetching journal entry:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/journal-entries/:id/legs", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const legs = await storage.getJournalEntryLegs(id, tenantId);
+      res.json(legs);
+    } catch (error: any) {
+      console.error('Error fetching journal entry legs:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/journal-entries", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      
+      // Validate payload structure
+      const validated = journalEntryPayloadSchema.parse(req.body);
+      
+      // SECURITY: Inject server tenantId into journal entry data (NEVER trust client)
+      const payloadWithTenant = {
+        journalEntry: {
+          ...validated.journalEntry,
+          tenantId,
+        },
+        legs: validated.legs,
+      };
+      
+      const journalEntry = await storage.createJournalEntryWithLegs(payloadWithTenant);
+      res.status(201).json(journalEntry);
+    } catch (error: any) {
+      console.error('Error creating journal entry:', error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Invalid journal entry data', errors: error.errors });
+      }
+      res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/journal-entries/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Validate payload structure
+      const validated = journalEntryPayloadSchema.parse(req.body);
+      
+      // SECURITY: Inject server tenantId into journal entry data (NEVER trust client)
+      const payloadWithTenant = {
+        journalEntry: {
+          ...validated.journalEntry,
+          tenantId,
+        },
+        legs: validated.legs,
+      };
+      
+      const journalEntry = await storage.updateJournalEntryWithLegs(id, tenantId, payloadWithTenant);
+      res.json(journalEntry);
+    } catch (error: any) {
+      console.error('Error updating journal entry:', error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Invalid journal entry data', errors: error.errors });
+      }
+      res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/journal-entries/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deleteJournalEntry(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error('Error deleting journal entry:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Bill routes
   app.get('/api/bills', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
@@ -2041,6 +2239,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Purchase Order routes
+  app.get('/api/purchase-orders', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const purchaseOrders = await storage.getPurchaseOrders(req.tenantId);
+      res.json(purchaseOrders);
+    } catch (error) {
+      console.error("Error fetching purchase orders:", error);
+      res.status(500).json({ message: "Failed to fetch purchase orders" });
+    }
+  });
+
+  app.get('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const po = await storage.getPurchaseOrder(id);
+      if (!po) {
+        return res.status(404).json({ message: "Purchase Order not found" });
+      }
+      // Verify tenant access
+      if (po.tenantId !== tenantId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      res.json(po);
+    } catch (error) {
+      console.error("Error fetching purchase order:", error);
+      res.status(500).json({ message: "Failed to fetch purchase order" });
+    }
+  });
+
+  app.get('/api/purchase-orders/:id/line-items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // SECURITY: Verify PO belongs to this tenant before returning line items
+      const po = await storage.getPurchaseOrder(id);
+      if (!po) {
+        return res.status(404).json({ message: "Purchase Order not found" });
+      }
+      if (po.tenantId !== tenantId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const lineItems = await storage.getPurchaseOrderLineItems(id, tenantId);
+      res.json(lineItems);
+    } catch (error) {
+      console.error("Error fetching purchase order line items:", error);
+      res.status(500).json({ message: "Failed to fetch purchase order line items" });
+    }
+  });
+
+  app.post('/api/purchase-orders', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      
+      // Parse body WITHOUT tenantId
+      const validated = purchaseOrderPayloadSchema.parse(req.body);
+      
+      // Inject server tenantId into PO data (NEVER trust client)
+      const poWithTenant = {
+        ...validated,
+        purchaseOrder: {
+          ...validated.purchaseOrder,
+          tenantId: tenantId,
+        }
+      };
+      
+      // Also inject tenantId into line items
+      const lineItemsWithTenant = validated.lineItems.map(item => ({
+        ...item,
+        tenantId: tenantId,
+      }));
+      
+      const payload = {
+        purchaseOrder: poWithTenant.purchaseOrder,
+        lineItems: lineItemsWithTenant,
+      };
+      
+      const po = await storage.createPurchaseOrderWithItems(payload);
+      res.status(201).json(po);
+    } catch (error: any) {
+      console.error("Error creating purchase order:", error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Invalid purchase order data', errors: error.errors });
+      }
+      res.status(400).json({ message: error.message || "Failed to create purchase order" });
+    }
+  });
+
+  app.patch('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Parse body WITHOUT trusting tenantId
+      const validated = purchaseOrderPayloadSchema.parse(req.body);
+      
+      // Force server tenantId (same pattern as POST)
+      const poWithTenant = {
+        ...validated,
+        purchaseOrder: {
+          ...validated.purchaseOrder,
+          tenantId: tenantId,
+        }
+      };
+      
+      const lineItemsWithTenant = validated.lineItems.map(item => ({
+        ...item,
+        tenantId: tenantId,
+      }));
+      
+      const payload = {
+        purchaseOrder: poWithTenant.purchaseOrder,
+        lineItems: lineItemsWithTenant,
+      };
+      
+      const po = await storage.updatePurchaseOrderWithItems(id, tenantId, payload);
+      res.json(po);
+    } catch (error: any) {
+      console.error("Error updating purchase order:", error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Invalid purchase order data', errors: error.errors });
+      }
+      res.status(400).json({ message: error.message || "Failed to update purchase order" });
+    }
+  });
+
+  app.delete('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deletePurchaseOrder(id, tenantId);
+      res.json({ message: "Purchase Order deleted" });
+    } catch (error: any) {
+      console.error("Error deleting purchase order:", error);
+      res.status(500).json({ message: error.message || "Failed to delete purchase order" });
+    }
+  });
+
   // Expense routes
   app.get('/api/expenses', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
@@ -2120,6 +2458,359 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);
       res.status(500).json({ message: "Failed to fetch dashboard stats" });
+    }
+  });
+
+  // Asset Management routes
+  app.get('/api/assets', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const assets = await storage.getAssets(req.tenantId);
+      res.json(assets);
+    } catch (error) {
+      console.error("Error fetching assets:", error);
+      res.status(500).json({ message: "Failed to fetch assets" });
+    }
+  });
+
+  app.get('/api/assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const asset = await storage.getAsset(id);
+      
+      if (!asset || asset.tenantId !== req.tenantId) {
+        return res.status(404).json({ message: "Asset not found" });
+      }
+      
+      res.json(asset);
+    } catch (error) {
+      console.error("Error fetching asset:", error);
+      res.status(500).json({ message: "Failed to fetch asset" });
+    }
+  });
+
+  app.get('/api/assets/:id/depreciation-schedules', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+
+      // SECURITY: Verify asset belongs to this tenant before returning schedules
+      const asset = await storage.getAsset(id);
+      if (!asset || asset.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Asset not found" });
+      }
+
+      const schedules = await storage.getAssetDepreciationSchedules(id, tenantId);
+      res.json(schedules);
+    } catch (error) {
+      console.error("Error fetching depreciation schedules:", error);
+      res.status(500).json({ message: "Failed to fetch depreciation schedules" });
+    }
+  });
+
+  app.post('/api/assets', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+
+      // SECURITY: Strip client-provided tenantId, use verified tenantId from middleware
+      const { tenantId: _, ...assetPayload } = req.body;
+      
+      // Parse and validate request body
+      const parsed = insertAssetSchema.parse(assetPayload);
+
+      // Create asset with FORCE server tenantId
+      const asset = await storage.createAsset({ ...parsed, tenantId });
+      res.status(201).json(asset);
+    } catch (error: any) {
+      console.error("Error creating asset:", error);
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid asset data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create asset" });
+    }
+  });
+
+  app.patch('/api/assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+
+      // SECURITY: Strip client-provided tenantId
+      const { tenantId: _, ...assetPayload } = req.body;
+
+      // Parse and validate request body
+      const parsed = insertAssetSchema.partial().parse(assetPayload);
+
+      // Update asset (verifies tenant ownership inside)
+      const asset = await storage.updateAsset(id, tenantId, parsed);
+      res.json(asset);
+    } catch (error: any) {
+      console.error("Error updating asset:", error);
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid asset data", errors: error.errors });
+      }
+      if (error.message === "Asset not found") {
+        return res.status(404).json({ message: "Asset not found" });
+      }
+      res.status(500).json({ message: "Failed to update asset" });
+    }
+  });
+
+  app.delete('/api/assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+
+      // Delete asset (verifies tenant ownership inside)
+      await storage.deleteAsset(id, tenantId);
+      res.json({ message: "Asset deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting asset:", error);
+      if (error.message === "Asset not found") {
+        return res.status(404).json({ message: "Asset not found" });
+      }
+      res.status(500).json({ message: "Failed to delete asset" });
+    }
+  });
+
+  // Bank Reconciliation routes
+  app.get('/api/bank-reconciliations', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const reconciliations = await storage.getBankReconciliations(req.tenantId);
+      res.json(reconciliations);
+    } catch (error) {
+      console.error("Error fetching bank reconciliations:", error);
+      res.status(500).json({ message: "Failed to fetch bank reconciliations" });
+    }
+  });
+
+  app.get('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const reconciliation = await storage.getBankReconciliation(id);
+      
+      if (!reconciliation || reconciliation.tenantId !== req.tenantId) {
+        return res.status(404).json({ message: "Bank reconciliation not found" });
+      }
+      
+      res.json(reconciliation);
+    } catch (error) {
+      console.error("Error fetching bank reconciliation:", error);
+      res.status(500).json({ message: "Failed to fetch bank reconciliation" });
+    }
+  });
+
+  app.get('/api/bank-reconciliations/:id/items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+
+      // SECURITY: Verify reconciliation belongs to this tenant before returning items
+      const reconciliation = await storage.getBankReconciliation(id);
+      if (!reconciliation || reconciliation.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Bank reconciliation not found" });
+      }
+
+      const items = await storage.getBankReconciliationItems(id, tenantId);
+      res.json(items);
+    } catch (error) {
+      console.error("Error fetching reconciliation items:", error);
+      res.status(500).json({ message: "Failed to fetch reconciliation items" });
+    }
+  });
+
+  app.post('/api/bank-reconciliations', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+
+      // SECURITY: Strip client-provided tenantId from both reconciliation and items
+      const payload = req.body;
+      
+      // Parse and validate request body
+      const parsed = bankReconciliationPayloadSchema.parse(payload);
+
+      // CRITICAL: Inject server tenantId into reconciliation
+      const payloadWithTenantId = {
+        reconciliation: {
+          ...parsed.reconciliation,
+          tenantId, // FORCE server tenantId
+        },
+        items: parsed.items, // Items will get tenantId injected in storage layer
+      };
+
+      const reconciliation = await storage.createBankReconciliationWithItems(payloadWithTenantId);
+      res.status(201).json(reconciliation);
+    } catch (error: any) {
+      console.error("Error creating bank reconciliation:", error);
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid reconciliation data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create bank reconciliation" });
+    }
+  });
+
+  app.patch('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+
+      // Parse and validate request body
+      const parsed = bankReconciliationPayloadSchema.parse(req.body);
+
+      // CRITICAL: Inject server tenantId into reconciliation
+      const payloadWithTenantId = {
+        reconciliation: {
+          ...parsed.reconciliation,
+          tenantId, // FORCE server tenantId
+        },
+        items: parsed.items, // Items will get tenantId injected in storage layer
+      };
+
+      const reconciliation = await storage.updateBankReconciliationWithItems(id, tenantId, payloadWithTenantId);
+      res.json(reconciliation);
+    } catch (error: any) {
+      console.error("Error updating bank reconciliation:", error);
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid reconciliation data", errors: error.errors });
+      }
+      if (error.message === "Bank reconciliation not found") {
+        return res.status(404).json({ message: "Bank reconciliation not found" });
+      }
+      res.status(500).json({ message: "Failed to update bank reconciliation" });
+    }
+  });
+
+  app.delete('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+
+      await storage.deleteBankReconciliation(id, tenantId);
+      res.json({ message: "Bank reconciliation deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting bank reconciliation:", error);
+      if (error.message === "Bank reconciliation not found") {
+        return res.status(404).json({ message: "Bank reconciliation not found" });
+      }
+      res.status(500).json({ message: "Failed to delete bank reconciliation" });
+    }
+  });
+
+  app.patch('/api/bank-reconciliations/items/:itemId/match', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { itemId } = req.params;
+      const { journalEntryId } = req.body;
+      const tenantId = req.tenantId!;
+
+      if (!journalEntryId) {
+        return res.status(400).json({ message: "journalEntryId is required" });
+      }
+
+      await storage.matchReconciliationItem(itemId, journalEntryId, tenantId);
+      res.json({ message: "Reconciliation item matched successfully" });
+    } catch (error: any) {
+      console.error("Error matching reconciliation item:", error);
+      if (error.message === "Reconciliation item not found" || error.message === "Journal entry not found") {
+        return res.status(404).json({ message: error.message });
+      }
+      res.status(500).json({ message: "Failed to match reconciliation item" });
+    }
+  });
+
+  // ====================================
+  // FINANCIAL REPORTS (READ-ONLY)
+  // ====================================
+
+  app.get('/api/reports/profit-loss', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { startDate, endDate } = req.query;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ message: "startDate and endDate are required" });
+      }
+
+      const start = new Date(startDate as string);
+      const end = new Date(endDate as string);
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ message: "Invalid date format" });
+      }
+
+      const report = await storage.getProfitLossReport(tenantId, start, end);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error generating profit & loss report:", error);
+      res.status(500).json({ message: "Failed to generate profit & loss report" });
+    }
+  });
+
+  app.get('/api/reports/balance-sheet', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { asOfDate } = req.query;
+
+      if (!asOfDate) {
+        return res.status(400).json({ message: "asOfDate is required" });
+      }
+
+      const asOf = new Date(asOfDate as string);
+
+      if (isNaN(asOf.getTime())) {
+        return res.status(400).json({ message: "Invalid date format" });
+      }
+
+      const report = await storage.getBalanceSheetReport(tenantId, asOf);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error generating balance sheet report:", error);
+      res.status(500).json({ message: "Failed to generate balance sheet report" });
+    }
+  });
+
+  app.get('/api/reports/trial-balance', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { asOfDate } = req.query;
+
+      if (!asOfDate) {
+        return res.status(400).json({ message: "asOfDate is required" });
+      }
+
+      const asOf = new Date(asOfDate as string);
+
+      if (isNaN(asOf.getTime())) {
+        return res.status(400).json({ message: "Invalid date format" });
+      }
+
+      const report = await storage.getTrialBalanceReport(tenantId, asOf);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error generating trial balance report:", error);
+      res.status(500).json({ message: "Failed to generate trial balance report" });
+    }
+  });
+
+  app.get('/api/reports/cash-flow', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { startDate, endDate } = req.query;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ message: "startDate and endDate are required" });
+      }
+
+      const start = new Date(startDate as string);
+      const end = new Date(endDate as string);
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ message: "Invalid date format" });
+      }
+
+      const report = await storage.getCashFlowReport(tenantId, start, end);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error generating cash flow report:", error);
+      res.status(500).json({ message: "Failed to generate cash flow report" });
     }
   });
 
