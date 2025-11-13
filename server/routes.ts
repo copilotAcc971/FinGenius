@@ -2,8 +2,10 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import Stripe from "stripe";
 import OpenAI from "openai";
+import { z } from "zod";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { sendInvoiceEmail } from "./email-service";
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -25,13 +27,18 @@ import {
 
 // Initialize Stripe and OpenAI only if credentials are available
 const stripe = process.env.STRIPE_SECRET_KEY 
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" })
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-10-29.clover" })
   : null;
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = process.env.OPENAI_API_KEY 
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
+
+// Schema for send-email endpoint
+const sendEmailSchema = z.object({
+  message: z.string().optional()
+});
 
 // Middleware to verify tenant membership
 async function verifyTenantAccess(req: any, res: any, next: any) {
@@ -609,6 +616,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error deleting invoice:", error);
       res.status(400).json({ message: error.message || "Failed to delete invoice" });
+    }
+  });
+
+  app.post("/api/invoices/:id/send-email", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const { id } = req.params;
+    const tenantId = req.tenantId;
+    
+    try {
+      // Validate with default empty string for message
+      const validatedBody = sendEmailSchema.parse(req.body);
+      const customMessage = validatedBody.message || ''; // Default to empty string
+      
+      // Get invoice with customer details
+      const invoice = await storage.getInvoiceById(id, tenantId);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      
+      const customer = await storage.getCustomerById(invoice.customerId, tenantId);
+      if (!customer || !customer.email) {
+        return res.status(400).json({ error: "Customer email not found" });
+      }
+      
+      const companyProfile = await storage.getCompanyProfile(tenantId);
+      
+      // Gracefully handle missing company profile
+      const companyName = companyProfile?.legalName || 'Company';
+      
+      // Build email with proper null guard for message
+      const subject = `Invoice ${invoice.invoiceNumber} from ${companyName}`;
+      const body = `
+        <html>
+          <body>
+            <h2>Invoice ${invoice.invoiceNumber}</h2>
+            <p>Dear ${customer.name},</p>
+            ${customMessage ? `<p>${customMessage}</p>` : '<p>Please find your invoice details below.</p>'}
+            <p><strong>Invoice Number:</strong> ${invoice.invoiceNumber}</p>
+            <p><strong>Invoice Date:</strong> ${new Date(invoice.invoiceDate).toLocaleDateString()}</p>
+            <p><strong>Due Date:</strong> ${new Date(invoice.dueDate).toLocaleDateString()}</p>
+            <p><strong>Total Amount:</strong> $${parseFloat(invoice.total).toFixed(2)}</p>
+            ${invoice.invoiceSubject ? `<p><strong>Subject:</strong> ${invoice.invoiceSubject}</p>` : ''}
+            <br/>
+            <p>Thank you for your business!</p>
+            <p>Best regards,<br/>${companyName}</p>
+          </body>
+        </html>
+      `;
+      
+      // Send email
+      let emailSent = false;
+      try {
+        await sendInvoiceEmail({
+          to: customer.email,
+          subject,
+          body,
+          invoiceNumber: invoice.invoiceNumber || ''
+        });
+        emailSent = true; // Mark as sent
+      } catch (emailError: any) {
+        // Email send failed - update status and return error
+        try {
+          await storage.updateInvoice(id, tenantId, {
+            emailStatus: 'failed',
+            emailError: emailError.message || 'Failed to send email'
+          });
+        } catch (updateError) {
+          console.error('Failed to update invoice email error status:', updateError);
+        }
+        
+        // Handle Outlook connection errors gracefully
+        if (emailError.message?.includes('Outlook not connected')) {
+          return res.status(503).json({ 
+            error: 'Email service not configured. Please set up Outlook integration.' 
+          });
+        }
+        
+        return res.status(500).json({ 
+          error: 'Failed to send email: ' + emailError.message 
+        });
+      }
+      
+      // Email sent successfully - now update DB
+      if (emailSent) {
+        try {
+          await storage.updateInvoice(id, tenantId, {
+            emailSentAt: new Date(),
+            emailSentTo: customer.email,
+            emailStatus: 'sent'
+          });
+          
+          const updatedInvoice = await storage.getInvoiceById(id, tenantId);
+          return res.json({ 
+            success: true, 
+            message: 'Invoice sent successfully',
+            invoice: updatedInvoice
+          });
+        } catch (updateError: any) {
+          // SPECIAL CASE: Email sent but DB update failed
+          console.error('Failed to update invoice email status after successful send:', updateError);
+          return res.status(500).json({ 
+            error: 'Email sent successfully but failed to update invoice status. Please refresh to see latest data.',
+            emailSent: true // Flag to indicate email was sent
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error('Error in send-email endpoint:', error);
+      
+      // Return JSON error for validation failures
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid request: ' + error.errors.map(e => e.message).join(', ') 
+        });
+      }
+      
+      return res.status(500).json({ 
+        error: error.message || 'Internal server error' 
+      });
     }
   });
 

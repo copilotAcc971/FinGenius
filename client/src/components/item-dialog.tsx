@@ -99,9 +99,9 @@ export function ItemDialog({ open, onOpenChange, item }: ItemDialogProps) {
         ...values,
       };
       if (item) {
-        return await apiRequest("PATCH", `/api/items/${item.id}`, payload);
+        return await apiRequest(`/api/items/${item.id}`, "PATCH", payload);
       }
-      return await apiRequest("POST", "/api/items", payload);
+      return await apiRequest("/api/items", "POST", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/items", currentTenant?.id] });

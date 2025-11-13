@@ -401,7 +401,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
   }, [invoice, currentTenant, companyProfile, form, open]);
 
   const saveMutation = useMutation({
-    mutationFn: async (values: FormValues & { saveAndSend?: boolean }) => {
+    mutationFn: async (values: FormValues) => {
       const payload = {
         invoice: {
           tenantId: values.invoice.tenantId,
@@ -409,7 +409,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
           invoiceNumber: values.invoice.invoiceNumber || undefined,
           invoiceDate: new Date(values.invoice.invoiceDate).toISOString(),
           dueDate: new Date(values.invoice.dueDate).toISOString(),
-          status: values.saveAndSend ? "sent" : values.invoice.status,
+          status: values.invoice.status,
           invoiceSubject: values.invoice.invoiceSubject || undefined,
           poReference: values.invoice.poReference || undefined,
           issuerTaxId: values.invoice.issuerTaxId || undefined,
@@ -431,10 +431,14 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
         })),
       };
 
-      if (invoice) {
-        return await apiRequest(`/api/invoices/${invoice.id}`, "PATCH", payload);
-      }
-      return await apiRequest("/api/invoices", "POST", payload);
+      if (!currentTenant?.id) throw new Error("No tenant selected");
+      
+      const res = invoice 
+        ? await apiRequest(`/api/invoices/${invoice.id}?tenantId=${currentTenant.id}`, "PATCH", payload)
+        : await apiRequest(`/api/invoices?tenantId=${currentTenant.id}`, "POST", payload);
+      
+      // Parse JSON response
+      return await res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
@@ -464,8 +468,97 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
     },
   });
 
-  const onSubmit = (values: FormValues, saveAndSend = false) => {
-    saveMutation.mutate({ ...values, saveAndSend });
+  const saveAndSendMutation = useMutation({
+    mutationFn: async (values: FormValues) => {
+      if (!currentTenant?.id) throw new Error("No tenant selected");
+      
+      const payload = {
+        invoice: {
+          tenantId: values.invoice.tenantId,
+          customerId: values.invoice.customerId,
+          invoiceNumber: values.invoice.invoiceNumber || undefined,
+          invoiceDate: new Date(values.invoice.invoiceDate).toISOString(),
+          dueDate: new Date(values.invoice.dueDate).toISOString(),
+          status: values.invoice.status,
+          invoiceSubject: values.invoice.invoiceSubject || undefined,
+          poReference: values.invoice.poReference || undefined,
+          issuerTaxId: values.invoice.issuerTaxId || undefined,
+          customerTaxId: values.invoice.customerTaxId || undefined,
+          subtotal: values.invoice.subtotal,
+          taxAmount: values.invoice.taxAmount,
+          total: values.invoice.total,
+          notes: values.invoice.notes || undefined,
+        },
+        lineItems: values.lineItems.map(item => ({
+          itemId: item.itemId || undefined,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discount: item.discount || "0.00",
+          taxId: item.taxId || undefined,
+          amount: item.amount,
+          accountId: item.accountId || undefined,
+        })),
+      };
+
+      // First create/update invoice
+      const createRes = invoice 
+        ? await apiRequest(`/api/invoices/${invoice.id}?tenantId=${currentTenant.id}`, "PATCH", payload)
+        : await apiRequest(`/api/invoices?tenantId=${currentTenant.id}`, "POST", payload);
+      
+      const savedInvoice = await createRes.json();
+      
+      // Then send email
+      const emailRes = await apiRequest(
+        `/api/invoices/${savedInvoice.id}/send-email?tenantId=${currentTenant.id}`,
+        "POST",
+        {}
+      );
+      
+      // Parse JSON once
+      const emailData = await emailRes.json().catch(() => ({ error: 'Failed to send email' }));
+      
+      // Check if response was not ok
+      if (!emailRes.ok) {
+        throw new Error(emailData.error || 'Failed to send email');
+      }
+      
+      return emailData;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices", currentTenant?.id] });
+      toast({
+        title: "Invoice saved and sent successfully",
+        description: "The invoice has been created and emailed to the customer.",
+      });
+      onOpenChange(false);
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Failed to save and send invoice",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const onSubmit = (values: FormValues) => {
+    saveMutation.mutate(values);
+  };
+
+  const onSaveAndSend = (values: FormValues) => {
+    saveAndSendMutation.mutate(values);
   };
 
   const selectedCustomer = customers.find(c => c.id === watchedCustomerId);
@@ -502,7 +595,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
         )}
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit((values) => onSubmit(values, false))} className="space-y-6">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             
             {/* Issuer Section */}
             <div className="space-y-3">
@@ -963,11 +1056,11 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                     <span tabIndex={0}>
                       <Button 
                         type="button"
-                        onClick={form.handleSubmit((values) => onSubmit(values, true))}
-                        disabled={!isDataReady || saveMutation.isPending || lineItemsLoading} 
+                        onClick={form.handleSubmit(onSaveAndSend)}
+                        disabled={!isDataReady || saveAndSendMutation.isPending || lineItemsLoading} 
                         data-testid="button-save-send"
                       >
-                        {saveMutation.isPending ? "Saving..." : "Save & Send"}
+                        {saveAndSendMutation.isPending ? "Sending..." : "Save & Send"}
                       </Button>
                     </span>
                   </TooltipTrigger>

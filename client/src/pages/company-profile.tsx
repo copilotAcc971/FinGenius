@@ -94,10 +94,10 @@ export default function CompanyProfile() {
       
       const url = `/api/company-profile?tenantId=${tenantId}`;
       if (profile) {
-        const res = await apiRequest("PATCH", url, data);
+        const res = await apiRequest(url, "PATCH", data);
         return await res.json();
       } else {
-        const res = await apiRequest("POST", url, { ...data, tenantId });
+        const res = await apiRequest(url, "POST", { ...data, tenantId });
         return await res.json();
       }
     },

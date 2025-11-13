@@ -77,9 +77,9 @@ export function TaxDialog({ open, onOpenChange, tax }: TaxDialogProps) {
         ...values,
       };
       if (tax) {
-        return await apiRequest("PATCH", `/api/taxes/${tax.id}`, payload);
+        return await apiRequest(`/api/taxes/${tax.id}`, "PATCH", payload);
       }
-      return await apiRequest("POST", "/api/taxes", payload);
+      return await apiRequest("/api/taxes", "POST", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/taxes", currentTenant?.id] });

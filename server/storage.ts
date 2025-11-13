@@ -71,6 +71,7 @@ export interface IStorage {
   // Customer operations
   getCustomersByTenant(tenantId: string): Promise<Customer[]>;
   getCustomer(id: string): Promise<Customer | undefined>;
+  getCustomerById(id: string, tenantId: string): Promise<Customer | null>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   updateCustomer(id: string, tenantId: string, customer: Partial<InsertCustomer>): Promise<Customer>;
   deleteCustomer(id: string, tenantId: string): Promise<void>;
@@ -102,6 +103,7 @@ export interface IStorage {
   getInvoiceById(id: string, tenantId: string): Promise<Invoice | null>;
   getInvoiceLineItems(invoiceId: string): Promise<InvoiceLineItem[]>;
   createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice>;
+  updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>): Promise<Invoice>;
   updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice>;
   deleteInvoice(id: string, tenantId: string): Promise<boolean>;
   
@@ -275,6 +277,21 @@ export class DatabaseStorage implements IStorage {
   async getCustomer(id: string): Promise<Customer | undefined> {
     const [customer] = await db.select().from(customers).where(eq(customers.id, id));
     return customer;
+  }
+
+  async getCustomerById(id: string, tenantId: string): Promise<Customer | null> {
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(
+        and(
+          eq(customers.id, id),
+          eq(customers.tenantId, tenantId)
+        )
+      )
+      .limit(1);
+    
+    return customer || null;
   }
 
   async createCustomer(customerData: InsertCustomer): Promise<Customer> {
@@ -580,6 +597,25 @@ export class DatabaseStorage implements IStorage {
       
       return invoice;
     });
+  }
+
+  async updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>): Promise<Invoice> {
+    const invoice = await this.getInvoiceById(id, tenantId);
+    if (!invoice) {
+      throw new Error("Invoice not found");
+    }
+    
+    const [updatedInvoice] = await db
+      .update(invoices)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)))
+      .returning();
+    
+    if (!updatedInvoice) {
+      throw new Error("Invoice not found");
+    }
+    
+    return updatedInvoice;
   }
 
   async updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice> {

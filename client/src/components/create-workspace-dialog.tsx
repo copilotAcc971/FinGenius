@@ -50,7 +50,8 @@ export function CreateWorkspaceDialog({
 
   const createMutation = useMutation({
     mutationFn: async (values: z.infer<typeof formSchema>) => {
-      return await apiRequest("POST", "/api/tenants", values);
+      const res = await apiRequest("/api/tenants", "POST", values);
+      return await res.json();
     },
     onSuccess: (newTenant) => {
       queryClient.invalidateQueries({ queryKey: ["/api/tenants"] });

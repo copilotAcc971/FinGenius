@@ -359,6 +359,13 @@ export const invoices = pgTable("invoices", {
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
   notes: text("notes"),
+  
+  // Email tracking fields
+  emailSentAt: timestamp("email_sent_at"),
+  emailSentTo: varchar("email_sent_to"),
+  emailStatus: varchar("email_status"), // 'pending', 'sent', 'failed'
+  emailError: text("email_error"),
+  
   deletedAt: timestamp("deleted_at"), // Soft delete
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

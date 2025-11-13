@@ -63,7 +63,7 @@ export default function Taxes() {
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       if (!currentTenant?.id) throw new Error("No tenant selected");
-      await apiRequest("DELETE", `/api/taxes/${id}?tenantId=${currentTenant.id}`, {});
+      await apiRequest(`/api/taxes/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/taxes", currentTenant?.id] });

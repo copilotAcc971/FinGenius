@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreHorizontal, Edit, Trash2 } from "lucide-react";
+import { Plus, MoreHorizontal, Edit, Trash2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -60,10 +60,56 @@ export default function Invoices() {
     return customer ? customer.name : customerId;
   };
 
+  const sendEmailMutation = useMutation({
+    mutationFn: async (invoiceId: string) => {
+      if (!currentTenant?.id) throw new Error("No tenant selected");
+      const res = await apiRequest(
+        `/api/invoices/${invoiceId}/send-email?tenantId=${currentTenant.id}`,
+        "POST",
+        {}
+      );
+      
+      // Parse JSON once
+      const data = await res.json().catch(() => ({ error: 'Failed to send email' }));
+      
+      // Check if response was not ok
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to send email');
+      }
+      
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices", currentTenant?.id] });
+      toast({
+        title: "Invoice sent successfully",
+        description: "The invoice has been emailed to the customer.",
+      });
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Failed to send invoice",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       if (!currentTenant?.id) throw new Error("No tenant selected");
-      await apiRequest("DELETE", `/api/invoices/${id}?tenantId=${currentTenant.id}`, {});
+      await apiRequest(`/api/invoices/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
@@ -91,6 +137,10 @@ export default function Invoices() {
       });
     },
   });
+
+  const handleSendEmail = (invoiceId: string) => {
+    sendEmailMutation.mutate(invoiceId);
+  };
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -163,6 +213,7 @@ export default function Invoices() {
                 <TableHead>Due Date</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Email Status</TableHead>
                 <TableHead className="w-[70px]"></TableHead>
               </TableRow>
             </TableHeader>
@@ -175,6 +226,22 @@ export default function Invoices() {
                   <TableCell>{new Date(invoice.dueDate).toLocaleDateString()}</TableCell>
                   <TableCell className="text-right font-mono">${parseFloat(invoice.total).toFixed(2)}</TableCell>
                   <TableCell>{getStatusBadge(invoice.status)}</TableCell>
+                  <TableCell>
+                    {!invoice.emailStatus || invoice.emailStatus === 'pending' ? (
+                      <Badge variant="outline" data-testid={`badge-email-status-not-sent-${invoice.id}`}>Not Sent</Badge>
+                    ) : invoice.emailStatus === 'sent' ? (
+                      <div className="flex flex-col gap-1">
+                        <Badge variant="default" data-testid={`badge-email-status-sent-${invoice.id}`}>Sent</Badge>
+                        {invoice.emailSentAt && (
+                          <span className="text-xs text-muted-foreground" data-testid={`text-email-sent-date-${invoice.id}`}>
+                            {new Date(invoice.emailSentAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    ) : invoice.emailStatus === 'failed' ? (
+                      <Badge variant="destructive" data-testid={`badge-email-status-failed-${invoice.id}`}>Failed</Badge>
+                    ) : null}
+                  </TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -192,6 +259,14 @@ export default function Invoices() {
                         >
                           <Edit className="mr-2 h-4 w-4" />
                           Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleSendEmail(invoice.id)}
+                          disabled={sendEmailMutation.isPending}
+                          data-testid={`button-send-email-${invoice.id}`}
+                        >
+                          <Mail className="mr-2 h-4 w-4" />
+                          Send Email
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => deleteMutation.mutate(invoice.id)}

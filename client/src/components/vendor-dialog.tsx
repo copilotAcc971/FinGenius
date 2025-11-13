@@ -87,9 +87,9 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
   const saveMutation = useMutation({
     mutationFn: async (values: z.infer<typeof formSchema>) => {
       if (vendor) {
-        return await apiRequest("PATCH", `/api/vendors/${vendor.id}`, values);
+        return await apiRequest(`/api/vendors/${vendor.id}`, "PATCH", values);
       }
-      return await apiRequest("POST", "/api/vendors", values);
+      return await apiRequest("/api/vendors", "POST", values);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
