@@ -15,6 +15,7 @@ import Dashboard from "@/pages/dashboard";
 import Customers from "@/pages/customers";
 import Vendors from "@/pages/vendors";
 import Items from "@/pages/items";
+import Taxes from "@/pages/taxes";
 import Invoices from "@/pages/invoices";
 import Bills from "@/pages/bills";
 import Expenses from "@/pages/expenses";
@@ -36,6 +37,7 @@ function Router() {
           <Route path="/customers" component={Customers} />
           <Route path="/vendors" component={Vendors} />
           <Route path="/items" component={Items} />
+          <Route path="/taxes" component={Taxes} />
           <Route path="/invoices" component={Invoices} />
           <Route path="/bills" component={Bills} />
           <Route path="/expenses" component={Expenses} />

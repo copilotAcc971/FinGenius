@@ -4,6 +4,7 @@ import {
   FileText,
   Users,
   Package,
+  Percent,
   Receipt,
   ShoppingCart,
   CreditCard,
@@ -29,6 +30,7 @@ const salesItems = [
   { title: "Invoices", url: "/invoices", icon: FileText },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Items", url: "/items", icon: Package },
+  { title: "Taxes", url: "/taxes", icon: Percent },
 ];
 
 const purchasesItems = [

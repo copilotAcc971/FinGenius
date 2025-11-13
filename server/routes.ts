@@ -9,6 +9,8 @@ import {
   insertCustomerSchema,
   insertVendorSchema,
   insertItemSchema,
+  insertTaxSchema,
+  updateTaxSchema,
   insertInvoiceSchema,
   invoicePayloadSchema,
   insertBillSchema,
@@ -341,6 +343,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error deleting item:", error);
       res.status(400).json({ message: error.message || "Failed to delete item" });
+    }
+  });
+
+  // Tax routes
+  app.get('/api/taxes', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const taxes = await storage.getTaxes(req.tenantId);
+      res.json(taxes);
+    } catch (error) {
+      console.error("Error fetching taxes:", error);
+      res.status(500).json({ message: "Failed to fetch taxes" });
+    }
+  });
+
+  app.post('/api/taxes', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      
+      // Parse req.body - insertTaxSchema.omit strips tenantId
+      const parsed = insertTaxSchema.parse(req.body);
+      
+      // Add verified tenantId back AFTER parsing
+      const tax = await storage.createTax({ ...parsed, tenantId });
+      res.status(201).json(tax);
+    } catch (error: any) {
+      console.error("Error creating tax:", error);
+      res.status(400).json({ message: error.message || "Failed to create tax" });
+    }
+  });
+
+  app.patch('/api/taxes/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Verify tax exists and belongs to this tenant
+      const existingTax = await storage.getTax(id);
+      if (!existingTax) {
+        return res.status(404).json({ message: "Tax not found" });
+      }
+      
+      // Verify the tax belongs to the tenant the user has access to
+      if (existingTax.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Tax not found" });
+      }
+      
+      // STRIP tenantId from payload - NEVER trust client
+      const { tenantId: _, ...sanitizedPayload } = req.body;
+      
+      // Validate sanitized payload with custom update schema
+      const parsed = updateTaxSchema.parse(sanitizedPayload);
+      
+      // Update with VERIFIED tenantId
+      const updated = await storage.updateTax(id, tenantId, parsed);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating tax:", error);
+      res.status(400).json({ message: error.message || "Failed to update tax" });
+    }
+  });
+
+  app.delete('/api/taxes/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Verify tax exists and belongs to this tenant
+      const existingTax = await storage.getTax(id);
+      if (!existingTax) {
+        return res.status(404).json({ message: "Tax not found" });
+      }
+      
+      // Verify the tax belongs to the tenant the user has access to
+      if (existingTax.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Tax not found" });
+      }
+      
+      // Delete using VERIFIED tenantId from middleware
+      await storage.deleteTax(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting tax:", error);
+      res.status(400).json({ message: error.message || "Failed to delete tax" });
     }
   });
 

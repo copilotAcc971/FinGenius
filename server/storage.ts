@@ -5,6 +5,7 @@ import {
   customers,
   vendors,
   items,
+  taxes,
   invoices,
   invoiceLineItems,
   bills,
@@ -22,6 +23,8 @@ import {
   type InsertVendor,
   type Item,
   type InsertItem,
+  type Tax,
+  type InsertTax,
   type Invoice,
   type InsertInvoice,
   type InvoiceLineItem,
@@ -40,7 +43,7 @@ import {
   type InsertDocument,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ne } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -73,6 +76,13 @@ export interface IStorage {
   createItem(item: InsertItem & { tenantId: string }): Promise<Item>;
   updateItem(id: string, tenantId: string, item: Partial<InsertItem>): Promise<Item>;
   deleteItem(id: string, tenantId: string): Promise<void>;
+
+  // Tax operations
+  getTaxes(tenantId: string): Promise<Tax[]>;
+  getTax(id: string): Promise<Tax | undefined>;
+  createTax(tax: InsertTax & { tenantId: string }): Promise<Tax>;
+  updateTax(id: string, tenantId: string, tax: Partial<InsertTax>): Promise<Tax>;
+  deleteTax(id: string, tenantId: string): Promise<void>;
 
   // Invoice operations
   getInvoicesByTenant(tenantId: string): Promise<Invoice[]>;
@@ -303,6 +313,86 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Item not found");
     }
     await db.delete(items).where(and(eq(items.id, id), eq(items.tenantId, tenantId)));
+  }
+
+  // Tax operations
+  async getTaxes(tenantId: string): Promise<Tax[]> {
+    return await db
+      .select()
+      .from(taxes)
+      .where(eq(taxes.tenantId, tenantId));
+  }
+
+  async getTax(id: string): Promise<Tax | undefined> {
+    const [tax] = await db.select().from(taxes).where(eq(taxes.id, id));
+    return tax;
+  }
+
+  async createTax(taxData: InsertTax & { tenantId: string }): Promise<Tax> {
+    return await db.transaction(async (tx) => {
+      // If setting this tax as default, clear other defaults first
+      if (taxData.isDefault === true) {
+        await tx
+          .update(taxes)
+          .set({ isDefault: false })
+          .where(eq(taxes.tenantId, taxData.tenantId));
+      }
+      
+      // Now create the new tax
+      const [tax] = await tx
+        .insert(taxes)
+        .values(taxData)
+        .returning();
+      
+      return tax;
+    });
+  }
+
+  async updateTax(id: string, tenantId: string, taxData: Partial<InsertTax>): Promise<Tax> {
+    return await db.transaction(async (tx) => {
+      // Verify tax exists and belongs to tenant
+      const [tax] = await tx
+        .select()
+        .from(taxes)
+        .where(and(eq(taxes.id, id), eq(taxes.tenantId, tenantId)))
+        .limit(1);
+      
+      if (!tax) {
+        throw new Error("Tax not found");
+      }
+      
+      // If setting this tax as default, clear other defaults first
+      if (taxData.isDefault === true) {
+        await tx
+          .update(taxes)
+          .set({ isDefault: false })
+          .where(and(
+            eq(taxes.tenantId, tenantId),
+            ne(taxes.id, id)
+          ));
+      }
+      
+      // Now update this tax
+      const [updatedTax] = await tx
+        .update(taxes)
+        .set(taxData)
+        .where(and(eq(taxes.id, id), eq(taxes.tenantId, tenantId)))
+        .returning();
+      
+      if (!updatedTax) {
+        throw new Error("Tax not found");
+      }
+      
+      return updatedTax;
+    });
+  }
+
+  async deleteTax(id: string, tenantId: string): Promise<void> {
+    const tax = await this.getTax(id);
+    if (!tax || tax.tenantId !== tenantId) {
+      throw new Error("Tax not found");
+    }
+    await db.delete(taxes).where(and(eq(taxes.id, id), eq(taxes.tenantId, tenantId)));
   }
 
   // Invoice operations

@@ -166,8 +166,8 @@ export const items = pgTable("items", {
   accountId: varchar("account_id").references(() => accounts.id),
   taxId: varchar("tax_id"),
   isActive: boolean("is_active").default(true),
-  createdAt: timestamp("createdAt").defaultNow(),
-  updatedAt: timestamp("updatedAt").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const insertItemSchema = createInsertSchema(items, {
@@ -181,6 +181,33 @@ export const insertItemSchema = createInsertSchema(items, {
 
 export type InsertItem = z.infer<typeof insertItemSchema>;
 export type Item = typeof items.$inferSelect;
+
+// Taxes
+export const taxes = pgTable("taxes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  rate: decimal("rate", { precision: 5, scale: 2 }).notNull(),
+  isDefault: boolean("is_default").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
+});
+
+export const insertTaxSchema = createInsertSchema(taxes, {
+  rate: decimalString,
+}).omit({
+  id: true,
+  tenantId: true,
+});
+
+export const updateTaxSchema = z.object({
+  name: z.string().optional(),
+  rate: decimalString.optional(),
+  isDefault: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export type InsertTax = z.infer<typeof insertTaxSchema>;
+export type Tax = typeof taxes.$inferSelect;
 
 // Invoices (Sales)
 export const invoices = pgTable("invoices", {
