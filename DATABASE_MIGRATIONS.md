@@ -99,3 +99,60 @@ This file documents important database migrations that need to be run when deplo
 **Status:** ✅ Completed - Schema updated with defaults | ✅ Migration SQL executed successfully (0 rows updated)
 
 ---
+
+## Migration 3: Tax Registration Numbers for Tax Compliance (2025-11-13)
+
+**Purpose:** Add tax registration numbers to customers and vendors, and create tenant company profiles for invoice issuer tax compliance.
+
+**Schema Changes:**
+
+**Customers Table:**
+- Added without defaults:
+  - `taxRegistrationNumber` (varchar, length 100): Optional tax registration/VAT number
+
+**Vendors Table:**
+- Added without defaults:
+  - `taxRegistrationNumber` (varchar, length 100): Optional tax registration/VAT number
+
+**Tenant Company Profiles Table (NEW):**
+- `id` (varchar): Primary key with UUID default
+- `tenantId` (varchar): Foreign key to tenants.id with unique constraint
+- `legalName` (varchar, length 255): Required - Legal business name
+- `taxRegistrationNumber` (varchar, length 100): Optional - Company tax/VAT number
+- `address` (jsonb): Structured address using addressSchema, default '{}'
+- `email` (varchar, length 255): Optional - Company email
+- `phone` (varchar, length 50): Optional - Company phone
+- `website` (varchar, length 255): Optional - Company website
+- `createdAt`, `updatedAt` timestamps
+
+**Migration Files:**
+- Schema: `shared/schema.ts` (updated customers, vendors, added tenantCompanyProfiles)
+- SQL Script: `migrations/003_tax_registration_numbers.sql`
+
+**Execution Steps:**
+1. Run `npm run db:push` to sync schema
+2. Execute migration SQL:
+   ```bash
+   # Development (using execute_sql_tool)
+   # Or Production:
+   psql $DATABASE_URL -f migrations/003_tax_registration_numbers.sql
+   ```
+3. Verify columns exist in customers and vendors tables
+4. Verify tenant_company_profiles table created with unique tenantId constraint
+
+**What the Migration Does:**
+1. Adds `tax_registration_number` column to customers table (nullable)
+2. Adds `tax_registration_number` column to vendors table (nullable)
+3. Creates `tenant_company_profiles` table via db:push
+4. Backfills NULL values for existing rows (if any)
+
+**Key Changes:**
+- Added `insertTenantCompanyProfileSchema` for INSERT operations
+- Added `updateTenantCompanyProfileSchema` for PATCH operations
+- Added `InsertTenantCompanyProfile` and `TenantCompanyProfile` type exports
+- Schemas for customers and vendors automatically include new optional field
+- Unique constraint on tenantId ensures one company profile per tenant
+
+**Status:** ✅ Completed - Schema updated | ✅ Migration SQL executed successfully (0 rows updated) | ✅ tenant_company_profiles table created
+
+---

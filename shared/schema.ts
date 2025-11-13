@@ -95,6 +95,40 @@ export const contactPersonSchema = z.object({
   designation: z.string().optional(),
 });
 
+// Tenant Company Profiles (for invoice issuer details, tax compliance)
+export const tenantCompanyProfiles = pgTable("tenant_company_profiles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id).unique(),
+  
+  legalName: varchar("legal_name", { length: 255 }).notNull(),
+  taxRegistrationNumber: varchar("tax_registration_number", { length: 100 }),
+  
+  // Structured address
+  address: jsonb("address").$type<z.infer<typeof addressSchema>>().default({}),
+  
+  email: varchar("email", { length: 255 }),
+  phone: varchar("phone", { length: 50 }),
+  website: varchar("website", { length: 255 }),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertTenantCompanyProfileSchema = createInsertSchema(tenantCompanyProfiles, {
+  address: addressSchema.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateTenantCompanyProfileSchema = insertTenantCompanyProfileSchema
+  .omit({ tenantId: true })
+  .partial();
+
+export type InsertTenantCompanyProfile = z.infer<typeof insertTenantCompanyProfileSchema>;
+export type TenantCompanyProfile = typeof tenantCompanyProfiles.$inferSelect;
+
 // Customers
 export const customers = pgTable("customers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -117,6 +151,9 @@ export const customers = pgTable("customers", {
   billingAddress: jsonb("billing_address").$type<z.infer<typeof addressSchema>>().default({}),
   shippingAddress: jsonb("shipping_address").$type<z.infer<typeof addressSchema>>().default({}),
   contactPersons: jsonb("contact_persons").$type<z.infer<typeof contactPersonSchema>[]>().default([]),
+  
+  // Tax compliance
+  taxRegistrationNumber: varchar("tax_registration_number", { length: 100 }),
   
   // Keep existing fields
   address: text("address"),
@@ -174,6 +211,9 @@ export const vendors = pgTable("vendors", {
   billingAddress: jsonb("billing_address").$type<z.infer<typeof addressSchema>>().default({}),
   shippingAddress: jsonb("shipping_address").$type<z.infer<typeof addressSchema>>().default({}),
   contactPersons: jsonb("contact_persons").$type<z.infer<typeof contactPersonSchema>[]>().default([]),
+  
+  // Tax compliance
+  taxRegistrationNumber: varchar("tax_registration_number", { length: 100 }),
   
   // Vendor-specific Stripe fields
   stripeAccountId: varchar("stripe_account_id"),
