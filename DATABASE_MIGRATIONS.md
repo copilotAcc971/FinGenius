@@ -229,3 +229,64 @@ This file documents important database migrations that need to be run when deplo
 **Status:** ✅ Completed - Schema updated | ✅ db:push executed successfully | ✅ All tables and constraints created | ✅ No LSP errors
 
 ---
+
+## Migration 5: Invoice Tax Compliance and Enhanced Line Items (2025-11-13)
+
+**Purpose:** Add tax compliance fields to invoices for regulatory requirements and enhance invoice line items with item catalog references, discounts, and item-level tax support.
+
+**Schema Changes:**
+
+**Invoices Table:**
+- Added without defaults:
+  - `invoiceSubject` (varchar, length 500): Invoice subject/description
+  - `issuerTaxId` (varchar, length 100): Tax registration number of invoice issuer
+  - `customerTaxId` (varchar, length 100): Tax registration number of customer
+
+**Invoice Line Items Table:**
+- Added with defaults:
+  - `discount` (decimal, precision 12, scale 2): Item-level discount amount or percentage, default 0
+- Added without defaults:
+  - `itemId` (varchar): Foreign key to items table (optional, for catalog items)
+  - `taxId` (varchar): Foreign key to taxes table (for item-level tax)
+
+**Migration Files:**
+- Schema: `shared/schema.ts` (updated invoices and invoiceLineItems tables, updated schemas)
+- SQL Script: `migrations/005_invoice_tax_compliance.sql`
+
+**Execution Steps:**
+1. Run `npm run db:push` to sync schema with new fields
+2. Execute migration SQL:
+   ```bash
+   # Development (using execute_sql_tool)
+   # Or Production:
+   psql $DATABASE_URL -f migrations/005_invoice_tax_compliance.sql
+   ```
+3. Verify invoices table has new columns: invoice_subject, issuer_tax_id, customer_tax_id
+4. Verify invoice_line_items table has new columns: item_id (with FK), discount (with default 0), tax_id (with FK)
+
+**What the Migration Does:**
+1. Adds `invoice_subject` column to invoices table (nullable)
+2. Adds `issuer_tax_id` column to invoices table (nullable)
+3. Adds `customer_tax_id` column to invoices table (nullable)
+4. Adds `item_id` column to invoice_line_items table with FK to items (nullable)
+5. Adds `discount` column to invoice_line_items table with default 0
+6. Adds `tax_id` column to invoice_line_items table with FK to taxes (nullable)
+7. Backfills existing invoice_line_items rows with discount = 0
+
+**Key Changes:**
+- Updated `insertInvoiceSchema` to include optional tax compliance fields with validation
+- Updated `insertInvoiceLineItemSchema` to include discount with decimal validation
+- All new fields are optional (nullable) except discount which has default 0
+- Foreign key constraints ensure referential integrity for itemId and taxId
+- Maintains backward compatibility - existing invoices work without these fields
+
+**Use Cases:**
+- **Tax Compliance**: Store tax IDs for both issuer and customer for regulatory reporting
+- **Invoice Description**: Add subject/description to invoices for better clarity
+- **Item Catalog**: Link line items to reusable items in catalog for consistency
+- **Discounts**: Apply line-item level discounts with decimal precision
+- **Item-Level Tax**: Apply different tax rates to individual line items
+
+**Status:** ✅ Schema updated | ✅ db:push executed successfully | ✅ Migration SQL executed successfully (0 rows updated) | ✅ All columns and foreign keys created
+
+---

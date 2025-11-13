@@ -344,6 +344,12 @@ export const invoices = pgTable("invoices", {
   customerId: varchar("customer_id").notNull().references(() => customers.id),
   invoiceNumber: varchar("invoice_number", { length: 100 }),
   poReference: varchar("po_reference", { length: 100 }), // Purchase Order reference
+  
+  // Tax compliance fields
+  invoiceSubject: varchar("invoice_subject", { length: 500 }),
+  issuerTaxId: varchar("issuer_tax_id", { length: 100 }),
+  customerTaxId: varchar("customer_tax_id", { length: 100 }),
+  
   invoiceDate: timestamp("invoice_date").notNull(),
   dueDate: timestamp("due_date").notNull(),
   status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, sent, paid, overdue, cancelled
@@ -374,6 +380,9 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
 }).extend({
   // Explicitly make invoiceNumber optional (server-generated)
   invoiceNumber: z.string().max(100).optional(),
+  invoiceSubject: z.string().max(500).optional(),
+  issuerTaxId: z.string().max(100).optional(),
+  customerTaxId: z.string().max(100).optional(),
 });
 
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
@@ -384,10 +393,22 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   invoiceId: varchar("invoice_id").notNull().references(() => invoices.id),
+  
+  // Item catalog reference
+  itemId: varchar("item_id").references(() => items.id),
+  
   description: text("description").notNull(),
   quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
   unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  
+  // Item-level discount
+  discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
+  
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Item-level tax
+  taxId: varchar("tax_id").references(() => taxes.id),
+  
   accountId: varchar("account_id").references(() => accounts.id),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -395,6 +416,7 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
 export const insertInvoiceLineItemSchema = createInsertSchema(invoiceLineItems, {
   quantity: decimalString,
   unitPrice: decimalString,
+  discount: decimalString,
   amount: decimalString,
 }).omit({
   id: true,

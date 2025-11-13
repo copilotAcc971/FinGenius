@@ -58,6 +58,7 @@ export interface IStorage {
   getTenantsByUserId(userId: string): Promise<Tenant[]>;
   createTenant(tenant: InsertTenant): Promise<Tenant>;
   updateTenant(id: string, userId: string, tenant: Partial<InsertTenant>): Promise<Tenant>;
+  isTenantMember(tenantId: string, userId: string): Promise<boolean>;
 
   // Customer operations
   getCustomersByTenant(tenantId: string): Promise<Customer[]>;
@@ -191,6 +192,21 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tenants.id, id))
       .returning();
     return updatedTenant;
+  }
+
+  async isTenantMember(tenantId: string, userId: string): Promise<boolean> {
+    const [member] = await db
+      .select()
+      .from(tenantMembers)
+      .where(
+        and(
+          eq(tenantMembers.tenantId, tenantId),
+          eq(tenantMembers.userId, userId)
+        )
+      )
+      .limit(1);
+    
+    return !!member;
   }
 
   // Customer operations
@@ -476,6 +492,10 @@ export class DatabaseStorage implements IStorage {
           ...payload.invoice,
           tenantId,
           invoiceNumber,
+          // Ensure new Phase 1-3 fields are persisted
+          invoiceSubject: payload.invoice.invoiceSubject,
+          issuerTaxId: payload.invoice.issuerTaxId,
+          customerTaxId: payload.invoice.customerTaxId,
         })
         .returning();
       
@@ -484,6 +504,10 @@ export class DatabaseStorage implements IStorage {
           ...item,
           invoiceId: invoice.id,
           tenantId,
+          // Ensure new Phase 1-3 fields are persisted
+          itemId: item.itemId,
+          discount: item.discount || "0",
+          taxId: item.taxId,
         }));
         await tx.insert(invoiceLineItems).values(lineItemsWithInvoiceId);
       }
@@ -540,8 +564,12 @@ export class DatabaseStorage implements IStorage {
       const [updatedInvoice] = await tx
         .update(invoices)
         .set({ 
-          ...safeInvoiceData, 
+          ...safeInvoiceData,
           tenantId: existingInvoice.tenantId,
+          // Ensure new Phase 1-3 fields are persisted
+          invoiceSubject: payload.invoice.invoiceSubject,
+          issuerTaxId: payload.invoice.issuerTaxId,
+          customerTaxId: payload.invoice.customerTaxId,
           updatedAt: new Date() 
         })
         .where(eq(invoices.id, id))
@@ -558,6 +586,10 @@ export class DatabaseStorage implements IStorage {
           ...item,
           invoiceId: id,
           tenantId: existingInvoice.tenantId,
+          // Ensure new Phase 1-3 fields are persisted
+          itemId: item.itemId,
+          discount: item.discount || "0",
+          taxId: item.taxId,
         }));
         await tx.insert(invoiceLineItems).values(lineItemsWithInvoiceId);
       }

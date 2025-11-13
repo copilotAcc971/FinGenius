@@ -47,9 +47,15 @@ async function verifyTenantAccess(req: any, res: any, next: any) {
       return res.status(404).json({ message: "Tenant not found" });
     }
 
-    // User must be the owner to access this tenant
-    // In a production app, you'd check tenant_members table for membership
-    if (tenant.ownerId !== userId) {
+    // Check if user is owner
+    if (tenant.ownerId === userId) {
+      req.tenantId = tenantId;
+      return next();
+    }
+
+    // Check if user is a member
+    const isMember = await storage.isTenantMember(tenantId, userId);
+    if (!isMember) {
       return res.status(403).json({ message: "Access denied to this workspace" });
     }
 
