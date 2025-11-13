@@ -136,6 +136,7 @@ export interface IStorage {
   createTenant(tenant: InsertTenant): Promise<Tenant>;
   updateTenant(id: string, userId: string, tenant: Partial<InsertTenant>): Promise<Tenant>;
   isTenantMember(tenantId: string, userId: string): Promise<boolean>;
+  getTenantMembersWithRoles(tenantId: string): Promise<any[]>;
 
   // Company Profile operations
   getCompanyProfile(tenantId: string): Promise<TenantCompanyProfile | null>;
@@ -408,6 +409,39 @@ export class DatabaseStorage implements IStorage {
       .limit(1);
     
     return !!member;
+  }
+
+  async getTenantMembersWithRoles(tenantId: string): Promise<any[]> {
+    const { users, roles, tenantMemberRoles } = await import('@shared/schema');
+    
+    const members = await db
+      .select({
+        id: tenantMembers.id,
+        userId: tenantMembers.userId,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+      })
+      .from(tenantMembers)
+      .leftJoin(users, eq(users.id, tenantMembers.userId))
+      .where(eq(tenantMembers.tenantId, tenantId));
+    
+    const membersWithRoles = await Promise.all(
+      members.map(async (member) => {
+        const roleAssignments = await db
+          .select({ role: roles })
+          .from(tenantMemberRoles)
+          .leftJoin(roles, eq(roles.id, tenantMemberRoles.roleId))
+          .where(eq(tenantMemberRoles.tenantMemberId, member.id));
+        
+        return {
+          ...member,
+          roles: roleAssignments.map(r => r.role).filter(Boolean),
+        };
+      })
+    );
+    
+    return membersWithRoles;
   }
 
   // Company Profile operations

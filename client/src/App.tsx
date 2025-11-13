@@ -9,6 +9,8 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { UserMenu } from "@/components/user-menu";
 import { useAuth } from "@/hooks/useAuth";
 import { TenantProvider } from "@/contexts/TenantContext";
+import { RBACProvider } from "@/contexts/rbac-context";
+import { useTenant } from "@/hooks/useTenant";
 
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
@@ -40,6 +42,8 @@ import FinancialReports from "@/pages/financial-reports";
 import ARAgingReport from "@/pages/ar-aging";
 import APAgingReport from "@/pages/ap-aging";
 import BankConnections from "@/pages/bank-connections";
+import RoleManagement from "@/pages/role-management";
+import UserManagement from "@/pages/user-management";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -78,6 +82,8 @@ function Router() {
           <Route path="/ap-aging" component={APAgingReport} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/settings" component={Settings} />
+          <Route path="/settings/roles" component={RoleManagement} />
+          <Route path="/settings/users" component={UserManagement} />
         </>
       )}
       <Route component={NotFound} />
@@ -87,6 +93,7 @@ function Router() {
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
+  const { currentTenant } = useTenant();
 
   const sidebarStyle = {
     "--sidebar-width": "16rem",
@@ -104,27 +111,29 @@ function AppContent() {
 
   return (
     <>
-      <SidebarProvider style={sidebarStyle as React.CSSProperties}>
-        <div className="flex h-screen w-full">
-          <AppSidebar />
-          <div className="flex flex-col flex-1 overflow-hidden">
-            <header className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background">
-              <div className="flex items-center gap-4">
-                <SidebarTrigger data-testid="button-sidebar-toggle" />
-                <WorkspaceSwitcher />
-              </div>
-              <div className="flex items-center gap-4">
-                <UserMenu />
-              </div>
-            </header>
-            <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
-              <div className="mx-auto max-w-7xl">
-                <Router />
-              </div>
-            </main>
+      <RBACProvider tenantId={currentTenant?.id || null}>
+        <SidebarProvider style={sidebarStyle as React.CSSProperties}>
+          <div className="flex h-screen w-full">
+            <AppSidebar />
+            <div className="flex flex-col flex-1 overflow-hidden">
+              <header className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background">
+                <div className="flex items-center gap-4">
+                  <SidebarTrigger data-testid="button-sidebar-toggle" />
+                  <WorkspaceSwitcher />
+                </div>
+                <div className="flex items-center gap-4">
+                  <UserMenu />
+                </div>
+              </header>
+              <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
+                <div className="mx-auto max-w-7xl">
+                  <Router />
+                </div>
+              </main>
+            </div>
           </div>
-        </div>
-      </SidebarProvider>
+        </SidebarProvider>
+      </RBACProvider>
       <Toaster />
     </>
   );

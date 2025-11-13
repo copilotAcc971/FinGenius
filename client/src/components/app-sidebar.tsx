@@ -18,6 +18,8 @@ import {
   TrendingUp,
   Clock,
   Landmark,
+  Shield,
+  UserCog,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,6 +34,7 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Link, useLocation } from "wouter";
+import { useRBAC } from "@/contexts/rbac-context";
 
 const salesItems = [
   { title: "Invoices", url: "/invoices", icon: FileText },
@@ -75,8 +78,14 @@ const otherItems = [
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
+const adminItems = [
+  { title: "Role Management", url: "/settings/roles", icon: Shield },
+  { title: "User Management", url: "/settings/users", icon: UserCog },
+];
+
 export function AppSidebar() {
   const [location] = useLocation();
+  const { hasAnyPermission, hasPermission, isLoading } = useRBAC();
 
   return (
     <Sidebar>
@@ -193,6 +202,26 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {!isLoading && hasPermission('users.manage_roles') && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Administration</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {adminItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={location === item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
+                      <Link href={item.url}>
+                        <item.icon className="h-5 w-5" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter className="p-4 border-t">
         <div className="text-xs text-muted-foreground">

@@ -350,6 +350,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get current user's permissions
+  app.get('/api/rbac/permissions/me', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      res.json({ permissions: req.permissions || [] });
+    } catch (error) {
+      console.error("Error fetching user permissions:", error);
+      res.status(500).json({ message: "Failed to fetch user permissions" });
+    }
+  });
+
+  // Get current user's roles
+  app.get('/api/rbac/roles/me', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      res.json({ roles: req.roles || [] });
+    } catch (error) {
+      console.error("Error fetching user roles:", error);
+      res.status(500).json({ message: "Failed to fetch user roles" });
+    }
+  });
+
+  // Get all members for tenant with their roles
+  app.get('/api/tenants/members', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const members = await storage.getTenantMembersWithRoles(req.tenantId);
+      res.json(members);
+    } catch (error) {
+      console.error("Error fetching tenant members:", error);
+      res.status(500).json({ message: "Failed to fetch tenant members" });
+    }
+  });
+
   // Customer routes
   app.get('/api/customers', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('customers.read'), async (req: any, res) => {
     try {
