@@ -39,8 +39,9 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { useTenant } from "@/hooks/useTenant";
-import { Plus, Trash2, Loader2, Upload, X, Sparkles } from "lucide-react";
+import { Plus, Trash2, Loader2, Upload, X, Sparkles, Tag } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 
 const safeParseFloat = (value: string | number | null | undefined): number => {
   if (value === '' || value === null || value === undefined) return 0;
@@ -91,6 +92,11 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
   const { currentTenant } = useTenant();
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [extractedCategories, setExtractedCategories] = useState<{
+    primaryCategory?: string;
+    suggestedCategories?: string[];
+    lineItemCategories?: Map<number, string>;
+  }>({});
 
   const { data: vendors = [] } = useQuery<Vendor[]>({
     queryKey: ["/api/vendors", currentTenant?.id],
@@ -285,6 +291,20 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
         extractedData.vendorName.toLowerCase().includes(v.name.toLowerCase())
       );
 
+      // Store extracted categories for display
+      const lineItemCategories = new Map<number, string>();
+      extractedData.lineItems.forEach((item: any, index: number) => {
+        if (item.suggestedCategory) {
+          lineItemCategories.set(index, item.suggestedCategory);
+        }
+      });
+
+      setExtractedCategories({
+        primaryCategory: extractedData.primaryCategory,
+        suggestedCategories: extractedData.suggestedCategories,
+        lineItemCategories,
+      });
+
       // Auto-fill form with extracted data
       form.setValue('bill.vendorId', vendor?.id || '', { shouldValidate: false });
       form.setValue('bill.billNumber', extractedData.billNumber || '', { shouldValidate: false });
@@ -299,6 +319,8 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
         quantity: number;
         unitPrice: number;
         amount: number;
+        suggestedCategory?: string;
+        suggestedAccountType?: string;
       }) => ({
         description: item.description,
         quantity: item.quantity.toString(),
@@ -307,8 +329,8 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
       })), { shouldValidate: false });
 
       toast({
-        title: "Data extracted successfully",
-        description: "Please review and adjust the extracted data before saving.",
+        title: "✨ Data extracted successfully",
+        description: `Classified as "${extractedData.primaryCategory}". ${extractedData.lineItems.length} line items extracted with AI categorization.`,
       });
     } catch (error: any) {
       toast({
@@ -464,6 +486,23 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
               </div>
             )}
 
+            {extractedCategories.primaryCategory && (
+              <Alert className="bg-primary/5 border-primary/20">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <AlertDescription className="flex items-center gap-2">
+                  <span className="font-medium">AI Classification:</span>
+                  <Badge variant="default" data-testid="badge-primary-category">
+                    {extractedCategories.primaryCategory}
+                  </Badge>
+                  {extractedCategories.suggestedCategories && extractedCategories.suggestedCategories.length > 1 && (
+                    <span className="text-xs text-muted-foreground">
+                      +{extractedCategories.suggestedCategories.length - 1} more
+                    </span>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -596,26 +635,41 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
                 </Button>
               </div>
 
-              {fields.map((field, index) => (
-                <div key={field.id} className="grid grid-cols-12 gap-2 items-start border-b pb-4">
-                  <div className="col-span-5">
-                    <FormField
-                      control={form.control}
-                      name={`lineItems.${index}.description`}
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormControl>
-                            <Input 
-                              {...field} 
-                              placeholder="Description"
-                              data-testid={`input-line-item-description-${index}`}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
+              {fields.map((field, index) => {
+                const suggestedCategory = extractedCategories.lineItemCategories?.get(index);
+                
+                return (
+                  <div key={field.id} className="grid grid-cols-12 gap-2 items-start border-b pb-4">
+                    <div className="col-span-5">
+                      <FormField
+                        control={form.control}
+                        name={`lineItems.${index}.description`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormControl>
+                              <Input 
+                                {...field} 
+                                placeholder="Description"
+                                data-testid={`input-line-item-description-${index}`}
+                              />
+                            </FormControl>
+                            {suggestedCategory && (
+                              <div className="flex items-center gap-1 mt-1">
+                                <Tag className="h-3 w-3 text-muted-foreground" />
+                                <Badge 
+                                  variant="secondary" 
+                                  className="text-xs"
+                                  data-testid={`badge-category-${index}`}
+                                >
+                                  {suggestedCategory}
+                                </Badge>
+                              </div>
+                            )}
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
 
                   <div className="col-span-2">
                     <FormField
@@ -688,7 +742,8 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
