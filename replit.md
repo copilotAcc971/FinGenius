@@ -66,6 +66,25 @@ Building a comprehensive accounting application that matches Zoho Books function
   - UI with list, create/edit dialog, balance display
   - Status workflow: draft → sent → paid → partially_applied → fully_applied
 
+### Phase 4: Bills & AI Document Extraction - COMPLETED ✅
+- ✅ Bills Module - PRODUCTION READY
+  - Full CRUD API with multi-tenant security and financial integrity
+  - AI-powered document data extraction using OpenAI GPT-5 with vision
+  - Embedded file upload with AI extraction in bill dialog
+  - Auto-numbering (BILL-0001)
+  - Server-side financial calculations (line items, totals, tax)
+  - Multi-tenant isolation: tenantId ALWAYS stripped from payload, forced from parameter
+  - Security hardening: Bills and line items inject server tenantId on create/update
+  - GET line-items verifies bill ownership before returning data
+  - UI with list, create/edit dialog with AI document uploader
+  - Status workflow: draft → pending_approval → approved → paid
+- ✅ Vendor Dialog Enhanced
+  - Redesigned to match customer dialog structure
+  - Three tabs: Basic Details, Payment Info, Additional
+  - Tax Registration Number (TRN) field added
+  - Payment terms and banking information
+  - Multi-currency support
+
 ## Architecture Notes
 
 ### Multi-Tenant Security Pattern
@@ -74,6 +93,18 @@ Building a comprehensive accounting application that matches Zoho Books function
 - tenantId sent as query parameter: `?tenantId=xxx`
 - Database queries filtered by tenantId
 - **CRITICAL**: Backend NEVER trusts client-provided tenantId - always uses req.tenantId from middleware
+- **CRITICAL STORAGE PATTERN**: Strip tenantId from ALL payload data before spreading
+  ```typescript
+  // SECURITY: Strip tenantId from payload, FORCE server tenantId
+  const { tenantId: _, ...safeData } = payload;
+  const entity = {
+    ...safeData,
+    tenantId: tenantId, // FORCE from parameter
+  };
+  ```
+  - Applied to ALL entities: bills, line items, quotes, invoices, etc.
+  - Prevents accidental tenantId injection from client
+  - Ensures TypeScript catches missing tenantId (fail-safe)
 
 ### Financial Integrity Pattern (Quotes & Sales Orders)
 - **Server-Side Line Item Calculation**: amount = (quantity × unitPrice) - discount
@@ -125,6 +156,10 @@ Building a comprehensive accounting application that matches Zoho Books function
 - `recurring_invoices` + `recurring_invoice_line_items` (templates with REC-XXXX numbering)
 - `retainer_invoices` + `retainer_invoice_line_items` (retainers with RET-XXXX numbering)
 
+### Bills & Expenses Tables
+- `bills` + `bill_line_items` (vendor invoices with BILL-XXXX numbering)
+- `expenses` (expense tracking linked to bills or standalone)
+
 ### Key Foreign Keys
 - invoices.customerId → customers.id
 - invoices.tenantId → workspaces.id
@@ -147,8 +182,15 @@ Building a comprehensive accounting application that matches Zoho Books function
 - **UI**: Send Email button, status badges, proper loading/error states
 - **Production-Ready**: Architect approved (Nov 13, 2025)
 
-### AI Integration
-- OpenAI API key configured (for future document data extraction)
+### AI Integration - PRODUCTION READY
+- **OpenAI GPT-5** with vision support for bill document extraction
+- **AI Service**: server/ai-bill-extractor.ts
+- **Features**:
+  - Base64 image input via image_url content type
+  - Structured JSON output with response_format
+  - Extracts: vendor name, bill number, date, items, quantities, prices, totals
+  - Error handling and validation
+  - Embedded in bill dialog for seamless UX
 
 ### Payment Integration
 - Stripe configured (for vendor payments via Stripe Connect)
