@@ -1,4 +1,4 @@
-import { db } from '@db';
+import { db } from '../db';
 import { eq, and } from 'drizzle-orm';
 import { 
   openBankingConnections, 
@@ -151,12 +151,16 @@ export class OpenBankingService {
 
       console.log(`[OpenBankingService] Connection ${connectionId} refreshed successfully`);
     } catch (error) {
-      console.error('[OpenBankingService] Failed to refresh connection:', error);
+      const newSyncErrorCount = (connection?.syncErrors || 0) + 1;
+      console.error(
+        `[OpenBankingService] Failed to refresh connection ${connectionId} (sync error count: ${newSyncErrorCount}):`,
+        error
+      );
 
       await db
         .update(openBankingConnections)
         .set({
-          syncErrors: (connection?.syncErrors || 0) + 1,
+          syncErrors: newSyncErrorCount,
           lastSyncError: error instanceof Error ? error.message : 'Unknown error',
           updatedAt: new Date(),
         })

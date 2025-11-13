@@ -8,6 +8,12 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
 import googleDriveRoutes from "./google-drive-routes";
+import { OpenBankingService } from './open-banking';
+import { openBankingProviderFactory } from './open-banking/providers';
+import { db } from './db';
+import { eq, and } from 'drizzle-orm';
+import jwt from 'jsonwebtoken';
+import { randomBytes } from 'crypto';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -43,6 +49,10 @@ import {
   insertAssetSchema,
   insertBankReconciliationSchema,
   bankReconciliationPayloadSchema,
+  openBankingConnections,
+  bankAccounts,
+  customers,
+  vendors,
 } from "@shared/schema";
 
 // Initialize Stripe and OpenAI only if credentials are available
@@ -2844,6 +2854,467 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error generating AP aging report:", error);
       res.status(500).json({ message: "Failed to generate AP aging report" });
+    }
+  });
+
+  // ============================================================================
+  // OPEN BANKING ROUTES
+  // ============================================================================
+
+  // GET /api/open-banking/lean/authorize
+  // Generate authorization URL for bank connection
+  app.get('/api/open-banking/lean/authorize', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { entityType, entityId } = req.query;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      const clientIp = req.ip || req.connection.remoteAddress;
+
+      // Validate required parameters
+      if (!entityType || !entityId) {
+        console.log('[Open Banking] Authorization attempt failed: Missing parameters', {
+          tenantId,
+          userId,
+          clientIp,
+        });
+        return res.status(400).json({ 
+          message: "Missing required parameters: entityType and entityId" 
+        });
+      }
+
+      // Validate entityType
+      if (!['customer', 'vendor'].includes(entityType as string)) {
+        console.log('[Open Banking] Authorization attempt failed: Invalid entityType', {
+          tenantId,
+          userId,
+          entityType,
+          clientIp,
+        });
+        return res.status(400).json({ 
+          message: "Invalid entityType. Must be 'customer' or 'vendor'" 
+        });
+      }
+
+      // SECURITY: Verify entity ownership before generating auth URL
+      if (entityType === 'customer') {
+        const customer = await db.select().from(customers)
+          .where(and(eq(customers.id, entityId as string), eq(customers.tenantId, tenantId)))
+          .limit(1);
+        if (!customer[0]) {
+          console.log('[Open Banking] Authorization attempt failed: Customer not found or access denied', {
+            tenantId,
+            userId,
+            entityType,
+            entityId,
+            clientIp,
+          });
+          return res.status(403).json({ message: 'Entity not found or access denied' });
+        }
+      } else if (entityType === 'vendor') {
+        const vendor = await db.select().from(vendors)
+          .where(and(eq(vendors.id, entityId as string), eq(vendors.tenantId, tenantId)))
+          .limit(1);
+        if (!vendor[0]) {
+          console.log('[Open Banking] Authorization attempt failed: Vendor not found or access denied', {
+            tenantId,
+            userId,
+            entityType,
+            entityId,
+            clientIp,
+          });
+          return res.status(403).json({ message: 'Entity not found or access denied' });
+        }
+      }
+
+      // SECURITY: Generate cryptographically secure state using JWT
+      const nonce = randomBytes(32).toString('hex');
+      const statePayload = {
+        nonce,
+        tenantId,
+        entityType,
+        entityId,
+        exp: Math.floor(Date.now() / 1000) + 600 // 10 minute expiry
+      };
+      const state = jwt.sign(statePayload, process.env.SESSION_SECRET!);
+
+      // Construct redirect URI using environment-aware URL
+      const baseUrl = process.env.REPLIT_DOMAINS?.split(',')[0] 
+        ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}`
+        : 'http://localhost:5000';
+      const redirectUri = `${baseUrl}/api/open-banking/lean/callback`;
+
+      // Create Lean provider and get authorization URL
+      const provider = openBankingProviderFactory.createProvider('lean');
+      const authorizationUrl = provider.getAuthorizationUrl(redirectUri, state);
+
+      console.log('[Open Banking] Authorization URL generated successfully', {
+        tenantId,
+        userId,
+        entityType,
+        entityId,
+        provider: 'lean',
+        clientIp,
+      });
+
+      res.json({ authorizationUrl });
+    } catch (error: any) {
+      console.error('[Open Banking] Error generating authorization URL:', error);
+      res.status(500).json({ 
+        message: "Failed to generate authorization URL",
+      });
+    }
+  });
+
+  // GET /api/open-banking/lean/callback
+  // Handle OAuth callback and create bank connection
+  // NOTE: This route is intentionally UNAUTHENTICATED as it receives callbacks from external OAuth providers
+  app.get('/api/open-banking/lean/callback', async (req: any, res) => {
+    const clientIp = req.ip || req.connection.remoteAddress;
+    
+    try {
+      const { code, state } = req.query;
+
+      // Validate required parameters
+      if (!code || !state) {
+        console.log('[Open Banking] Callback failed: Missing parameters', {
+          clientIp,
+        });
+        return res.status(400).json({ 
+          message: "Invalid request" 
+        });
+      }
+
+      // SECURITY: Verify and decode JWT state parameter
+      let statePayload: {
+        nonce: string;
+        tenantId: string;
+        entityType: string;
+        entityId: string;
+        exp: number;
+      };
+
+      try {
+        statePayload = jwt.verify(state as string, process.env.SESSION_SECRET!) as {
+          nonce: string;
+          tenantId: string;
+          entityType: string;
+          entityId: string;
+          exp: number;
+        };
+      } catch (error) {
+        console.log('[Open Banking] Callback failed: Invalid or expired state token', {
+          clientIp,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        return res.status(400).json({ message: 'Invalid or expired state parameter' });
+      }
+
+      // SECURITY: Extract verified tenantId from JWT (NEVER trust query params)
+      const { tenantId, entityType, entityId } = statePayload;
+
+      // Validate tenantId exists in database
+      const tenant = await storage.getTenant(tenantId);
+      if (!tenant) {
+        console.log('[Open Banking] Callback failed: Tenant not found', {
+          tenantId,
+          clientIp,
+        });
+        return res.status(400).json({ 
+          message: "Invalid request" 
+        });
+      }
+
+      // SECURITY: Re-verify entity ownership (defense in depth)
+      if (entityType === 'customer') {
+        const customer = await db.select().from(customers)
+          .where(and(eq(customers.id, entityId), eq(customers.tenantId, tenantId)))
+          .limit(1);
+        if (!customer[0]) {
+          console.log('[Open Banking] Callback failed: Customer validation failed', {
+            tenantId,
+            entityType,
+            entityId,
+            clientIp,
+          });
+          return res.status(403).json({ message: 'Entity validation failed' });
+        }
+      } else if (entityType === 'vendor') {
+        const vendor = await db.select().from(vendors)
+          .where(and(eq(vendors.id, entityId), eq(vendors.tenantId, tenantId)))
+          .limit(1);
+        if (!vendor[0]) {
+          console.log('[Open Banking] Callback failed: Vendor validation failed', {
+            tenantId,
+            entityType,
+            entityId,
+            clientIp,
+          });
+          return res.status(403).json({ message: 'Entity validation failed' });
+        }
+      }
+
+      // Construct redirect URI
+      const baseUrl = process.env.REPLIT_DOMAINS?.split(',')[0] 
+        ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}`
+        : 'http://localhost:5000';
+      const redirectUri = `${baseUrl}/api/open-banking/lean/callback`;
+
+      // Exchange authorization code for tokens
+      const provider = openBankingProviderFactory.createProvider('lean');
+      const tokens = await provider.exchangeCodeForTokens(code as string, redirectUri);
+
+      console.log('[Open Banking] Token exchange successful', {
+        tenantId,
+        entityType,
+        entityId,
+        provider: 'lean',
+        clientIp,
+      });
+
+      // Create OpenBankingService instance for this tenant
+      const openBankingService = new OpenBankingService(tenantId);
+
+      // Initiate connection in database
+      const connection = await openBankingService.initiateConnection(
+        'lean',
+        entityId,
+        entityId, // Use entityId as customerId for now
+        tokens.accessToken,
+        tokens.refreshToken,
+        tokens.expiresIn,
+        undefined, // bankIdentifier - will be set when fetching accounts
+        undefined, // bankName
+        undefined, // accountType
+        undefined, // accountMask
+        ['accounts', 'transactions', 'payments', 'identity'] // Default permissions
+      );
+
+      console.log('[Open Banking] Connection created successfully', {
+        connectionId: connection.id,
+        tenantId,
+        provider: 'lean',
+        clientIp,
+      });
+
+      // Fetch bank accounts from provider
+      const accounts = await openBankingService.getAccounts(connection.id);
+
+      console.log('[Open Banking] Accounts fetched successfully', {
+        connectionId: connection.id,
+        accountCount: accounts.length,
+        tenantId,
+        clientIp,
+      });
+
+      // Store bank accounts in database
+      for (const account of accounts) {
+        await db.insert(bankAccounts).values({
+          tenantId,
+          connectionId: connection.id,
+          accountId: account.accountId,
+          accountName: account.accountName,
+          accountType: account.accountType,
+          currency: account.currency,
+          balance: account.balance?.toString(),
+          availableBalance: account.availableBalance?.toString(),
+          status: 'active',
+        });
+      }
+
+      console.log('[Open Banking] Bank accounts stored successfully', {
+        connectionId: connection.id,
+        accountCount: accounts.length,
+        tenantId,
+        clientIp,
+      });
+
+      res.json({ 
+        success: true, 
+        connectionId: connection.id,
+        accountCount: accounts.length 
+      });
+    } catch (error: any) {
+      console.error('[Open Banking] Callback error:', error, {
+        clientIp,
+      });
+      res.status(500).json({ 
+        message: "Failed to process OAuth callback",
+      });
+    }
+  });
+
+  // POST /api/open-banking/connections/:id/refresh
+  // Refresh connection tokens
+  app.post('/api/open-banking/connections/:id/refresh', isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.claims.sub;
+
+      // Fetch connection to get tenantId
+      const [connection] = await db
+        .select()
+        .from(openBankingConnections)
+        .where(eq(openBankingConnections.id, id))
+        .limit(1);
+
+      if (!connection) {
+        return res.status(404).json({ 
+          message: "Connection not found" 
+        });
+      }
+
+      // Verify user has access to this tenant
+      const tenant = await storage.getTenant(connection.tenantId);
+      if (!tenant) {
+        return res.status(404).json({ 
+          message: "Tenant not found" 
+        });
+      }
+
+      // Check if user is owner or member
+      if (tenant.ownerId !== userId) {
+        const isMember = await storage.isTenantMember(connection.tenantId, userId);
+        if (!isMember) {
+          return res.status(403).json({ 
+            message: "Access denied to this connection" 
+          });
+        }
+      }
+
+      // Create service and refresh connection
+      const openBankingService = new OpenBankingService(connection.tenantId);
+      await openBankingService.refreshConnection(id);
+
+      console.log('[Open Banking] Refreshed connection', {
+        connectionId: id,
+        tenantId: connection.tenantId,
+        provider: connection.provider,
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('[Open Banking] Refresh error:', error);
+      res.status(500).json({ 
+        message: "Failed to refresh connection",
+        error: error.message 
+      });
+    }
+  });
+
+  // DELETE /api/open-banking/connections/:id
+  // Disconnect bank connection
+  app.delete('/api/open-banking/connections/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.claims.sub;
+
+      // Fetch connection to get tenantId
+      const [connection] = await db
+        .select()
+        .from(openBankingConnections)
+        .where(eq(openBankingConnections.id, id))
+        .limit(1);
+
+      if (!connection) {
+        return res.status(404).json({ 
+          message: "Connection not found" 
+        });
+      }
+
+      // Verify user has access to this tenant
+      const tenant = await storage.getTenant(connection.tenantId);
+      if (!tenant) {
+        return res.status(404).json({ 
+          message: "Tenant not found" 
+        });
+      }
+
+      // Check if user is owner or member
+      if (tenant.ownerId !== userId) {
+        const isMember = await storage.isTenantMember(connection.tenantId, userId);
+        if (!isMember) {
+          return res.status(403).json({ 
+            message: "Access denied to this connection" 
+          });
+        }
+      }
+
+      // Create service and disconnect connection
+      const openBankingService = new OpenBankingService(connection.tenantId);
+      await openBankingService.disconnectConnection(id);
+
+      console.log('[Open Banking] Disconnected connection', {
+        connectionId: id,
+        tenantId: connection.tenantId,
+        provider: connection.provider,
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('[Open Banking] Disconnect error:', error);
+      res.status(500).json({ 
+        message: "Failed to disconnect connection",
+        error: error.message 
+      });
+    }
+  });
+
+  // GET /api/open-banking/connections/:id/capabilities
+  // Get provider capabilities for a connection
+  app.get('/api/open-banking/connections/:id/capabilities', isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.claims.sub;
+
+      // Fetch connection to get tenantId and provider
+      const [connection] = await db
+        .select()
+        .from(openBankingConnections)
+        .where(eq(openBankingConnections.id, id))
+        .limit(1);
+
+      if (!connection) {
+        return res.status(404).json({ 
+          message: "Connection not found" 
+        });
+      }
+
+      // Verify user has access to this tenant
+      const tenant = await storage.getTenant(connection.tenantId);
+      if (!tenant) {
+        return res.status(404).json({ 
+          message: "Tenant not found" 
+        });
+      }
+
+      // Check if user is owner or member
+      if (tenant.ownerId !== userId) {
+        const isMember = await storage.isTenantMember(connection.tenantId, userId);
+        if (!isMember) {
+          return res.status(403).json({ 
+            message: "Access denied to this connection" 
+          });
+        }
+      }
+
+      // Get provider capabilities
+      const provider = openBankingProviderFactory.createProvider(connection.provider as any);
+      const capabilities = openBankingProviderFactory.getProviderCapabilities(provider);
+
+      console.log('[Open Banking] Retrieved capabilities', {
+        connectionId: id,
+        tenantId: connection.tenantId,
+        provider: connection.provider,
+        capabilities,
+      });
+
+      res.json({ capabilities });
+    } catch (error: any) {
+      console.error('[Open Banking] Get capabilities error:', error);
+      res.status(500).json({ 
+        message: "Failed to get provider capabilities",
+        error: error.message 
+      });
     }
   });
 
