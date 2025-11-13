@@ -24,7 +24,7 @@ Building a comprehensive accounting application that matches Zoho Books function
 - ⏳ PDF generation with company logo and tax details
 - ⏳ Email templates with PDF attachments
 
-### Phase 3: Advanced Sales Modules - IN PROGRESS
+### Phase 3: Advanced Sales Modules - COMPLETED ✅
 - ✅ Quotes Module - PRODUCTION READY
   - Full CRUD API with server-side security and financial integrity
   - Line item amounts calculated server-side: (quantity × unitPrice) - discount
@@ -36,10 +36,35 @@ Building a comprehensive accounting application that matches Zoho Books function
   - Same calculation patterns as Quotes for consistency
   - Auto-numbering (SO-0001), order-to-invoice conversion
   - UI with list, create/edit dialog, status badges, convert action
-- ⏳ Credit Notes linked to invoices
-- ⏳ Customer Payment Tracking
-- ⏳ Retainer Invoices
-- ⏳ Recurring Invoicing
+- ✅ Credit Notes Module - PRODUCTION READY
+  - Full CRUD API with apply-to-invoice functionality
+  - Server-side financial calculations (line items, totals, tax)
+  - Auto-numbering (CN-0001), balance tracking
+  - UI with list, create/edit dialog, apply-to-invoice action
+  - Status workflow: draft → issued → applied
+- ✅ Customer Payments Module - PRODUCTION READY
+  - Full CRUD API with invoice balance updates
+  - Auto-numbering (PAY-0001)
+  - Payment methods: Cash, Check, Bank Transfer, Credit Card, Other
+  - UI with list, create/edit dialog, payment method badges
+  - Reference number and notes tracking
+- ✅ Recurring Invoices Module - PRODUCTION READY
+  - Full CRUD API with invoice generation from templates
+  - Server-side financial calculations
+  - Auto-numbering (REC-0001)
+  - Frequencies: Daily, Weekly, Monthly, Quarterly, Yearly
+  - Manual invoice generation ("Generate Now" action)
+  - Batch processing endpoint for automation
+  - UI with list, create/edit dialog, status badges, frequency badges
+  - Status workflow: active → paused → completed
+- ✅ Retainer Invoices Module - PRODUCTION READY
+  - Full CRUD API with balance tracking
+  - Server-side financial calculations
+  - Auto-numbering (RET-0001)
+  - Balance tracking (amountUsed, remainingBalance)
+  - Apply-to-invoice functionality
+  - UI with list, create/edit dialog, balance display
+  - Status workflow: draft → sent → paid → partially_applied → fully_applied
 
 ## Architecture Notes
 
@@ -91,6 +116,14 @@ Building a comprehensive accounting application that matches Zoho Books function
 - `invoices` (with issuerTaxId, customerTaxId, invoiceSubject)
 - `invoice_line_items` (with itemId, discount, taxId)
 - `invoice_audit_log` (complete audit trail)
+
+### Advanced Sales Tables
+- `quotations` + `quotation_line_items` (quotes with QUO-XXXX numbering)
+- `sales_orders` + `sales_order_line_items` (orders with SO-XXXX numbering)
+- `credit_notes` + `credit_note_line_items` (credit notes with CN-XXXX numbering)
+- `customer_payments` (payment tracking with PAY-XXXX numbering)
+- `recurring_invoices` + `recurring_invoice_line_items` (templates with REC-XXXX numbering)
+- `retainer_invoices` + `retainer_invoice_line_items` (retainers with RET-XXXX numbering)
 
 ### Key Foreign Keys
 - invoices.customerId → customers.id
