@@ -156,25 +156,58 @@ export type Customer = typeof customers.$inferSelect;
 export const vendors = pgTable("vendors", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  
+  // Basic info
   name: varchar("name", { length: 255 }).notNull(),
   email: varchar("email", { length: 255 }),
   phone: varchar("phone", { length: 50 }),
   company: varchar("company", { length: 255 }),
-  address: text("address"),
-  stripeAccountId: varchar("stripe_account_id"), // Vendor's Stripe Connect account for payments
+  
+  // NEW FIELDS for Zoho Books parity (matching customers)
+  displayName: varchar("display_name", { length: 255 }),
+  website: varchar("website", { length: 255 }),
+  customerType: varchar("customer_type", { length: 50 }).default("business"),
+  paymentTerms: integer("payment_terms").default(30),
+  currencyCode: varchar("currency_code", { length: 3 }).default("USD"),
+  
+  // Structured addresses (JSONB) - reuse addressSchema
+  billingAddress: jsonb("billing_address").$type<z.infer<typeof addressSchema>>().default({}),
+  shippingAddress: jsonb("shipping_address").$type<z.infer<typeof addressSchema>>().default({}),
+  contactPersons: jsonb("contact_persons").$type<z.infer<typeof contactPersonSchema>[]>().default([]),
+  
+  // Vendor-specific Stripe fields
+  stripeAccountId: varchar("stripe_account_id"),
   bankAccountLast4: varchar("bank_account_last4", { length: 4 }),
+  
+  // Keep existing fields
+  address: text("address"), // DEPRECATED but keep for backward compatibility
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertVendorSchema = createInsertSchema(vendors).omit({
+export const insertVendorSchema = createInsertSchema(vendors, {
+  billingAddress: addressSchema.optional(),
+  shippingAddress: addressSchema.optional(),
+  contactPersons: z.array(contactPersonSchema).optional(),
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
+export const updateVendorSchema = insertVendorSchema.omit({ tenantId: true }).partial();
+
+export const vendorFormSchema = insertVendorSchema
+  .omit({ tenantId: true })
+  .extend({
+    billingAddress: addressSchema.optional(),
+    shippingAddress: addressSchema.optional(),
+    contactPersons: z.array(contactPersonSchema).optional(),
+  });
+
 export type InsertVendor = z.infer<typeof insertVendorSchema>;
+export type VendorFormValues = z.infer<typeof vendorFormSchema>;
 export type Vendor = typeof vendors.$inferSelect;
 
 // Chart of Accounts
