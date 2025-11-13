@@ -12,6 +12,7 @@ import {
   BarChart3,
   Settings,
   Upload,
+  RefreshCw,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,6 +33,7 @@ const salesItems = [
   { title: "Quotes", url: "/quotes", icon: FileText },
   { title: "Sales Orders", url: "/sales-orders", icon: FileText },
   { title: "Credit Notes", url: "/credit-notes", icon: FileText },
+  { title: "Recurring Invoices", url: "/recurring-invoices", icon: RefreshCw },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Items", url: "/items", icon: Package },
   { title: "Taxes", url: "/taxes", icon: Percent },

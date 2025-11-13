@@ -24,6 +24,8 @@ import {
   creditNoteLineItems,
   customerPayments,
   customerPaymentSequences,
+  recurringInvoices,
+  recurringInvoiceLineItems,
   type User,
   type UpsertUser,
   type Tenant,
@@ -69,6 +71,10 @@ import {
   type InsertCreditNoteLineItem,
   type CustomerPayment,
   type InsertCustomerPayment,
+  type RecurringInvoice,
+  type InsertRecurringInvoice,
+  type RecurringInvoiceLineItem,
+  type InsertRecurringInvoiceLineItem,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull } from "drizzle-orm";
@@ -203,6 +209,16 @@ export interface IStorage {
   updateCustomerPayment(id: string, tenantId: string, payment: Partial<InsertCustomerPayment>): Promise<CustomerPayment>;
   deleteCustomerPayment(id: string, tenantId: string): Promise<void>;
   getNextCustomerPaymentNumber(tenantId: string): Promise<string>;
+
+  // Recurring Invoice operations
+  getRecurringInvoices(tenantId: string): Promise<RecurringInvoice[]>;
+  getRecurringInvoiceById(id: string, tenantId: string): Promise<RecurringInvoice | null>;
+  createRecurringInvoice(data: InsertRecurringInvoice, lineItems: InsertRecurringInvoiceLineItem[]): Promise<RecurringInvoice>;
+  updateRecurringInvoice(id: string, tenantId: string, data: Partial<InsertRecurringInvoice>, lineItems?: InsertRecurringInvoiceLineItem[]): Promise<RecurringInvoice>;
+  deleteRecurringInvoice(id: string, tenantId: string): Promise<void>;
+  getRecurringInvoiceLineItems(recurringInvoiceId: string, tenantId: string): Promise<RecurringInvoiceLineItem[]>;
+  generateInvoiceFromRecurring(recurringId: string, tenantId: string): Promise<Invoice>;
+  processRecurringInvoices(tenantId: string): Promise<Invoice[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2252,6 +2268,371 @@ export class DatabaseStorage implements IStorage {
       return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
     });
   }
+
+  // Recurring Invoice operations
+  async getRecurringInvoices(tenantId: string): Promise<RecurringInvoice[]> {
+    return await db
+      .select()
+      .from(recurringInvoices)
+      .where(and(
+        eq(recurringInvoices.tenantId, tenantId),
+        isNull(recurringInvoices.deletedAt)
+      ))
+      .orderBy(desc(recurringInvoices.createdAt));
+  }
+
+  async getRecurringInvoiceById(id: string, tenantId: string): Promise<RecurringInvoice | null> {
+    const results = await db
+      .select()
+      .from(recurringInvoices)
+      .where(and(
+        eq(recurringInvoices.id, id),
+        eq(recurringInvoices.tenantId, tenantId),
+        isNull(recurringInvoices.deletedAt)
+      ));
+    return results[0] || null;
+  }
+
+  async createRecurringInvoice(data: InsertRecurringInvoice, lineItems: InsertRecurringInvoiceLineItem[]): Promise<RecurringInvoice> {
+    return await db.transaction(async (tx) => {
+      // Generate recurring invoice number
+      const lastRecurring = await tx
+        .select({ recurringInvoiceNumber: recurringInvoices.recurringInvoiceNumber })
+        .from(recurringInvoices)
+        .where(eq(recurringInvoices.tenantId, data.tenantId))
+        .orderBy(desc(recurringInvoices.createdAt))
+        .limit(1);
+      
+      const lastNumber = lastRecurring[0]?.recurringInvoiceNumber;
+      const nextNumber = lastNumber 
+        ? parseInt(lastNumber.replace('REC-', '')) + 1 
+        : 1;
+      const recurringInvoiceNumber = `REC-${nextNumber.toString().padStart(4, '0')}`;
+
+      // Calculate nextInvoiceDate from startDate and frequency
+      const startDate = new Date(data.startDate);
+      let nextInvoiceDate = new Date(startDate);
+      
+      switch (data.frequency) {
+        case 'daily':
+          nextInvoiceDate.setDate(nextInvoiceDate.getDate() + 1);
+          break;
+        case 'weekly':
+          nextInvoiceDate.setDate(nextInvoiceDate.getDate() + 7);
+          break;
+        case 'monthly':
+          nextInvoiceDate.setMonth(nextInvoiceDate.getMonth() + 1);
+          break;
+        case 'quarterly':
+          nextInvoiceDate.setMonth(nextInvoiceDate.getMonth() + 3);
+          break;
+        case 'yearly':
+          nextInvoiceDate.setFullYear(nextInvoiceDate.getFullYear() + 1);
+          break;
+      }
+
+      // Calculate line item amounts server-side
+      const lineItemsWithCalculatedAmounts = lineItems.map(item => {
+        const quantity = parseFloat(item.quantity);
+        const unitPrice = parseFloat(item.unitPrice);
+        const discount = parseFloat(item.discount || "0");
+        const calculatedAmount = (quantity * unitPrice) - discount;
+        
+        return {
+          ...item,
+          amount: calculatedAmount.toFixed(2),
+        };
+      });
+
+      // Calculate totals from line items
+      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+        return sum + parseFloat(item.amount);
+      }, 0);
+
+      // Calculate tax amount
+      let taxAmount = 0;
+      for (const item of lineItemsWithCalculatedAmounts) {
+        if (item.taxId) {
+          const [taxRecord] = await tx
+            .select()
+            .from(taxes)
+            .where(eq(taxes.id, item.taxId))
+            .limit(1);
+          
+          if (taxRecord) {
+            const itemAmount = parseFloat(item.amount);
+            const taxRate = parseFloat(taxRecord.rate);
+            taxAmount += (itemAmount * taxRate) / 100;
+          }
+        }
+      }
+
+      const total = subtotal + taxAmount;
+
+      // Create recurring invoice
+      const [createdRecurring] = await tx
+        .insert(recurringInvoices)
+        .values({
+          ...data,
+          recurringInvoiceNumber,
+          nextInvoiceDate,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
+        })
+        .returning();
+
+      // Insert line items
+      if (lineItemsWithCalculatedAmounts.length > 0) {
+        await tx.insert(recurringInvoiceLineItems).values(
+          lineItemsWithCalculatedAmounts.map(item => ({
+            ...item,
+            tenantId: data.tenantId,
+            recurringInvoiceId: createdRecurring.id,
+          }))
+        );
+      }
+
+      return createdRecurring;
+    });
+  }
+
+  async updateRecurringInvoice(id: string, tenantId: string, data: Partial<InsertRecurringInvoice>, lineItems?: InsertRecurringInvoiceLineItem[]): Promise<RecurringInvoice> {
+    return await db.transaction(async (tx) => {
+      // Verify ownership
+      const existing = await this.getRecurringInvoiceById(id, tenantId);
+      if (!existing) {
+        throw new Error("Recurring invoice not found");
+      }
+
+      let updateData = { ...data };
+
+      // If line items are provided, recalculate totals
+      if (lineItems) {
+        // Delete existing line items
+        await tx
+          .delete(recurringInvoiceLineItems)
+          .where(eq(recurringInvoiceLineItems.recurringInvoiceId, id));
+
+        // Calculate new line item amounts
+        const lineItemsWithCalculatedAmounts = lineItems.map(item => {
+          const quantity = parseFloat(item.quantity);
+          const unitPrice = parseFloat(item.unitPrice);
+          const discount = parseFloat(item.discount || "0");
+          const calculatedAmount = (quantity * unitPrice) - discount;
+          
+          return {
+            ...item,
+            amount: calculatedAmount.toFixed(2),
+          };
+        });
+
+        // Calculate totals
+        const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+          return sum + parseFloat(item.amount);
+        }, 0);
+
+        let taxAmount = 0;
+        for (const item of lineItemsWithCalculatedAmounts) {
+          if (item.taxId) {
+            const [taxRecord] = await tx
+              .select()
+              .from(taxes)
+              .where(eq(taxes.id, item.taxId))
+              .limit(1);
+            
+            if (taxRecord) {
+              const itemAmount = parseFloat(item.amount);
+              const taxRate = parseFloat(taxRecord.rate);
+              taxAmount += (itemAmount * taxRate) / 100;
+            }
+          }
+        }
+
+        const total = subtotal + taxAmount;
+
+        updateData = {
+          ...updateData,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
+        };
+
+        // Insert new line items
+        if (lineItemsWithCalculatedAmounts.length > 0) {
+          await tx.insert(recurringInvoiceLineItems).values(
+            lineItemsWithCalculatedAmounts.map(item => ({
+              ...item,
+              tenantId,
+              recurringInvoiceId: id,
+            }))
+          );
+        }
+      }
+
+      // Update recurring invoice
+      const [updated] = await tx
+        .update(recurringInvoices)
+        .set({
+          ...updateData,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(recurringInvoices.id, id),
+          eq(recurringInvoices.tenantId, tenantId)
+        ))
+        .returning();
+
+      if (!updated) {
+        throw new Error("Failed to update recurring invoice");
+      }
+
+      return updated;
+    });
+  }
+
+  async deleteRecurringInvoice(id: string, tenantId: string): Promise<void> {
+    await db
+      .update(recurringInvoices)
+      .set({ deletedAt: new Date() })
+      .where(and(
+        eq(recurringInvoices.id, id),
+        eq(recurringInvoices.tenantId, tenantId)
+      ));
+  }
+
+  async getRecurringInvoiceLineItems(recurringInvoiceId: string, tenantId: string): Promise<RecurringInvoiceLineItem[]> {
+    return await db
+      .select()
+      .from(recurringInvoiceLineItems)
+      .where(and(
+        eq(recurringInvoiceLineItems.recurringInvoiceId, recurringInvoiceId),
+        eq(recurringInvoiceLineItems.tenantId, tenantId)
+      ));
+  }
+
+  async generateInvoiceFromRecurring(recurringId: string, tenantId: string): Promise<Invoice> {
+    return await db.transaction(async (tx) => {
+      // Get recurring invoice
+      const recurring = await this.getRecurringInvoiceById(recurringId, tenantId);
+      if (!recurring) {
+        throw new Error("Recurring invoice not found");
+      }
+
+      // Get line items
+      const lineItems = await this.getRecurringInvoiceLineItems(recurringId, tenantId);
+
+      // Generate new invoice number
+      const invoiceNumber = await this.getNextInvoiceNumber(tenantId);
+
+      // Create invoice
+      const invoiceData: InsertInvoice = {
+        tenantId,
+        customerId: recurring.customerId,
+        invoiceNumber,
+        invoiceDate: new Date(),
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+        status: "draft",
+        subtotal: recurring.subtotal,
+        taxAmount: recurring.taxAmount,
+        total: recurring.total,
+        invoiceSubject: recurring.invoiceSubject || undefined,
+        notes: recurring.notes || undefined,
+        issuerTaxId: recurring.issuerTaxId || undefined,
+        customerTaxId: recurring.customerTaxId || undefined,
+      };
+
+      const [createdInvoice] = await tx
+        .insert(invoices)
+        .values(invoiceData)
+        .returning();
+
+      // Copy line items
+      if (lineItems.length > 0) {
+        await tx.insert(invoiceLineItems).values(
+          lineItems.map(item => ({
+            tenantId,
+            invoiceId: createdInvoice.id,
+            itemId: item.itemId || undefined,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discount: item.discount || "0",
+            amount: item.amount,
+            taxId: item.taxId || undefined,
+          }))
+        );
+      }
+
+      // Update recurring invoice nextInvoiceDate
+      const currentNext = new Date(recurring.nextInvoiceDate);
+      let newNextDate = new Date(currentNext);
+      
+      switch (recurring.frequency) {
+        case 'daily':
+          newNextDate.setDate(newNextDate.getDate() + 1);
+          break;
+        case 'weekly':
+          newNextDate.setDate(newNextDate.getDate() + 7);
+          break;
+        case 'monthly':
+          newNextDate.setMonth(newNextDate.getMonth() + 1);
+          break;
+        case 'quarterly':
+          newNextDate.setMonth(newNextDate.getMonth() + 3);
+          break;
+        case 'yearly':
+          newNextDate.setFullYear(newNextDate.getFullYear() + 1);
+          break;
+      }
+
+      // Check if we should mark as completed
+      let newStatus = recurring.status;
+      if (recurring.endDate && newNextDate > new Date(recurring.endDate)) {
+        newStatus = 'completed';
+      }
+
+      await tx
+        .update(recurringInvoices)
+        .set({
+          nextInvoiceDate: newNextDate,
+          lastInvoiceId: createdInvoice.id,
+          lastInvoiceDate: new Date(),
+          status: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(recurringInvoices.id, recurringId));
+
+      return createdInvoice;
+    });
+  }
+
+  async processRecurringInvoices(tenantId: string): Promise<Invoice[]> {
+    const recurringList = await db
+      .select()
+      .from(recurringInvoices)
+      .where(and(
+        eq(recurringInvoices.tenantId, tenantId),
+        eq(recurringInvoices.status, 'active'),
+        isNull(recurringInvoices.deletedAt)
+      ));
+
+    const createdInvoices: Invoice[] = [];
+    const now = new Date();
+
+    for (const recurring of recurringList) {
+      if (new Date(recurring.nextInvoiceDate) <= now) {
+        try {
+          const invoice = await this.generateInvoiceFromRecurring(recurring.id, tenantId);
+          createdInvoices.push(invoice);
+        } catch (error) {
+          console.error(`Failed to generate invoice from recurring ${recurring.id}:`, error);
+        }
+      }
+    }
+
+    return createdInvoices;
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -3062,6 +3443,39 @@ export class MemStorage implements IStorage {
     const next = current + 1;
     this.customerPaymentSequenceCounters.set(tenantId, next);
     return `PAY-${String(next).padStart(4, '0')}`;
+  }
+
+  // Recurring Invoice operations
+  async getRecurringInvoices(tenantId: string): Promise<RecurringInvoice[]> {
+    throw new Error('Recurring invoices not implemented in MemStorage');
+  }
+
+  async getRecurringInvoiceById(id: string, tenantId: string): Promise<RecurringInvoice | null> {
+    throw new Error('Recurring invoices not implemented in MemStorage');
+  }
+
+  async createRecurringInvoice(data: InsertRecurringInvoice, lineItems: InsertRecurringInvoiceLineItem[]): Promise<RecurringInvoice> {
+    throw new Error('Recurring invoices not implemented in MemStorage');
+  }
+
+  async updateRecurringInvoice(id: string, tenantId: string, data: Partial<InsertRecurringInvoice>, lineItems?: InsertRecurringInvoiceLineItem[]): Promise<RecurringInvoice> {
+    throw new Error('Recurring invoices not implemented in MemStorage');
+  }
+
+  async deleteRecurringInvoice(id: string, tenantId: string): Promise<void> {
+    throw new Error('Recurring invoices not implemented in MemStorage');
+  }
+
+  async getRecurringInvoiceLineItems(recurringInvoiceId: string, tenantId: string): Promise<RecurringInvoiceLineItem[]> {
+    throw new Error('Recurring invoices not implemented in MemStorage');
+  }
+
+  async generateInvoiceFromRecurring(recurringId: string, tenantId: string): Promise<Invoice> {
+    throw new Error('Recurring invoices not implemented in MemStorage');
+  }
+
+  async processRecurringInvoices(tenantId: string): Promise<Invoice[]> {
+    throw new Error('Recurring invoices not implemented in MemStorage');
   }
 }
 

@@ -31,6 +31,8 @@ import {
   insertCreditNoteSchema,
   insertCreditNoteLineItemSchema,
   insertCustomerPaymentSchema,
+  insertRecurringInvoiceSchema,
+  insertRecurringInvoiceLineItemSchema,
 } from "@shared/schema";
 
 // Initialize Stripe and OpenAI only if credentials are available
@@ -1584,6 +1586,135 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Payment deleted" });
     } catch (error: any) {
       console.error('Error deleting customer payment:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Recurring Invoice routes
+  app.get("/api/recurring-invoices", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const recurringInvoices = await storage.getRecurringInvoices(tenantId);
+      res.json(recurringInvoices);
+    } catch (error: any) {
+      console.error('Error fetching recurring invoices:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/recurring-invoices/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const recurringInvoice = await storage.getRecurringInvoiceById(id, tenantId);
+      if (!recurringInvoice) {
+        return res.status(404).json({ message: "Recurring invoice not found" });
+      }
+      res.json(recurringInvoice);
+    } catch (error: any) {
+      console.error('Error fetching recurring invoice:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/recurring-invoices/:id/line-items", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const lineItems = await storage.getRecurringInvoiceLineItems(id, tenantId);
+      res.json(lineItems);
+    } catch (error: any) {
+      console.error('Error fetching recurring invoice line items:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/recurring-invoices", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { lineItems, ...recurringData } = req.body;
+      
+      // Validate recurring invoice data
+      const validatedData = insertRecurringInvoiceSchema.parse({ ...recurringData, tenantId });
+      
+      // Validate line items
+      const validatedLineItems = lineItems.map((item: any) => 
+        insertRecurringInvoiceLineItemSchema.parse(item)
+      );
+      
+      const recurringInvoice = await storage.createRecurringInvoice(validatedData, validatedLineItems);
+      res.status(201).json(recurringInvoice);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error creating recurring invoice:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/recurring-invoices/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const { lineItems, ...recurringData } = req.body;
+      
+      // Validate data
+      const partialSchema = insertRecurringInvoiceSchema.partial();
+      const validatedData = partialSchema.parse(recurringData);
+      
+      let validatedLineItems;
+      if (lineItems) {
+        validatedLineItems = lineItems.map((item: any) => 
+          insertRecurringInvoiceLineItemSchema.parse(item)
+        );
+      }
+      
+      const updated = await storage.updateRecurringInvoice(id, tenantId, validatedData, validatedLineItems);
+      res.json(updated);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error updating recurring invoice:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/recurring-invoices/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deleteRecurringInvoice(id, tenantId);
+      res.json({ message: "Recurring invoice deleted" });
+    } catch (error: any) {
+      console.error('Error deleting recurring invoice:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/recurring-invoices/:id/generate", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const invoice = await storage.generateInvoiceFromRecurring(id, tenantId);
+      res.status(201).json(invoice);
+    } catch (error: any) {
+      console.error('Error generating invoice from recurring:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/recurring-invoices/process", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const invoices = await storage.processRecurringInvoices(tenantId);
+      res.json({ 
+        message: `Generated ${invoices.length} invoice(s) from recurring templates`,
+        invoices 
+      });
+    } catch (error: any) {
+      console.error('Error processing recurring invoices:', error);
       res.status(500).json({ message: error.message });
     }
   });

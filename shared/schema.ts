@@ -943,28 +943,40 @@ export const recurringInvoices = pgTable("recurring_invoices", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   customerId: varchar("customer_id").notNull().references(() => customers.id),
-  profileName: varchar("profile_name", { length: 255 }).notNull(),
+  recurringInvoiceNumber: varchar("recurring_invoice_number", { length: 50 }).notNull(),
   
+  // Frequency settings
   frequency: varchar("frequency", { length: 50 }).notNull(), // daily, weekly, monthly, quarterly, yearly
   startDate: timestamp("start_date").notNull(),
-  endDate: timestamp("end_date"),
+  endDate: timestamp("end_date"), // nullable for indefinite recurring
   nextInvoiceDate: timestamp("next_invoice_date").notNull(),
   
-  status: varchar("status", { length: 50 }).notNull().default("active"), // active, paused, stopped
-  
   // Invoice template data
-  invoiceSubject: varchar("invoice_subject", { length: 500 }),
-  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
-  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
-  total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  issuerTaxId: varchar("issuer_tax_id", { length: 100 }),
+  customerTaxId: varchar("customer_tax_id", { length: 100 }),
+  invoiceSubject: text("invoice_subject"),
   notes: text("notes"),
+  terms: text("terms"),
   
+  // Calculated fields (recalculated server-side)
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
+  
+  // Status
+  status: varchar("status", { length: 50 }).notNull().default("active"), // active, paused, completed
+  
+  // Tracking
   lastInvoiceId: varchar("last_invoice_id").references(() => invoices.id),
   lastInvoiceDate: timestamp("last_invoice_date"),
   
+  // Audit
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  unique("unique_recurring_invoice_number_tenant").on(table.tenantId, table.recurringInvoiceNumber),
+]);
 
 export const insertRecurringInvoiceSchema = createInsertSchema(recurringInvoices, {
   subtotal: decimalString,
@@ -974,6 +986,9 @@ export const insertRecurringInvoiceSchema = createInsertSchema(recurringInvoices
   id: true,
   createdAt: true,
   updatedAt: true,
+  deletedAt: true,
+  recurringInvoiceNumber: true, // Auto-generated
+  nextInvoiceDate: true, // Calculated from startDate + frequency
   lastInvoiceId: true,
   lastInvoiceDate: true,
 });
@@ -1003,6 +1018,8 @@ export const insertRecurringInvoiceLineItemSchema = createInsertSchema(recurring
   amount: decimalString,
 }).omit({
   id: true,
+  tenantId: true,
+  recurringInvoiceId: true,
   createdAt: true,
 });
 
