@@ -1853,8 +1853,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/bills', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
+      
+      // Parse body WITHOUT tenantId
       const validated = billPayloadSchema.parse(req.body);
-      const bill = await storage.createBillWithItems(validated);
+      
+      // Inject server tenantId into bill data (NEVER trust client)
+      const billWithTenant = {
+        ...validated,
+        bill: {
+          ...validated.bill,
+          tenantId: tenantId,
+        }
+      };
+      
+      // Also inject tenantId into line items
+      const lineItemsWithTenant = validated.lineItems.map(item => ({
+        ...item,
+        tenantId: tenantId,
+      }));
+      
+      const payload = {
+        bill: billWithTenant.bill,
+        lineItems: lineItemsWithTenant,
+      };
+      
+      const bill = await storage.createBillWithItems(payload, tenantId);
       res.status(201).json(bill);
     } catch (error: any) {
       console.error("Error creating bill:", error);
@@ -1869,8 +1892,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
+      
+      // Parse body WITHOUT trusting tenantId
       const validated = billPayloadSchema.parse(req.body);
-      const bill = await storage.updateBillWithItems(id, tenantId, validated);
+      
+      // Force server tenantId (same pattern as POST)
+      const billWithTenant = {
+        ...validated,
+        bill: {
+          ...validated.bill,
+          tenantId: tenantId,
+        }
+      };
+      
+      const lineItemsWithTenant = validated.lineItems.map(item => ({
+        ...item,
+        tenantId: tenantId,
+      }));
+      
+      const payload = {
+        bill: billWithTenant.bill,
+        lineItems: lineItemsWithTenant,
+      };
+      
+      const bill = await storage.updateBillWithItems(id, tenantId, payload);
       res.json(bill);
     } catch (error: any) {
       console.error("Error updating bill:", error);
@@ -1896,6 +1941,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/bills/:id/line-items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
       const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // SECURITY: Verify bill belongs to this tenant before returning line items
+      const bill = await storage.getBillById(id, tenantId);
+      if (!bill) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+      
       const lineItems = await storage.getBillLineItems(id);
       res.json(lineItems);
     } catch (error) {

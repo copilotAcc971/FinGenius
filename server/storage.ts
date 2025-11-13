@@ -162,7 +162,7 @@ export interface IStorage {
   getBill(id: string): Promise<Bill | undefined>;
   getBillById(id: string, tenantId: string): Promise<Bill | null>;
   getBillLineItems(billId: string): Promise<BillLineItem[]>;
-  createBillWithItems(payload: BillPayload): Promise<Bill>;
+  createBillWithItems(payload: BillPayload, tenantId: string): Promise<Bill>;
   updateBillWithItems(id: string, tenantId: string, payload: BillPayload): Promise<Bill>;
   deleteBill(id: string, tenantId: string): Promise<void>;
 
@@ -912,12 +912,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(billLineItems.billId, billId));
   }
 
-  async createBillWithItems(payload: BillPayload): Promise<Bill> {
+  async createBillWithItems(payload: BillPayload, tenantId: string): Promise<Bill> {
     return await db.transaction(async (tx) => {
       const vendor = await tx.select().from(vendors)
         .where(and(
           eq(vendors.id, payload.bill.vendorId),
-          eq(vendors.tenantId, payload.bill.tenantId)
+          eq(vendors.tenantId, tenantId)
         ))
         .limit(1);
       
@@ -925,65 +925,75 @@ export class DatabaseStorage implements IStorage {
         throw new Error("Vendor not found or doesn't belong to this tenant");
       }
 
-      // Auto-generate bill number if not provided (BILL-0001 format)
-      let billNumber = payload.bill.billNumber;
-      if (!billNumber) {
-        const lastBill = await tx
-          .select({ billNumber: bills.billNumber })
-          .from(bills)
-          .where(eq(bills.tenantId, payload.bill.tenantId))
-          .orderBy(desc(bills.createdAt))
-          .limit(1);
+      // Auto-generate bill number
+      const lastBill = await tx
+        .select({ billNumber: bills.billNumber })
+        .from(bills)
+        .where(eq(bills.tenantId, tenantId))
+        .orderBy(desc(bills.billNumber))
+        .limit(1);
+      
+      const nextNumber = lastBill.length > 0 
+        ? parseInt(lastBill[0].billNumber.split('-')[1]) + 1 
+        : 1;
+      const billNumber = `BILL-${String(nextNumber).padStart(4, '0')}`;
+      
+      // SERVER-SIDE CALCULATIONS - NEVER trust client totals
+      let subtotal = 0;
+      let taxAmount = 0;
+      
+      // Calculate from line items
+      for (const item of payload.lineItems) {
+        const lineAmount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        subtotal += lineAmount;
         
-        const lastNumber = lastBill[0]?.billNumber;
-        const nextNumber = lastNumber 
-          ? parseInt(lastNumber.replace('BILL-', '')) + 1 
-          : 1;
-        billNumber = `BILL-${nextNumber.toString().padStart(4, '0')}`;
+        // Fetch tax rate from database if taxId provided
+        if (item.taxId) {
+          const [taxRecord] = await tx
+            .select()
+            .from(taxes)
+            .where(eq(taxes.id, item.taxId))
+            .limit(1);
+          
+          if (taxRecord) {
+            const taxRate = parseFloat(taxRecord.rate);
+            taxAmount += (lineAmount * taxRate / 100);
+          }
+        }
       }
-
-      // Server-side calculation: Calculate each line item's amount
-      const lineItemsWithCalculatedAmounts = payload.lineItems.map(item => {
-        const quantity = parseFloat(item.quantity);
-        const unitPrice = parseFloat(item.unitPrice);
-        const calculatedAmount = quantity * unitPrice;
-        
-        return {
-          ...item,
-          amount: calculatedAmount.toFixed(2),
-        };
-      });
-
-      // Calculate subtotal from calculated amounts
-      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
-        return sum + parseFloat(item.amount);
-      }, 0);
-
-      // Use taxAmount from payload (could be enhanced to fetch tax rates from database)
-      const taxAmount = parseFloat(payload.bill.taxAmount);
+      
       const total = subtotal + taxAmount;
       
-      const [bill] = await tx
-        .insert(bills)
-        .values({
-          ...payload.bill,
-          billNumber,
-          subtotal: subtotal.toFixed(2),
-          taxAmount: taxAmount.toFixed(2),
-          total: total.toFixed(2),
-        })
-        .returning();
+      // SECURITY: Strip tenantId from payload, FORCE server tenantId
+      const { tenantId: _, ...safeBillData } = payload.bill;
       
-      if (lineItemsWithCalculatedAmounts.length > 0) {
-        const lineItemsWithBillId = lineItemsWithCalculatedAmounts.map(item => ({
-          ...item,
-          billId: bill.id,
-          tenantId: payload.bill.tenantId,
-        }));
-        await tx.insert(billLineItems).values(lineItemsWithBillId);
+      // Create bill with SERVER-CALCULATED totals (ignore client values)
+      const [newBill] = await tx.insert(bills).values({
+        ...safeBillData,
+        tenantId: tenantId, // FORCE server tenantId
+        billNumber,
+        subtotal: subtotal.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        total: total.toFixed(2),
+      }).returning();
+      
+      // Insert line items with calculated amounts
+      if (payload.lineItems.length > 0) {
+        const lineItemsWithAmounts = payload.lineItems.map(item => {
+          // SECURITY: Strip tenantId from payload, FORCE server tenantId
+          const { tenantId: _itemTenantId, ...safeItemData } = item;
+          return {
+            ...safeItemData,
+            billId: newBill.id,
+            tenantId: tenantId, // FORCE server tenantId
+            amount: (parseFloat(item.quantity) * parseFloat(item.unitPrice)).toFixed(2),
+          };
+        });
+        
+        await tx.insert(billLineItems).values(lineItemsWithAmounts);
       }
       
-      return bill;
+      return newBill;
     });
   }
 
@@ -1005,13 +1015,44 @@ export class DatabaseStorage implements IStorage {
         throw new Error("Vendor not found or doesn't belong to this tenant");
       }
       
+      // SERVER-SIDE CALCULATIONS - NEVER trust client totals
+      let subtotal = 0;
+      let taxAmount = 0;
+      
+      // Calculate from line items
+      for (const item of payload.lineItems) {
+        const lineAmount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        subtotal += lineAmount;
+        
+        // Fetch tax rate from database if taxId provided
+        if (item.taxId) {
+          const [taxRecord] = await tx
+            .select()
+            .from(taxes)
+            .where(eq(taxes.id, item.taxId))
+            .limit(1);
+          
+          if (taxRecord) {
+            const taxRate = parseFloat(taxRecord.rate);
+            taxAmount += (lineAmount * taxRate / 100);
+          }
+        }
+      }
+      
+      const total = subtotal + taxAmount;
+      
+      // STRIP tenantId from payload - NEVER trust client
       const { tenantId: _, ...safeBillData } = payload.bill;
       
+      // Update bill with SERVER-CALCULATED totals (ignore client values)
       const [updatedBill] = await tx
         .update(bills)
         .set({ 
-          ...safeBillData, 
+          ...safeBillData,
           tenantId: bill.tenantId,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
           updatedAt: new Date() 
         })
         .where(eq(bills.id, id))
@@ -1021,15 +1062,22 @@ export class DatabaseStorage implements IStorage {
         throw new Error("Bill was deleted during update");
       }
       
+      // Delete old line items
       await tx.delete(billLineItems).where(eq(billLineItems.billId, id));
       
+      // Insert new line items with calculated amounts
       if (payload.lineItems.length > 0) {
-        const lineItemsWithBillId = payload.lineItems.map(item => ({
-          ...item,
-          billId: id,
-          tenantId: bill.tenantId,
-        }));
-        await tx.insert(billLineItems).values(lineItemsWithBillId);
+        const lineItemsWithAmounts = payload.lineItems.map(item => {
+          // SECURITY: Strip tenantId from payload, FORCE server tenantId
+          const { tenantId: _itemTenantId, ...safeItemData } = item;
+          return {
+            ...safeItemData,
+            billId: id,
+            tenantId: bill.tenantId, // FORCE server tenantId
+            amount: (parseFloat(item.quantity) * parseFloat(item.unitPrice)).toFixed(2),
+          };
+        });
+        await tx.insert(billLineItems).values(lineItemsWithAmounts);
       }
       
       return updatedBill;
@@ -3452,13 +3500,41 @@ export class MemStorage implements IStorage {
     return this.billLineItems.filter(item => item.billId === billId);
   }
 
-  async createBillWithItems(payload: BillPayload): Promise<Bill> {
+  async createBillWithItems(payload: BillPayload, tenantId: string): Promise<Bill> {
     const now = new Date();
     const billId = `bill-${Date.now()}-${Math.random()}`;
     
+    // SERVER-SIDE CALCULATIONS - NEVER trust client totals
+    let subtotal = 0;
+    let taxAmount = 0;
+    
+    // Calculate from line items
+    for (const item of payload.lineItems) {
+      const lineAmount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+      subtotal += lineAmount;
+      
+      // Fetch tax rate if taxId provided
+      if (item.taxId) {
+        const taxRecord = this.taxes.find(t => t.id === item.taxId);
+        if (taxRecord) {
+          const taxRate = parseFloat(taxRecord.rate);
+          taxAmount += (lineAmount * taxRate / 100);
+        }
+      }
+    }
+    
+    const total = subtotal + taxAmount;
+    
+    // SECURITY: Strip tenantId from payload, FORCE server tenantId
+    const { tenantId: _, ...safeBillData } = payload.bill;
+    
     const newBill: Bill = {
-      ...payload.bill,
+      ...safeBillData,
       id: billId,
+      tenantId: tenantId, // FORCE server tenantId
+      subtotal: subtotal.toFixed(2),
+      taxAmount: taxAmount.toFixed(2),
+      total: total.toFixed(2),
       createdAt: now,
       updatedAt: now,
     };
@@ -3467,11 +3543,14 @@ export class MemStorage implements IStorage {
     
     for (const item of payload.lineItems) {
       const lineItemId = `billitem-${Date.now()}-${Math.random()}`;
+      // SECURITY: Strip tenantId from payload, FORCE server tenantId
+      const { tenantId: _itemTenantId, ...safeItemData } = item;
       const newLineItem: BillLineItem = {
-        ...item,
+        ...safeItemData,
         id: lineItemId,
         billId,
-        tenantId: payload.bill.tenantId,
+        tenantId: tenantId, // FORCE server tenantId
+        amount: (parseFloat(item.quantity) * parseFloat(item.unitPrice)).toFixed(2),
         itemId: item.itemId || null,
         taxId: item.taxId || null,
         accountId: item.accountId || null,
@@ -3488,7 +3567,39 @@ export class MemStorage implements IStorage {
     const existing = this.bills.find(b => b.id === id && b.tenantId === tenantId);
     if (!existing) throw new Error("Bill not found");
     
-    const updated = { ...existing, ...payload.bill, updatedAt: new Date() };
+    // SERVER-SIDE CALCULATIONS - NEVER trust client totals
+    let subtotal = 0;
+    let taxAmount = 0;
+    
+    // Calculate from line items
+    for (const item of payload.lineItems) {
+      const lineAmount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+      subtotal += lineAmount;
+      
+      // Fetch tax rate if taxId provided
+      if (item.taxId) {
+        const taxRecord = this.taxes.find(t => t.id === item.taxId);
+        if (taxRecord) {
+          const taxRate = parseFloat(taxRecord.rate);
+          taxAmount += (lineAmount * taxRate / 100);
+        }
+      }
+    }
+    
+    const total = subtotal + taxAmount;
+    
+    // SECURITY: Strip tenantId from payload, FORCE server tenantId
+    const { tenantId: _, ...safeBillData } = payload.bill;
+    
+    const updated = { 
+      ...existing, 
+      ...safeBillData, 
+      tenantId: existing.tenantId, // FORCE server tenantId
+      subtotal: subtotal.toFixed(2),
+      taxAmount: taxAmount.toFixed(2),
+      total: total.toFixed(2),
+      updatedAt: new Date() 
+    };
     const index = this.bills.findIndex(b => b.id === id);
     this.bills[index] = updated;
     
@@ -3497,11 +3608,14 @@ export class MemStorage implements IStorage {
     const now = new Date();
     for (const item of payload.lineItems) {
       const lineItemId = `billitem-${Date.now()}-${Math.random()}`;
+      // SECURITY: Strip tenantId from payload, FORCE server tenantId
+      const { tenantId: _itemTenantId, ...safeItemData } = item;
       const newLineItem: BillLineItem = {
-        ...item,
+        ...safeItemData,
         id: lineItemId,
         billId: id,
-        tenantId,
+        tenantId, // FORCE server tenantId
+        amount: (parseFloat(item.quantity) * parseFloat(item.unitPrice)).toFixed(2),
         itemId: item.itemId || null,
         taxId: item.taxId || null,
         accountId: item.accountId || null,
