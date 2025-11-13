@@ -2811,6 +2811,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/reports/ar-aging', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const groupBy = (req.query.groupBy as 'customer' | 'invoice' | 'project') || 'customer';
+
+      // Validate groupBy parameter
+      if (!['customer', 'invoice', 'project'].includes(groupBy)) {
+        return res.status(400).json({ message: "Invalid groupBy parameter. Must be 'customer', 'invoice', or 'project'" });
+      }
+
+      const report = await storage.getARAgingReport(tenantId, groupBy);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error generating AR aging report:", error);
+      res.status(500).json({ message: "Failed to generate AR aging report" });
+    }
+  });
+
+  app.get('/api/reports/ap-aging', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const groupBy = (req.query.groupBy as 'vendor' | 'invoice' | 'project') || 'vendor';
+
+      // Validate groupBy parameter
+      if (!['vendor', 'invoice', 'project'].includes(groupBy)) {
+        return res.status(400).json({ message: "Invalid groupBy parameter. Must be 'vendor', 'invoice', or 'project'" });
+      }
+
+      const report = await storage.getAPAgingReport(tenantId, groupBy);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error generating AP aging report:", error);
+      res.status(500).json({ message: "Failed to generate AP aging report" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

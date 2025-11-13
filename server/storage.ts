@@ -119,6 +119,8 @@ import {
   type BalanceSheetReport,
   type TrialBalanceReport,
   type CashFlowReport,
+  type ARAgingReport,
+  type APAgingReport,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql } from "drizzle-orm";
@@ -323,6 +325,8 @@ export interface IStorage {
   getBalanceSheetReport(tenantId: string, asOfDate: Date): Promise<BalanceSheetReport>;
   getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport>;
   getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport>;
+  getARAgingReport(tenantId: string, groupBy?: 'customer' | 'invoice' | 'project'): Promise<ARAgingReport>;
+  getAPAgingReport(tenantId: string, groupBy?: 'vendor' | 'invoice' | 'project'): Promise<APAgingReport>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4367,6 +4371,438 @@ export class DatabaseStorage implements IStorage {
       netCashFlow: netCashFlow.toFixed(2),
     };
   }
+
+  // AR Aging Report (Accounts Receivable)
+  async getARAgingReport(tenantId: string, groupBy: 'customer' | 'invoice' | 'project' = 'customer'): Promise<ARAgingReport> {
+    const asOfDate = new Date();
+
+    // Get all non-deleted invoices for this tenant
+    const allInvoices = await db
+      .select({
+        invoice: invoices,
+        customer: customers,
+      })
+      .from(invoices)
+      .innerJoin(customers, eq(invoices.customerId, customers.id))
+      .where(and(
+        eq(invoices.tenantId, tenantId),
+        isNull(invoices.deletedAt),
+        ne(invoices.status, 'cancelled')
+      ));
+
+    // Calculate paid amounts (from customer payments)
+    const invoicePaidAmounts = new Map<string, number>();
+    const customerPaymentsList = await db
+      .select()
+      .from(customerPayments)
+      .where(and(
+        eq(customerPayments.tenantId, tenantId),
+        isNull(customerPayments.deletedAt)
+      ));
+    
+    for (const payment of customerPaymentsList) {
+      if (payment.invoiceId) {
+        const current = invoicePaidAmounts.get(payment.invoiceId) || 0;
+        invoicePaidAmounts.set(payment.invoiceId, current + parseFloat(payment.amount));
+      }
+    }
+
+    // Helper function to calculate bucket
+    const getBucket = (daysOverdue: number): string => {
+      if (daysOverdue <= 0) return 'current';
+      if (daysOverdue <= 30) return '1-30';
+      if (daysOverdue <= 60) return '31-60';
+      if (daysOverdue <= 90) return '61-90';
+      if (daysOverdue <= 120) return '91-120';
+      return '120+';
+    };
+
+    // Helper function to update bucket amounts
+    const updateBucketAmounts = (buckets: Record<string, number>, bucket: string, amount: number) => {
+      buckets[bucket] = (buckets[bucket] || 0) + amount;
+    };
+
+    // Initialize summary
+    const summary = {
+      current: '0',
+      days_1_30: '0',
+      days_31_60: '0',
+      days_61_90: '0',
+      days_91_120: '0',
+      days_120_plus: '0',
+      total: '0',
+    };
+
+    if (groupBy === 'invoice') {
+      // Invoice-wise view
+      const invoiceLines: any[] = [];
+      
+      for (const { invoice, customer } of allInvoices) {
+        const totalAmount = parseFloat(invoice.total);
+        const paidAmount = invoicePaidAmounts.get(invoice.id) || 0;
+        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
+        
+        if (outstandingAmount > 0) {
+          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+          const bucket = getBucket(daysOverdue);
+          
+          invoiceLines.push({
+            invoiceId: invoice.id,
+            invoiceNumber: invoice.invoiceNumber || '',
+            customerId: customer.id,
+            customerName: customer.name,
+            invoiceDate: new Date(invoice.invoiceDate),
+            dueDate: new Date(invoice.dueDate),
+            daysOverdue,
+            totalAmount: totalAmount.toFixed(2),
+            paidAmount: paidAmount.toFixed(2),
+            outstandingAmount: outstandingAmount.toFixed(2),
+            bucket,
+            projectName: invoice.projectName,
+          });
+
+          // Update summary
+          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
+          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
+          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
+        }
+      }
+
+      return {
+        tenantId,
+        asOfDate,
+        groupBy: 'invoice',
+        summary,
+        invoices: invoiceLines,
+      };
+    } else if (groupBy === 'project') {
+      // Project-wise view
+      const projectBuckets = new Map<string, Record<string, number>>();
+      
+      for (const { invoice } of allInvoices) {
+        const totalAmount = parseFloat(invoice.total);
+        const paidAmount = invoicePaidAmounts.get(invoice.id) || 0;
+        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
+        
+        if (outstandingAmount > 0) {
+          const projectName = invoice.projectName || 'Unassigned';
+          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+          const bucket = getBucket(daysOverdue);
+          
+          if (!projectBuckets.has(projectName)) {
+            projectBuckets.set(projectName, {
+              current: 0,
+              days_1_30: 0,
+              days_31_60: 0,
+              days_61_90: 0,
+              days_91_120: 0,
+              days_120_plus: 0,
+              total: 0,
+            });
+          }
+          
+          const buckets = projectBuckets.get(projectName)!;
+          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
+          buckets[bucketKey] += outstandingAmount;
+          buckets.total += outstandingAmount;
+
+          // Update summary
+          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
+          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
+        }
+      }
+
+      const projectLines = Array.from(projectBuckets.entries()).map(([projectName, buckets]) => ({
+        projectName,
+        current: buckets.current.toFixed(2),
+        days_1_30: buckets.days_1_30.toFixed(2),
+        days_31_60: buckets.days_31_60.toFixed(2),
+        days_61_90: buckets.days_61_90.toFixed(2),
+        days_91_120: buckets.days_91_120.toFixed(2),
+        days_120_plus: buckets.days_120_plus.toFixed(2),
+        total: buckets.total.toFixed(2),
+      }));
+
+      return {
+        tenantId,
+        asOfDate,
+        groupBy: 'project',
+        summary,
+        projects: projectLines,
+      };
+    } else {
+      // Customer-wise view (default)
+      const customerBuckets = new Map<string, { name: string; buckets: Record<string, number> }>();
+      
+      for (const { invoice, customer } of allInvoices) {
+        const totalAmount = parseFloat(invoice.total);
+        const paidAmount = invoicePaidAmounts.get(invoice.id) || 0;
+        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
+        
+        if (outstandingAmount > 0) {
+          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+          const bucket = getBucket(daysOverdue);
+          
+          if (!customerBuckets.has(customer.id)) {
+            customerBuckets.set(customer.id, {
+              name: customer.name,
+              buckets: {
+                current: 0,
+                days_1_30: 0,
+                days_31_60: 0,
+                days_61_90: 0,
+                days_91_120: 0,
+                days_120_plus: 0,
+                total: 0,
+              },
+            });
+          }
+          
+          const customerData = customerBuckets.get(customer.id)!;
+          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
+          customerData.buckets[bucketKey] += outstandingAmount;
+          customerData.buckets.total += outstandingAmount;
+
+          // Update summary
+          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
+          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
+        }
+      }
+
+      const customerLines = Array.from(customerBuckets.entries()).map(([entityId, data]) => ({
+        entityId,
+        entityName: data.name,
+        current: data.buckets.current.toFixed(2),
+        days_1_30: data.buckets.days_1_30.toFixed(2),
+        days_31_60: data.buckets.days_31_60.toFixed(2),
+        days_61_90: data.buckets.days_61_90.toFixed(2),
+        days_91_120: data.buckets.days_91_120.toFixed(2),
+        days_120_plus: data.buckets.days_120_plus.toFixed(2),
+        total: data.buckets.total.toFixed(2),
+      }));
+
+      return {
+        tenantId,
+        asOfDate,
+        groupBy: 'customer',
+        summary,
+        customers: customerLines,
+      };
+    }
+  }
+
+  // AP Aging Report (Accounts Payable)
+  async getAPAgingReport(tenantId: string, groupBy: 'vendor' | 'invoice' | 'project' = 'vendor'): Promise<APAgingReport> {
+    const asOfDate = new Date();
+
+    // Get all bills for this tenant
+    const allBills = await db
+      .select({
+        bill: bills,
+        vendor: vendors,
+      })
+      .from(bills)
+      .innerJoin(vendors, eq(bills.vendorId, vendors.id))
+      .where(and(
+        eq(bills.tenantId, tenantId),
+        ne(bills.status, 'cancelled')
+      ));
+
+    // Calculate paid amounts (from payments)
+    const billPaidAmounts = new Map<string, number>();
+    const paymentsList = await db
+      .select()
+      .from(payments)
+      .where(and(
+        eq(payments.tenantId, tenantId),
+        ne(payments.status, 'cancelled')
+      ));
+    
+    for (const payment of paymentsList) {
+      if (payment.billId) {
+        const current = billPaidAmounts.get(payment.billId) || 0;
+        billPaidAmounts.set(payment.billId, current + parseFloat(payment.amount));
+      }
+    }
+
+    // Helper function to calculate bucket
+    const getBucket = (daysOverdue: number): string => {
+      if (daysOverdue <= 0) return 'current';
+      if (daysOverdue <= 30) return '1-30';
+      if (daysOverdue <= 60) return '31-60';
+      if (daysOverdue <= 90) return '61-90';
+      if (daysOverdue <= 120) return '91-120';
+      return '120+';
+    };
+
+    // Initialize summary
+    const summary = {
+      current: '0',
+      days_1_30: '0',
+      days_31_60: '0',
+      days_61_90: '0',
+      days_91_120: '0',
+      days_120_plus: '0',
+      total: '0',
+    };
+
+    if (groupBy === 'invoice') {
+      // Invoice-wise view (bills)
+      const invoiceLines: any[] = [];
+      
+      for (const { bill, vendor } of allBills) {
+        const totalAmount = parseFloat(bill.total);
+        const paidAmount = billPaidAmounts.get(bill.id) || 0;
+        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
+        
+        if (outstandingAmount > 0) {
+          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(bill.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+          const bucket = getBucket(daysOverdue);
+          
+          invoiceLines.push({
+            invoiceId: bill.id,
+            invoiceNumber: bill.billNumber,
+            vendorId: vendor.id,
+            vendorName: vendor.name,
+            invoiceDate: new Date(bill.billDate),
+            dueDate: new Date(bill.dueDate),
+            daysOverdue,
+            totalAmount: totalAmount.toFixed(2),
+            paidAmount: paidAmount.toFixed(2),
+            outstandingAmount: outstandingAmount.toFixed(2),
+            bucket,
+            projectName: bill.projectName,
+          });
+
+          // Update summary
+          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
+          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
+          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
+        }
+      }
+
+      return {
+        tenantId,
+        asOfDate,
+        groupBy: 'invoice',
+        summary,
+        invoices: invoiceLines,
+      };
+    } else if (groupBy === 'project') {
+      // Project-wise view
+      const projectBuckets = new Map<string, Record<string, number>>();
+      
+      for (const { bill } of allBills) {
+        const totalAmount = parseFloat(bill.total);
+        const paidAmount = billPaidAmounts.get(bill.id) || 0;
+        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
+        
+        if (outstandingAmount > 0) {
+          const projectName = bill.projectName || 'Unassigned';
+          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(bill.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+          const bucket = getBucket(daysOverdue);
+          
+          if (!projectBuckets.has(projectName)) {
+            projectBuckets.set(projectName, {
+              current: 0,
+              days_1_30: 0,
+              days_31_60: 0,
+              days_61_90: 0,
+              days_91_120: 0,
+              days_120_plus: 0,
+              total: 0,
+            });
+          }
+          
+          const buckets = projectBuckets.get(projectName)!;
+          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
+          buckets[bucketKey] += outstandingAmount;
+          buckets.total += outstandingAmount;
+
+          // Update summary
+          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
+          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
+        }
+      }
+
+      const projectLines = Array.from(projectBuckets.entries()).map(([projectName, buckets]) => ({
+        projectName,
+        current: buckets.current.toFixed(2),
+        days_1_30: buckets.days_1_30.toFixed(2),
+        days_31_60: buckets.days_31_60.toFixed(2),
+        days_61_90: buckets.days_61_90.toFixed(2),
+        days_91_120: buckets.days_91_120.toFixed(2),
+        days_120_plus: buckets.days_120_plus.toFixed(2),
+        total: buckets.total.toFixed(2),
+      }));
+
+      return {
+        tenantId,
+        asOfDate,
+        groupBy: 'project',
+        summary,
+        projects: projectLines,
+      };
+    } else {
+      // Vendor-wise view (default)
+      const vendorBuckets = new Map<string, { name: string; buckets: Record<string, number> }>();
+      
+      for (const { bill, vendor } of allBills) {
+        const totalAmount = parseFloat(bill.total);
+        const paidAmount = billPaidAmounts.get(bill.id) || 0;
+        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
+        
+        if (outstandingAmount > 0) {
+          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(bill.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+          const bucket = getBucket(daysOverdue);
+          
+          if (!vendorBuckets.has(vendor.id)) {
+            vendorBuckets.set(vendor.id, {
+              name: vendor.name,
+              buckets: {
+                current: 0,
+                days_1_30: 0,
+                days_31_60: 0,
+                days_61_90: 0,
+                days_91_120: 0,
+                days_120_plus: 0,
+                total: 0,
+              },
+            });
+          }
+          
+          const vendorData = vendorBuckets.get(vendor.id)!;
+          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
+          vendorData.buckets[bucketKey] += outstandingAmount;
+          vendorData.buckets.total += outstandingAmount;
+
+          // Update summary
+          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
+          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
+        }
+      }
+
+      const vendorLines = Array.from(vendorBuckets.entries()).map(([entityId, data]) => ({
+        entityId,
+        entityName: data.name,
+        current: data.buckets.current.toFixed(2),
+        days_1_30: data.buckets.days_1_30.toFixed(2),
+        days_31_60: data.buckets.days_31_60.toFixed(2),
+        days_61_90: data.buckets.days_61_90.toFixed(2),
+        days_91_120: data.buckets.days_91_120.toFixed(2),
+        days_120_plus: data.buckets.days_120_plus.toFixed(2),
+        total: data.buckets.total.toFixed(2),
+      }));
+
+      return {
+        tenantId,
+        asOfDate,
+        groupBy: 'vendor',
+        summary,
+        vendors: vendorLines,
+      };
+    }
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -5281,6 +5717,31 @@ export class MemStorage implements IStorage {
 
   async processRecurringInvoices(tenantId: string): Promise<Invoice[]> {
     throw new Error('Recurring invoices not implemented in MemStorage');
+  }
+
+  // Financial Reports (READ-ONLY) - Stub implementations
+  async getProfitLossReport(tenantId: string, startDate: Date, endDate: Date): Promise<ProfitLossReport> {
+    throw new Error('Reports not implemented in MemStorage');
+  }
+
+  async getBalanceSheetReport(tenantId: string, asOfDate: Date): Promise<BalanceSheetReport> {
+    throw new Error('Reports not implemented in MemStorage');
+  }
+
+  async getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport> {
+    throw new Error('Reports not implemented in MemStorage');
+  }
+
+  async getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport> {
+    throw new Error('Reports not implemented in MemStorage');
+  }
+
+  async getARAgingReport(tenantId: string, groupBy: 'customer' | 'invoice' | 'project' = 'customer'): Promise<ARAgingReport> {
+    throw new Error('AR Aging Report not implemented in MemStorage');
+  }
+
+  async getAPAgingReport(tenantId: string, groupBy: 'vendor' | 'invoice' | 'project' = 'vendor'): Promise<APAgingReport> {
+    throw new Error('AP Aging Report not implemented in MemStorage');
   }
 }
 

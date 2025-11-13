@@ -371,6 +371,9 @@ export const invoices = pgTable("invoices", {
   issuerTaxId: varchar("issuer_tax_id", { length: 100 }),
   customerTaxId: varchar("customer_tax_id", { length: 100 }),
   
+  // Project tracking
+  projectName: varchar("project_name", { length: 255 }),
+  
   invoiceDate: timestamp("invoice_date").notNull(),
   dueDate: timestamp("due_date").notNull(),
   status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, sent, paid, overdue, cancelled
@@ -411,6 +414,7 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   invoiceSubject: z.string().max(500).optional(),
   issuerTaxId: z.string().max(100).optional(),
   customerTaxId: z.string().max(100).optional(),
+  projectName: z.string().max(255).optional(),
 });
 
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
@@ -551,6 +555,10 @@ export const bills = pgTable("bills", {
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   vendorId: varchar("vendor_id").notNull().references(() => vendors.id),
   billNumber: varchar("bill_number", { length: 100 }).notNull(),
+  
+  // Project tracking
+  projectName: varchar("project_name", { length: 255 }),
+  
   billDate: timestamp("bill_date").notNull(),
   dueDate: timestamp("due_date").notNull(),
   status: varchar("status", { length: 50 }).notNull().default("unpaid"), // unpaid, scheduled, paid, overdue, cancelled
@@ -571,6 +579,8 @@ export const insertBillSchema = createInsertSchema(bills, {
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  projectName: z.string().max(255).optional(),
 });
 
 export type InsertBill = z.infer<typeof insertBillSchema>;
@@ -1780,10 +1790,45 @@ export const agingReportLineSchema = z.object({
 
 export type AgingReportLine = z.infer<typeof agingReportLineSchema>;
 
+// Invoice-wise Aging Report Line
+export const agingReportInvoiceLineSchema = z.object({
+  invoiceId: z.string(),
+  invoiceNumber: z.string(),
+  customerId: z.string().optional(), // for AR
+  customerName: z.string().optional(), // for AR
+  vendorId: z.string().optional(), // for AP
+  vendorName: z.string().optional(), // for AP
+  invoiceDate: z.date(),
+  dueDate: z.date(),
+  daysOverdue: z.number(),
+  totalAmount: decimalString,
+  paidAmount: decimalString,
+  outstandingAmount: decimalString,
+  bucket: z.enum(["current", "1-30", "31-60", "61-90", "91-120", "120+"]),
+  projectName: z.string().nullable().optional(),
+});
+
+export type AgingReportInvoiceLine = z.infer<typeof agingReportInvoiceLineSchema>;
+
+// Project-wise Aging Report Line
+export const agingReportProjectLineSchema = z.object({
+  projectName: z.string(),
+  current: decimalString,
+  days_1_30: decimalString,
+  days_31_60: decimalString,
+  days_61_90: decimalString,
+  days_91_120: decimalString,
+  days_120_plus: decimalString,
+  total: decimalString,
+});
+
+export type AgingReportProjectLine = z.infer<typeof agingReportProjectLineSchema>;
+
 // AR Aging Report (Accounts Receivable)
 export const arAgingReportSchema = z.object({
   tenantId: z.string(),
   asOfDate: z.date(),
+  groupBy: z.enum(['customer', 'invoice', 'project']),
   summary: z.object({
     current: z.string(),
     days_1_30: z.string(),
@@ -1793,7 +1838,9 @@ export const arAgingReportSchema = z.object({
     days_120_plus: z.string(),
     total: z.string(),
   }),
-  customers: z.array(agingReportLineSchema),
+  customers: z.array(agingReportLineSchema).optional(), // For customer grouping
+  invoices: z.array(agingReportInvoiceLineSchema).optional(), // For invoice grouping
+  projects: z.array(agingReportProjectLineSchema).optional(), // For project grouping
 });
 
 export type ARAgingReport = z.infer<typeof arAgingReportSchema>;
@@ -1802,6 +1849,7 @@ export type ARAgingReport = z.infer<typeof arAgingReportSchema>;
 export const apAgingReportSchema = z.object({
   tenantId: z.string(),
   asOfDate: z.date(),
+  groupBy: z.enum(['vendor', 'invoice', 'project']),
   summary: z.object({
     current: z.string(),
     days_1_30: z.string(),
@@ -1811,7 +1859,9 @@ export const apAgingReportSchema = z.object({
     days_120_plus: z.string(),
     total: z.string(),
   }),
-  vendors: z.array(agingReportLineSchema),
+  vendors: z.array(agingReportLineSchema).optional(), // For vendor grouping
+  invoices: z.array(agingReportInvoiceLineSchema).optional(), // For invoice grouping (bills)
+  projects: z.array(agingReportProjectLineSchema).optional(), // For project grouping
 });
 
 export type APAgingReport = z.infer<typeof apAgingReportSchema>;
