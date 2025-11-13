@@ -1517,6 +1517,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Customer Payment routes (Accounts Receivable)
+  app.get("/api/customer-payments", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const payments = await storage.getCustomerPayments(tenantId);
+      res.json(payments);
+    } catch (error: any) {
+      console.error('Error fetching customer payments:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/customer-payments/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const payment = await storage.getCustomerPaymentById(id, tenantId);
+      if (!payment) {
+        return res.status(404).json({ message: "Payment not found" });
+      }
+      res.json(payment);
+    } catch (error: any) {
+      console.error('Error fetching customer payment:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/customer-payments", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const validated = insertCustomerPaymentSchema.parse({ ...req.body, tenantId });
+      const payment = await storage.createCustomerPayment(validated);
+      res.status(201).json(payment);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error creating customer payment:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/customer-payments/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const partialSchema = insertCustomerPaymentSchema.partial();
+      const validated = partialSchema.parse({ ...req.body, tenantId });
+      const payment = await storage.updateCustomerPayment(id, tenantId, validated);
+      res.json(payment);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error updating customer payment:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/customer-payments/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deleteCustomerPayment(id, tenantId);
+      res.json({ message: "Payment deleted" });
+    } catch (error: any) {
+      console.error('Error deleting customer payment:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Bill routes
   app.get('/api/bills', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {

@@ -8,6 +8,7 @@ import {
   Receipt,
   ShoppingCart,
   CreditCard,
+  DollarSign,
   BarChart3,
   Settings,
   Upload,
@@ -44,6 +45,7 @@ const purchasesItems = [
 
 const paymentsItems = [
   { title: "Vendor Payments", url: "/payments", icon: CreditCard },
+  { title: "Customer Payments", url: "/customer-payments", icon: DollarSign },
 ];
 
 const otherItems = [

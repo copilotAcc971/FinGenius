@@ -23,6 +23,7 @@ import CreditNotes from "@/pages/credit-notes";
 import Bills from "@/pages/bills";
 import Expenses from "@/pages/expenses";
 import Payments from "@/pages/payments";
+import CustomerPayments from "@/pages/customer-payments";
 import Documents from "@/pages/documents";
 import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
@@ -49,6 +50,7 @@ function Router() {
           <Route path="/bills" component={Bills} />
           <Route path="/expenses" component={Expenses} />
           <Route path="/payments" component={Payments} />
+          <Route path="/customer-payments" component={CustomerPayments} />
           <Route path="/documents" component={Documents} />
           <Route path="/reports" component={Reports} />
           <Route path="/company-profile" component={CompanyProfile} />
