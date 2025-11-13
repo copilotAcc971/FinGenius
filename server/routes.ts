@@ -14,6 +14,9 @@ import { db } from './db';
 import { eq, and } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { randomBytes } from 'crypto';
+import { RBACService, getAllPermissions } from './rbac/service';
+import { loadAuthContext, requirePermission, requireAnyPermission, requireRole } from './middleware/rbac';
+import { initializeRBAC, seedPermissions, seedRolesForTenant } from './scripts/seed-rbac';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -185,7 +188,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/company-profile', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/company-profile', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('company_profile.update'), async (req: any, res) => {
     try {
       if (!req.tenantId) {
         return res.status(403).json({ message: "Forbidden" });
@@ -202,8 +205,153 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== RBAC Routes =====
+
+  // Get all permissions (catalog)
+  app.get('/api/rbac/permissions', isAuthenticated, async (req: any, res) => {
+    try {
+      const allPermissions = await getAllPermissions();
+      res.json(allPermissions);
+    } catch (error) {
+      console.error("Error fetching permissions:", error);
+      res.status(500).json({ message: "Failed to fetch permissions" });
+    }
+  });
+
+  // Get all roles for tenant
+  app.get('/api/rbac/roles', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const rbacService = new RBACService(req.tenantId);
+      const roles = await rbacService.getAllRoles();
+      res.json(roles);
+    } catch (error) {
+      console.error("Error fetching roles:", error);
+      res.status(500).json({ message: "Failed to fetch roles" });
+    }
+  });
+
+  // Get role with permissions
+  app.get('/api/rbac/roles/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const rbacService = new RBACService(req.tenantId);
+      const roleWithPerms = await rbacService.getRoleWithPermissions(id);
+      
+      if (!roleWithPerms) {
+        return res.status(404).json({ message: "Role not found" });
+      }
+      
+      res.json(roleWithPerms);
+    } catch (error) {
+      console.error("Error fetching role:", error);
+      res.status(500).json({ message: "Failed to fetch role" });
+    }
+  });
+
+  // Create custom role
+  app.post('/api/rbac/roles', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('users.manage_roles'), async (req: any, res) => {
+    try {
+      const { name, description, permissionIds } = req.body;
+      
+      if (!name || !permissionIds || !Array.isArray(permissionIds)) {
+        return res.status(400).json({ message: "Name and permissionIds array required" });
+      }
+      
+      const rbacService = new RBACService(req.tenantId);
+      const role = await rbacService.createCustomRole(name, description, permissionIds);
+      res.json(role);
+    } catch (error: any) {
+      console.error("Error creating role:", error);
+      res.status(400).json({ message: error.message || "Failed to create role" });
+    }
+  });
+
+  // Update custom role
+  app.patch('/api/rbac/roles/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('users.manage_roles'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { name, description, permissionIds } = req.body;
+      
+      const updates: any = {};
+      if (name) updates.name = name;
+      if (description !== undefined) updates.description = description;
+      
+      const rbacService = new RBACService(req.tenantId);
+      const role = await rbacService.updateRole(id, updates, permissionIds);
+      res.json(role);
+    } catch (error: any) {
+      console.error("Error updating role:", error);
+      res.status(400).json({ message: error.message || "Failed to update role" });
+    }
+  });
+
+  // Delete custom role
+  app.delete('/api/rbac/roles/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('users.manage_roles'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const rbacService = new RBACService(req.tenantId);
+      await rbacService.deleteRole(id);
+      res.json({ message: "Role deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting role:", error);
+      res.status(400).json({ message: error.message || "Failed to delete role" });
+    }
+  });
+
+  // Assign role to user
+  app.post('/api/rbac/users/:userId/roles', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('users.manage_roles'), async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const { roleId } = req.body;
+      
+      if (!roleId) {
+        return res.status(400).json({ message: "roleId required" });
+      }
+      
+      const rbacService = new RBACService(req.tenantId);
+      await rbacService.assignRoleToUser(userId, roleId);
+      res.json({ message: "Role assigned successfully" });
+    } catch (error: any) {
+      console.error("Error assigning role:", error);
+      res.status(400).json({ message: error.message || "Failed to assign role" });
+    }
+  });
+
+  // Remove role from user
+  app.delete('/api/rbac/users/:userId/roles/:roleId', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('users.manage_roles'), async (req: any, res) => {
+    try {
+      const { userId, roleId } = req.params;
+      const rbacService = new RBACService(req.tenantId);
+      await rbacService.removeRoleFromUser(userId, roleId);
+      res.json({ message: "Role removed successfully" });
+    } catch (error: any) {
+      console.error("Error removing role:", error);
+      res.status(400).json({ message: error.message || "Failed to remove role" });
+    }
+  });
+
+  // Seed RBAC (initialize permissions and roles)
+  app.post('/api/rbac/seed', isAuthenticated, async (req: any, res) => {
+    try {
+      // Only allow if user is an owner of at least one tenant
+      const userId = req.user.claims.sub;
+      const userTenants = await storage.getTenantsByUserId(userId);
+      const isOwner = userTenants.some((t: any) => t.ownerId === userId);
+      
+      if (!isOwner) {
+        return res.status(403).json({ message: "Only tenant owners can seed RBAC" });
+      }
+      
+      await initializeRBAC();
+      res.json({ message: "RBAC initialized successfully" });
+    } catch (error: any) {
+      console.error("Error seeding RBAC:", error);
+      res.status(500).json({ message: error.message || "Failed to seed RBAC" });
+    }
+  });
+
   // Customer routes
-  app.get('/api/customers', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/customers', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('customers.read'), async (req: any, res) => {
     try {
       const customers = await storage.getCustomersByTenant(req.tenantId);
       res.json(customers);
@@ -213,7 +361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/customers', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/customers', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('customers.create'), async (req: any, res) => {
     try {
       // Use verified tenantId from middleware
       const parsed = insertCustomerSchema.parse({ ...req.body, tenantId: req.tenantId });
@@ -225,28 +373,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/customers/:id', isAuthenticated, async (req: any, res) => {
+  app.patch('/api/customers/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('customers.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const userId = req.user.claims.sub;
-      
-      // Fetch the customer to get its tenantId
-      const customer = await storage.getCustomer(id);
-      if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
-      }
-      
-      // Verify user owns the tenant this customer belongs to
-      const tenant = await storage.getTenant(customer.tenantId);
-      if (!tenant || tenant.ownerId !== userId) {
-        return res.status(403).json({ message: "Access denied" });
-      }
       
       // Validate the update payload
       const parsed = updateCustomerSchema.parse(req.body);
       
-      // Now perform the update
-      const updated = await storage.updateCustomer(id, customer.tenantId, parsed);
+      // Now perform the update (tenantId already verified by middleware)
+      const updated = await storage.updateCustomer(id, req.tenantId, parsed);
       res.json(updated);
     } catch (error: any) {
       console.error("Error updating customer:", error);
@@ -254,25 +389,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/customers/:id', isAuthenticated, async (req: any, res) => {
+  app.delete('/api/customers/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('customers.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const userId = req.user.claims.sub;
       
-      // Fetch the customer to get its tenantId
-      const customer = await storage.getCustomer(id);
-      if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
-      }
-      
-      // Verify user owns the tenant this customer belongs to
-      const tenant = await storage.getTenant(customer.tenantId);
-      if (!tenant || tenant.ownerId !== userId) {
-        return res.status(403).json({ message: "Access denied" });
-      }
-      
-      // Now perform the delete
-      await storage.deleteCustomer(id, customer.tenantId);
+      // Now perform the delete (tenantId already verified by middleware)
+      await storage.deleteCustomer(id, req.tenantId);
       res.json({ message: "Customer deleted successfully" });
     } catch (error: any) {
       console.error("Error deleting customer:", error);
@@ -281,7 +403,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Vendor routes
-  app.get('/api/vendors', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/vendors', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('vendors.read'), async (req: any, res) => {
     try {
       const vendors = await storage.getVendorsByTenant(req.tenantId);
       res.json(vendors);
@@ -291,7 +413,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/vendors', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/vendors', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('vendors.create'), async (req: any, res) => {
     try {
       const parsed = insertVendorSchema.parse({ ...req.body, tenantId: req.tenantId });
       const vendor = await storage.createVendor(parsed);
@@ -302,7 +424,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/vendors/:id', isAuthenticated, async (req: any, res) => {
+  app.patch('/api/vendors/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('vendors.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const userId = req.user.claims.sub;
@@ -328,7 +450,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/vendors/:id', isAuthenticated, async (req: any, res) => {
+  app.delete('/api/vendors/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('vendors.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const userId = req.user.claims.sub;
@@ -355,7 +477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Account routes
-  app.get('/api/accounts', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/accounts', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.read'), async (req: any, res) => {
     try {
       const accounts = await storage.getAccounts(req.tenantId);
       res.json(accounts);
@@ -365,7 +487,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/accounts', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/accounts', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.create'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       
@@ -381,7 +503,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/accounts/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/accounts/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -412,7 +534,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/accounts/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.delete('/api/accounts/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -438,7 +560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Item routes
-  app.get('/api/items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('items.read'), async (req: any, res) => {
     try {
       const items = await storage.getItems(req.tenantId);
       res.json(items);
@@ -448,7 +570,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('items.create'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       
@@ -464,7 +586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/items/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/items/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('items.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -495,7 +617,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/items/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.delete('/api/items/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('items.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -521,7 +643,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Tax routes
-  app.get('/api/taxes', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/taxes', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('taxes.read'), async (req: any, res) => {
     try {
       const taxes = await storage.getTaxes(req.tenantId);
       res.json(taxes);
@@ -531,7 +653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/taxes', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/taxes', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('taxes.create'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       
@@ -547,7 +669,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/taxes/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/taxes/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('taxes.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -578,7 +700,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/taxes/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.delete('/api/taxes/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('taxes.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -604,7 +726,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Invoice routes
-  app.get('/api/invoices', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/invoices', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.read'), async (req: any, res) => {
     try {
       const invoices = await storage.getInvoicesByTenant(req.tenantId);
       res.json(invoices);
@@ -614,7 +736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/invoices/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/invoices/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const invoice = await storage.getInvoiceById(id, req.tenantId);
@@ -630,7 +752,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/invoices/:id/line-items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/invoices/:id/line-items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const userId = req.user.claims.sub;
@@ -653,7 +775,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/invoices', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/invoices', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.create'), async (req: any, res) => {
     try {
       const parsed = invoicePayloadSchema.parse({
         invoice: { ...req.body.invoice, tenantId: req.tenantId },
@@ -675,7 +797,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/invoices/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/invoices/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
       
@@ -708,7 +830,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/invoices/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.delete('/api/invoices/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const userId = req.user.claims.sub;
@@ -735,7 +857,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/invoices/:id/send-email", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post("/api/invoices/:id/send-email", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.send'), async (req: any, res) => {
     const { id } = req.params;
     const tenantId = req.tenantId;
     
@@ -2034,7 +2156,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Bill routes
-  app.get('/api/bills', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/bills', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.read'), async (req: any, res) => {
     try {
       const bills = await storage.getBillsByTenant(req.tenantId);
       res.json(bills);
@@ -2044,7 +2166,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/bills/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/bills/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2059,7 +2181,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/bills', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/bills', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.create'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       
@@ -2097,7 +2219,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/bills/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/bills/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2135,7 +2257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/bills/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.delete('/api/bills/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2147,7 +2269,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/bills/:id/line-items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/bills/:id/line-items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2166,7 +2288,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/bills/extract', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/bills/extract', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.create'), async (req: any, res) => {
     try {
       const { image } = req.body;
       if (!image) {
@@ -2181,7 +2303,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/bills/extract-bulk', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/bills/extract-bulk', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.create'), async (req: any, res) => {
     try {
       const { images } = req.body;
       
@@ -2247,7 +2369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Purchase Order routes
-  app.get('/api/purchase-orders', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/purchase-orders', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('purchase_orders.read'), async (req: any, res) => {
     try {
       const purchaseOrders = await storage.getPurchaseOrders(req.tenantId);
       res.json(purchaseOrders);
@@ -2257,7 +2379,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('purchase_orders.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2276,7 +2398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/purchase-orders/:id/line-items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/purchase-orders/:id/line-items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('purchase_orders.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2298,7 +2420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/purchase-orders', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/purchase-orders', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('purchase_orders.create'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       
@@ -2336,7 +2458,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('purchase_orders.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2374,7 +2496,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.delete('/api/purchase-orders/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('purchase_orders.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2387,7 +2509,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Expense routes
-  app.get('/api/expenses', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/expenses', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('expenses.read'), async (req: any, res) => {
     try {
       const expenses = await storage.getExpensesByTenant(req.tenantId);
       res.json(expenses);
@@ -2398,7 +2520,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Payment routes
-  app.get('/api/payments', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/payments', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('payments.read'), async (req: any, res) => {
     try {
       const payments = await storage.getPaymentsByTenant(req.tenantId);
       res.json(payments);
@@ -2409,7 +2531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Document routes
-  app.get('/api/documents', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/documents', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('documents.read'), async (req: any, res) => {
     try {
       const documents = await storage.getDocumentsByTenant(req.tenantId);
       res.json(documents);
@@ -2469,7 +2591,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Asset Management routes
-  app.get('/api/assets', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/assets', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('assets.read'), async (req: any, res) => {
     try {
       const assets = await storage.getAssets(req.tenantId);
       res.json(assets);
@@ -2479,7 +2601,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/assets/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('assets.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const asset = await storage.getAsset(id);
@@ -2495,7 +2617,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/assets/:id/depreciation-schedules', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/assets/:id/depreciation-schedules', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('assets.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2514,7 +2636,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/assets', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/assets', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('assets.create'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
 
@@ -2536,7 +2658,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/assets/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('assets.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2562,7 +2684,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.delete('/api/assets/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('assets.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2580,7 +2702,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Bank Reconciliation routes
-  app.get('/api/bank-reconciliations', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/bank-reconciliations', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bank_reconciliations.read'), async (req: any, res) => {
     try {
       const reconciliations = await storage.getBankReconciliations(req.tenantId);
       res.json(reconciliations);
@@ -2590,7 +2712,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bank_reconciliations.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const reconciliation = await storage.getBankReconciliation(id);
@@ -2606,7 +2728,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/bank-reconciliations/:id/items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/bank-reconciliations/:id/items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bank_reconciliations.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2625,7 +2747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/bank-reconciliations', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/bank-reconciliations', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bank_reconciliations.create'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
 
@@ -2655,7 +2777,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bank_reconciliations.reconcile'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2686,7 +2808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.delete('/api/bank-reconciliations/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bank_reconciliations.reconcile'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
@@ -2702,7 +2824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/bank-reconciliations/items/:itemId/match', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.patch('/api/bank-reconciliations/items/:itemId/match', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bank_reconciliations.reconcile'), async (req: any, res) => {
     try {
       const { itemId } = req.params;
       const { journalEntryId } = req.body;
@@ -2727,7 +2849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // FINANCIAL REPORTS (READ-ONLY)
   // ====================================
 
-  app.get('/api/reports/profit-loss', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/reports/profit-loss', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       const { startDate, endDate } = req.query;
@@ -2751,7 +2873,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/reports/balance-sheet', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/reports/balance-sheet', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       const { asOfDate } = req.query;
@@ -2774,7 +2896,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/reports/trial-balance', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/reports/trial-balance', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       const { asOfDate } = req.query;
@@ -2797,7 +2919,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/reports/cash-flow', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/reports/cash-flow', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       const { startDate, endDate } = req.query;
@@ -2821,7 +2943,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/reports/ar-aging', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/reports/ar-aging', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       const groupBy = (req.query.groupBy as 'customer' | 'invoice' | 'project') || 'customer';
@@ -2839,7 +2961,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/reports/ap-aging', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/reports/ap-aging', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       const groupBy = (req.query.groupBy as 'vendor' | 'invoice' | 'project') || 'vendor';

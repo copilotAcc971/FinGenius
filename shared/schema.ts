@@ -76,6 +76,90 @@ export const insertTenantMemberSchema = createInsertSchema(tenantMembers).omit({
 export type InsertTenantMember = z.infer<typeof insertTenantMemberSchema>;
 export type TenantMember = typeof tenantMembers.$inferSelect;
 
+// RBAC: Global permissions catalog - shared across all tenants
+export const permissions = pgTable("permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  module: varchar("module", { length: 100 }).notNull(),
+  action: varchar("action", { length: 50 }).notNull(),
+  name: varchar("name", { length: 200 }).notNull().unique(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("permissions_module_idx").on(table.module),
+  index("permissions_action_idx").on(table.action),
+]);
+
+export const insertPermissionSchema = createInsertSchema(permissions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPermission = z.infer<typeof insertPermissionSchema>;
+export type Permission = typeof permissions.$inferSelect;
+
+// RBAC: Tenant-scoped roles (system + custom)
+export const roles = pgTable("roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").references(() => tenants.id).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  isSystem: boolean("is_system").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_role_per_tenant").on(table.tenantId, table.name),
+  index("roles_tenant_idx").on(table.tenantId),
+]);
+
+export const insertRoleSchema = createInsertSchema(roles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertRole = z.infer<typeof insertRoleSchema>;
+export type Role = typeof roles.$inferSelect;
+
+// RBAC: Role-Permission mapping
+export const rolePermissions = pgTable("role_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roleId: varchar("role_id").references(() => roles.id, { onDelete: 'cascade' }).notNull(),
+  permissionId: varchar("permission_id").references(() => permissions.id, { onDelete: 'cascade' }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  unique("unique_role_permission").on(table.roleId, table.permissionId),
+  index("role_permissions_role_idx").on(table.roleId),
+  index("role_permissions_permission_idx").on(table.permissionId),
+]);
+
+export const insertRolePermissionSchema = createInsertSchema(rolePermissions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+
+// RBAC: User-Role assignment (replaces role string in tenantMembers)
+export const tenantMemberRoles = pgTable("tenant_member_roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantMemberId: varchar("tenant_member_id").references(() => tenantMembers.id, { onDelete: 'cascade' }).notNull(),
+  roleId: varchar("role_id").references(() => roles.id, { onDelete: 'restrict' }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  unique("unique_member_role").on(table.tenantMemberId, table.roleId),
+  index("tenant_member_roles_member_idx").on(table.tenantMemberId),
+  index("tenant_member_roles_role_idx").on(table.roleId),
+]);
+
+export const insertTenantMemberRoleSchema = createInsertSchema(tenantMemberRoles).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertTenantMemberRole = z.infer<typeof insertTenantMemberRoleSchema>;
+export type TenantMemberRole = typeof tenantMemberRoles.$inferSelect;
+
 // Address schema for JSONB fields
 export const addressSchema = z.object({
   attention: z.string().optional(),
