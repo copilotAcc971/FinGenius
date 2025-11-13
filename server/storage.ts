@@ -20,6 +20,10 @@ import {
   quoteLineItems,
   salesOrders,
   salesOrderLineItems,
+  creditNotes,
+  creditNoteLineItems,
+  customerPayments,
+  customerPaymentSequences,
   type User,
   type UpsertUser,
   type Tenant,
@@ -59,6 +63,12 @@ import {
   type InsertSalesOrder,
   type SalesOrderLineItem,
   type InsertSalesOrderLineItem,
+  type CreditNote,
+  type InsertCreditNote,
+  type CreditNoteLineItem,
+  type InsertCreditNoteLineItem,
+  type CustomerPayment,
+  type InsertCustomerPayment,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull } from "drizzle-orm";
@@ -176,6 +186,23 @@ export interface IStorage {
   deleteSalesOrder(id: string, tenantId: string): Promise<void>;
   getSalesOrderLineItems(salesOrderId: string, tenantId: string): Promise<SalesOrderLineItem[]>;
   convertSalesOrderToInvoice(salesOrderId: string, tenantId: string): Promise<Invoice>;
+
+  // Credit Note operations
+  getCreditNotes(tenantId: string): Promise<CreditNote[]>;
+  getCreditNoteById(id: string, tenantId: string): Promise<CreditNote | null>;
+  createCreditNote(note: InsertCreditNote, lineItems: InsertCreditNoteLineItem[]): Promise<CreditNote>;
+  updateCreditNote(id: string, tenantId: string, note: Partial<InsertCreditNote>, lineItems?: InsertCreditNoteLineItem[]): Promise<CreditNote>;
+  deleteCreditNote(id: string, tenantId: string): Promise<void>;
+  getCreditNoteLineItems(noteId: string, tenantId: string): Promise<CreditNoteLineItem[]>;
+  applyCreditNoteToInvoice(noteId: string, invoiceId: string, amount: string, tenantId: string): Promise<void>;
+
+  // Customer Payment operations
+  getCustomerPayments(tenantId: string): Promise<CustomerPayment[]>;
+  getCustomerPaymentById(id: string, tenantId: string): Promise<CustomerPayment | null>;
+  createCustomerPayment(payment: InsertCustomerPayment): Promise<CustomerPayment>;
+  updateCustomerPayment(id: string, tenantId: string, payment: Partial<InsertCustomerPayment>): Promise<CustomerPayment>;
+  deleteCustomerPayment(id: string, tenantId: string): Promise<void>;
+  getNextCustomerPaymentNumber(tenantId: string): Promise<string>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -635,6 +662,9 @@ export class DatabaseStorage implements IStorage {
       // ALWAYS generate invoice number server-side (ignore client-provided value)
       const invoiceNumber = await this.getNextInvoiceNumber(tenantId);
       
+      // Automatically populate customerTaxId from customer's taxRegistrationNumber
+      const customerTaxId = customer[0].taxRegistrationNumber || null;
+      
       const [invoice] = await tx
         .insert(invoices)
         .values({
@@ -644,7 +674,8 @@ export class DatabaseStorage implements IStorage {
           // Ensure new Phase 1-3 fields are persisted
           invoiceSubject: payload.invoice.invoiceSubject,
           issuerTaxId: payload.invoice.issuerTaxId,
-          customerTaxId: payload.invoice.customerTaxId,
+          // Use customer's TRN for tax compliance
+          customerTaxId,
         })
         .returning();
       
@@ -728,6 +759,9 @@ export class DatabaseStorage implements IStorage {
       
       const { tenantId: _, ...safeInvoiceData } = payload.invoice;
       
+      // Automatically populate customerTaxId from customer's taxRegistrationNumber
+      const customerTaxId = customer[0].taxRegistrationNumber || null;
+      
       // Update invoice
       const [updatedInvoice] = await tx
         .update(invoices)
@@ -737,7 +771,8 @@ export class DatabaseStorage implements IStorage {
           // Ensure new Phase 1-3 fields are persisted
           invoiceSubject: payload.invoice.invoiceSubject,
           issuerTaxId: payload.invoice.issuerTaxId,
-          customerTaxId: payload.invoice.customerTaxId,
+          // Use customer's TRN for tax compliance
+          customerTaxId,
           updatedAt: new Date() 
         })
         .where(eq(invoices.id, id))
@@ -1739,6 +1774,484 @@ export class DatabaseStorage implements IStorage {
 
     return result;
   }
+
+  // Credit Note operations
+  async getCreditNotes(tenantId: string): Promise<CreditNote[]> {
+    return await db
+      .select()
+      .from(creditNotes)
+      .where(and(
+        eq(creditNotes.tenantId, tenantId),
+        isNull(creditNotes.deletedAt)
+      ))
+      .orderBy(desc(creditNotes.createdAt));
+  }
+
+  async getCreditNoteById(id: string, tenantId: string): Promise<CreditNote | null> {
+    const results = await db
+      .select()
+      .from(creditNotes)
+      .where(and(
+        eq(creditNotes.id, id),
+        eq(creditNotes.tenantId, tenantId),
+        isNull(creditNotes.deletedAt)
+      ));
+    return results[0] || null;
+  }
+
+  async createCreditNote(note: InsertCreditNote, lineItems: InsertCreditNoteLineItem[]): Promise<CreditNote> {
+    const result = await db.transaction(async (tx) => {
+      // Generate credit note number if not provided
+      let creditNoteNumber = note.creditNoteNumber;
+      if (!creditNoteNumber) {
+        const lastNote = await tx
+          .select({ creditNoteNumber: creditNotes.creditNoteNumber })
+          .from(creditNotes)
+          .where(eq(creditNotes.tenantId, note.tenantId))
+          .orderBy(desc(creditNotes.createdAt))
+          .limit(1);
+        
+        const lastNumber = lastNote[0]?.creditNoteNumber;
+        const nextNumber = lastNumber 
+          ? parseInt(lastNumber.replace('CN-', '')) + 1 
+          : 1;
+        creditNoteNumber = `CN-${nextNumber.toString().padStart(4, '0')}`;
+      }
+
+      // SECURITY: Calculate each line item's amount from quantity, price, discount
+      const lineItemsWithCalculatedAmounts = lineItems.map(item => {
+        const quantity = parseFloat(item.quantity);
+        const unitPrice = parseFloat(item.unitPrice);
+        const discount = parseFloat(item.discount || "0");
+        
+        // Calculate amount: (quantity * unitPrice) - discount
+        const calculatedAmount = (quantity * unitPrice) - discount;
+        
+        return {
+          ...item,
+          amount: calculatedAmount.toFixed(2),
+        };
+      });
+
+      // Calculate subtotal from calculated amounts
+      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+        return sum + parseFloat(item.amount);
+      }, 0);
+
+      // Calculate tax from calculated amounts
+      const taxCalculations = await Promise.all(lineItemsWithCalculatedAmounts.map(async (item) => {
+        if (!item.taxId) return 0;
+        const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
+        if (!tax) return 0;
+        const taxRate = parseFloat(tax.rate);
+        return parseFloat(item.amount) * (taxRate / 100);
+      }));
+
+      const taxAmount = taxCalculations.reduce((sum, tax) => sum + tax, 0);
+      const total = subtotal + taxAmount;
+
+      // Create credit note with server-calculated totals
+      const [createdNote] = await tx
+        .insert(creditNotes)
+        .values({
+          ...note,
+          creditNoteNumber,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
+          balanceRemaining: total.toFixed(2), // Initially, full amount is available
+        })
+        .returning();
+
+      // Insert line items with calculated amounts
+      await tx.insert(creditNoteLineItems).values(
+        lineItemsWithCalculatedAmounts.map(item => ({
+          ...item,
+          creditNoteId: createdNote.id,
+          tenantId: note.tenantId,
+        }))
+      );
+
+      return createdNote;
+    });
+
+    return result;
+  }
+
+  async updateCreditNote(id: string, tenantId: string, note: Partial<InsertCreditNote>, lineItems?: InsertCreditNoteLineItem[]): Promise<CreditNote> {
+    const result = await db.transaction(async (tx) => {
+      const [existingNote] = await tx
+        .select()
+        .from(creditNotes)
+        .where(and(
+          eq(creditNotes.id, id),
+          eq(creditNotes.tenantId, tenantId),
+          isNull(creditNotes.deletedAt)
+        ))
+        .limit(1);
+
+      if (!existingNote) {
+        throw new Error('Credit note not found');
+      }
+
+      let updatedNote: CreditNote;
+
+      if (lineItems !== undefined) {
+        // SECURITY: Recalculate amounts for all line items
+        const lineItemsWithCalculatedAmounts = lineItems.map(item => {
+          const quantity = parseFloat(item.quantity);
+          const unitPrice = parseFloat(item.unitPrice);
+          const discount = parseFloat(item.discount || "0");
+          
+          const calculatedAmount = (quantity * unitPrice) - discount;
+          
+          return {
+            ...item,
+            amount: calculatedAmount.toFixed(2),
+          };
+        });
+
+        // Recalculate totals
+        const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+          return sum + parseFloat(item.amount);
+        }, 0);
+
+        const taxCalculations = await Promise.all(lineItemsWithCalculatedAmounts.map(async (item) => {
+          if (!item.taxId) return 0;
+          const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
+          if (!tax) return 0;
+          const taxRate = parseFloat(tax.rate);
+          return parseFloat(item.amount) * (taxRate / 100);
+        }));
+
+        const taxAmount = taxCalculations.reduce((sum, tax) => sum + tax, 0);
+        const total = subtotal + taxAmount;
+
+        // Calculate balance remaining (preserve the reduced amount from applications)
+        const appliedAmount = parseFloat(existingNote.total) - parseFloat(existingNote.balanceRemaining);
+        const newBalanceRemaining = total - appliedAmount;
+
+        // Update credit note with recalculated totals
+        [updatedNote] = await tx
+          .update(creditNotes)
+          .set({
+            ...note,
+            subtotal: subtotal.toFixed(2),
+            taxAmount: taxAmount.toFixed(2),
+            total: total.toFixed(2),
+            balanceRemaining: newBalanceRemaining.toFixed(2),
+            updatedAt: new Date(),
+          })
+          .where(and(
+            eq(creditNotes.id, id),
+            eq(creditNotes.tenantId, tenantId)
+          ))
+          .returning();
+
+        // Delete old line items
+        await tx
+          .delete(creditNoteLineItems)
+          .where(and(
+            eq(creditNoteLineItems.creditNoteId, id),
+            eq(creditNoteLineItems.tenantId, tenantId)
+          ));
+
+        // Insert new line items
+        await tx.insert(creditNoteLineItems).values(
+          lineItemsWithCalculatedAmounts.map(item => ({
+            ...item,
+            creditNoteId: id,
+            tenantId,
+          }))
+        );
+      } else {
+        // Update without changing line items
+        [updatedNote] = await tx
+          .update(creditNotes)
+          .set({
+            ...note,
+            updatedAt: new Date(),
+          })
+          .where(and(
+            eq(creditNotes.id, id),
+            eq(creditNotes.tenantId, tenantId)
+          ))
+          .returning();
+      }
+
+      return updatedNote;
+    });
+
+    return result;
+  }
+
+  async deleteCreditNote(id: string, tenantId: string): Promise<void> {
+    await db
+      .update(creditNotes)
+      .set({ deletedAt: new Date() })
+      .where(and(
+        eq(creditNotes.id, id),
+        eq(creditNotes.tenantId, tenantId)
+      ));
+  }
+
+  async getCreditNoteLineItems(noteId: string, tenantId: string): Promise<CreditNoteLineItem[]> {
+    return await db
+      .select()
+      .from(creditNoteLineItems)
+      .where(and(
+        eq(creditNoteLineItems.creditNoteId, noteId),
+        eq(creditNoteLineItems.tenantId, tenantId)
+      ));
+  }
+
+  async applyCreditNoteToInvoice(noteId: string, invoiceId: string, amount: string, tenantId: string): Promise<void> {
+    await db.transaction(async (tx) => {
+      // Get credit note
+      const [creditNote] = await tx
+        .select()
+        .from(creditNotes)
+        .where(and(
+          eq(creditNotes.id, noteId),
+          eq(creditNotes.tenantId, tenantId),
+          isNull(creditNotes.deletedAt)
+        ))
+        .limit(1);
+
+      if (!creditNote) {
+        throw new Error('Credit note not found');
+      }
+
+      const amountToApply = parseFloat(amount);
+      const balanceRemaining = parseFloat(creditNote.balanceRemaining);
+
+      if (amountToApply > balanceRemaining) {
+        throw new Error('Amount exceeds credit note balance');
+      }
+
+      // Get invoice
+      const [invoice] = await tx
+        .select()
+        .from(invoices)
+        .where(and(
+          eq(invoices.id, invoiceId),
+          eq(invoices.tenantId, tenantId),
+          isNull(invoices.deletedAt)
+        ))
+        .limit(1);
+
+      if (!invoice) {
+        throw new Error('Invoice not found');
+      }
+
+      // Update credit note balance
+      const newBalance = balanceRemaining - amountToApply;
+      await tx
+        .update(creditNotes)
+        .set({
+          balanceRemaining: newBalance.toFixed(2),
+          status: newBalance === 0 ? 'applied' : creditNote.status,
+          updatedAt: new Date(),
+        })
+        .where(eq(creditNotes.id, noteId));
+
+      // Update invoice (reduce the total owed)
+      // This would typically create a payment record or adjust the invoice balance
+      // For now, we'll just link the credit note to the invoice if not already linked
+      if (!creditNote.invoiceId) {
+        await tx
+          .update(creditNotes)
+          .set({
+            invoiceId: invoiceId,
+            updatedAt: new Date(),
+          })
+          .where(eq(creditNotes.id, noteId));
+      }
+    });
+  }
+
+  // Customer Payment operations
+  async getCustomerPayments(tenantId: string): Promise<CustomerPayment[]> {
+    return await db
+      .select()
+      .from(customerPayments)
+      .where(and(
+        eq(customerPayments.tenantId, tenantId),
+        isNull(customerPayments.deletedAt)
+      ))
+      .orderBy(desc(customerPayments.paymentDate));
+  }
+
+  async getCustomerPaymentById(id: string, tenantId: string): Promise<CustomerPayment | null> {
+    const [payment] = await db
+      .select()
+      .from(customerPayments)
+      .where(and(
+        eq(customerPayments.id, id),
+        eq(customerPayments.tenantId, tenantId),
+        isNull(customerPayments.deletedAt)
+      ))
+      .limit(1);
+    
+    return payment || null;
+  }
+
+  async createCustomerPayment(paymentData: InsertCustomerPayment): Promise<CustomerPayment> {
+    return await db.transaction(async (tx) => {
+      const tenantId = paymentData.tenantId;
+      const paymentNumber = await this.getNextCustomerPaymentNumber(tenantId);
+      
+      const [payment] = await tx
+        .insert(customerPayments)
+        .values({
+          ...paymentData,
+          paymentNumber,
+        })
+        .returning();
+
+      // If payment is linked to an invoice, update invoice balance
+      if (payment.invoiceId) {
+        const [invoice] = await tx
+          .select()
+          .from(invoices)
+          .where(and(
+            eq(invoices.id, payment.invoiceId),
+            eq(invoices.tenantId, tenantId),
+            isNull(invoices.deletedAt)
+          ))
+          .limit(1);
+
+        if (invoice) {
+          const currentBalance = parseFloat(invoice.total);
+          const paymentAmount = parseFloat(payment.amount);
+          const newBalance = Math.max(0, currentBalance - paymentAmount);
+
+          await tx
+            .update(invoices)
+            .set({
+              status: newBalance === 0 ? 'paid' : invoice.status,
+              updatedAt: new Date(),
+            })
+            .where(eq(invoices.id, payment.invoiceId));
+        }
+      }
+
+      return payment;
+    });
+  }
+
+  async updateCustomerPayment(id: string, tenantId: string, paymentData: Partial<InsertCustomerPayment>): Promise<CustomerPayment> {
+    const [updated] = await db
+      .update(customerPayments)
+      .set({
+        ...paymentData,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(customerPayments.id, id),
+        eq(customerPayments.tenantId, tenantId),
+        isNull(customerPayments.deletedAt)
+      ))
+      .returning();
+
+    if (!updated) {
+      throw new Error('Payment not found');
+    }
+
+    return updated;
+  }
+
+  async deleteCustomerPayment(id: string, tenantId: string): Promise<void> {
+    await db.transaction(async (tx) => {
+      // Get the payment first to check if it's linked to an invoice
+      const [payment] = await tx
+        .select()
+        .from(customerPayments)
+        .where(and(
+          eq(customerPayments.id, id),
+          eq(customerPayments.tenantId, tenantId),
+          isNull(customerPayments.deletedAt)
+        ))
+        .limit(1);
+
+      if (!payment) {
+        throw new Error('Payment not found');
+      }
+
+      // Soft delete the payment
+      await tx
+        .update(customerPayments)
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(customerPayments.id, id));
+
+      // If payment was linked to an invoice, restore the balance
+      if (payment.invoiceId) {
+        const [invoice] = await tx
+          .select()
+          .from(invoices)
+          .where(and(
+            eq(invoices.id, payment.invoiceId),
+            eq(invoices.tenantId, tenantId),
+            isNull(invoices.deletedAt)
+          ))
+          .limit(1);
+
+        if (invoice) {
+          const currentTotal = parseFloat(invoice.total);
+          const paymentAmount = parseFloat(payment.amount);
+          const restoredBalance = currentTotal + paymentAmount;
+
+          await tx
+            .update(invoices)
+            .set({
+              status: restoredBalance > 0 ? 'sent' : invoice.status,
+              updatedAt: new Date(),
+            })
+            .where(eq(invoices.id, payment.invoiceId));
+        }
+      }
+    });
+  }
+
+  async getNextCustomerPaymentNumber(tenantId: string): Promise<string> {
+    return await db.transaction(async (tx) => {
+      // Get or create sequence
+      let [sequence] = await tx
+        .select()
+        .from(customerPaymentSequences)
+        .where(eq(customerPaymentSequences.tenantId, tenantId))
+        .limit(1);
+      
+      if (!sequence) {
+        // Create initial sequence
+        [sequence] = await tx
+          .insert(customerPaymentSequences)
+          .values({
+            tenantId,
+            lastNumber: 1,
+            prefix: "PAY-",
+          })
+          .returning();
+        
+        return `${sequence.prefix}${String(sequence.lastNumber).padStart(4, '0')}`;
+      }
+      
+      // Increment sequence
+      const nextNumber = sequence.lastNumber + 1;
+      await tx
+        .update(customerPaymentSequences)
+        .set({ 
+          lastNumber: nextNumber,
+          updatedAt: new Date(),
+        })
+        .where(eq(customerPaymentSequences.tenantId, tenantId));
+      
+      return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
+    });
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -1757,6 +2270,8 @@ export class MemStorage implements IStorage {
   private payments: Payment[] = [];
   private documents: Document[] = [];
   private invoiceSequenceCounters: Map<string, number> = new Map();
+  private customerPayments: CustomerPayment[] = [];
+  private customerPaymentSequenceCounters: Map<string, number> = new Map();
 
   // User operations
   async getUser(id: string): Promise<User | undefined> {
@@ -2419,6 +2934,134 @@ export class MemStorage implements IStorage {
 
   async convertSalesOrderToInvoice(salesOrderId: string, tenantId: string): Promise<Invoice> {
     throw new Error('Sales orders not implemented in MemStorage');
+  }
+
+  // Credit Note operations
+  async getCreditNotes(tenantId: string): Promise<CreditNote[]> {
+    throw new Error('Credit notes not implemented in MemStorage');
+  }
+
+  async getCreditNoteById(id: string, tenantId: string): Promise<CreditNote | null> {
+    throw new Error('Credit notes not implemented in MemStorage');
+  }
+
+  async createCreditNote(note: InsertCreditNote, lineItems: InsertCreditNoteLineItem[]): Promise<CreditNote> {
+    throw new Error('Credit notes not implemented in MemStorage');
+  }
+
+  async updateCreditNote(id: string, tenantId: string, note: Partial<InsertCreditNote>, lineItems?: InsertCreditNoteLineItem[]): Promise<CreditNote> {
+    throw new Error('Credit notes not implemented in MemStorage');
+  }
+
+  async deleteCreditNote(id: string, tenantId: string): Promise<void> {
+    throw new Error('Credit notes not implemented in MemStorage');
+  }
+
+  async getCreditNoteLineItems(noteId: string, tenantId: string): Promise<CreditNoteLineItem[]> {
+    throw new Error('Credit notes not implemented in MemStorage');
+  }
+
+  async applyCreditNoteToInvoice(noteId: string, invoiceId: string, amount: string, tenantId: string): Promise<void> {
+    throw new Error('Credit notes not implemented in MemStorage');
+  }
+
+  // Customer Payment operations
+  async getCustomerPayments(tenantId: string): Promise<CustomerPayment[]> {
+    return this.customerPayments
+      .filter(p => p.tenantId === tenantId && !p.deletedAt)
+      .sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
+  }
+
+  async getCustomerPaymentById(id: string, tenantId: string): Promise<CustomerPayment | null> {
+    const payment = this.customerPayments.find(p => p.id === id && p.tenantId === tenantId && !p.deletedAt);
+    return payment || null;
+  }
+
+  async createCustomerPayment(paymentData: InsertCustomerPayment): Promise<CustomerPayment> {
+    const now = new Date();
+    const paymentId = `payment-${Date.now()}-${Math.random()}`;
+    const paymentNumber = await this.getNextCustomerPaymentNumber(paymentData.tenantId);
+
+    const newPayment: CustomerPayment = {
+      id: paymentId,
+      tenantId: paymentData.tenantId,
+      customerId: paymentData.customerId,
+      invoiceId: paymentData.invoiceId ?? null,
+      paymentNumber,
+      paymentDate: paymentData.paymentDate,
+      paymentMethod: paymentData.paymentMethod,
+      referenceNumber: paymentData.referenceNumber ?? null,
+      amount: paymentData.amount,
+      notes: paymentData.notes ?? null,
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.customerPayments.push(newPayment);
+
+    // Update invoice status if linked
+    if (newPayment.invoiceId) {
+      const invoice = this.invoices.find(i => i.id === newPayment.invoiceId && i.tenantId === paymentData.tenantId);
+      if (invoice) {
+        const currentBalance = parseFloat(invoice.total);
+        const paymentAmount = parseFloat(newPayment.amount);
+        const newBalance = Math.max(0, currentBalance - paymentAmount);
+        
+        invoice.status = newBalance === 0 ? 'paid' : invoice.status;
+        invoice.updatedAt = now;
+      }
+    }
+
+    return newPayment;
+  }
+
+  async updateCustomerPayment(id: string, tenantId: string, paymentData: Partial<InsertCustomerPayment>): Promise<CustomerPayment> {
+    const paymentIndex = this.customerPayments.findIndex(p => p.id === id && p.tenantId === tenantId && !p.deletedAt);
+    
+    if (paymentIndex === -1) {
+      throw new Error('Payment not found');
+    }
+
+    const updated = {
+      ...this.customerPayments[paymentIndex],
+      ...paymentData,
+      updatedAt: new Date(),
+    };
+
+    this.customerPayments[paymentIndex] = updated;
+    return updated;
+  }
+
+  async deleteCustomerPayment(id: string, tenantId: string): Promise<void> {
+    const payment = this.customerPayments.find(p => p.id === id && p.tenantId === tenantId && !p.deletedAt);
+    
+    if (!payment) {
+      throw new Error('Payment not found');
+    }
+
+    payment.deletedAt = new Date();
+    payment.updatedAt = new Date();
+
+    // Restore invoice status if linked
+    if (payment.invoiceId) {
+      const invoice = this.invoices.find(i => i.id === payment.invoiceId && i.tenantId === tenantId);
+      if (invoice) {
+        const currentTotal = parseFloat(invoice.total);
+        const paymentAmount = parseFloat(payment.amount);
+        const restoredBalance = currentTotal + paymentAmount;
+        
+        invoice.status = restoredBalance > 0 ? 'sent' : invoice.status;
+        invoice.updatedAt = new Date();
+      }
+    }
+  }
+
+  async getNextCustomerPaymentNumber(tenantId: string): Promise<string> {
+    const current = this.customerPaymentSequenceCounters.get(tenantId) || 0;
+    const next = current + 1;
+    this.customerPaymentSequenceCounters.set(tenantId, next);
+    return `PAY-${String(next).padStart(4, '0')}`;
   }
 }
 

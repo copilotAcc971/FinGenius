@@ -64,6 +64,7 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
       company: "",
       displayName: "",
       website: "",
+      taxRegistrationNumber: "",
       customerType: "business",
       paymentTerms: 30,
       currencyCode: "USD",
@@ -85,6 +86,7 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
         company: customer.company || "",
         displayName: customer.displayName || "",
         website: customer.website || "",
+        taxRegistrationNumber: customer.taxRegistrationNumber || "",
         customerType: customer.customerType || "business",
         paymentTerms: customer.paymentTerms || 30,
         currencyCode: customer.currencyCode || "USD",
@@ -103,6 +105,7 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
         company: "",
         displayName: "",
         website: "",
+        taxRegistrationNumber: "",
         customerType: "business",
         paymentTerms: 30,
         currencyCode: "USD",
@@ -317,6 +320,19 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
                       <FormLabel>Website</FormLabel>
                       <FormControl>
                         <Input placeholder="https://example.com" {...field} data-testid="input-website" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="taxRegistrationNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tax Registration Number (TRN)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Enter tax registration number" {...field} data-testid="input-tax-registration-number" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

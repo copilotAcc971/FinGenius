@@ -28,6 +28,9 @@ import {
   insertQuoteLineItemSchema,
   insertSalesOrderSchema,
   insertSalesOrderLineItemSchema,
+  insertCreditNoteSchema,
+  insertCreditNoteLineItemSchema,
+  insertCustomerPaymentSchema,
 } from "@shared/schema";
 
 // Initialize Stripe and OpenAI only if credentials are available
@@ -1370,6 +1373,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(invoice);
     } catch (error: any) {
       console.error('Error converting sales order to invoice:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== CREDIT NOTES =====
+
+  // Get all credit notes for tenant
+  app.get("/api/credit-notes", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const creditNotes = await storage.getCreditNotes(tenantId);
+      res.json(creditNotes);
+    } catch (error: any) {
+      console.error('Error fetching credit notes:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get credit note by ID
+  app.get("/api/credit-notes/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const creditNote = await storage.getCreditNoteById(id, tenantId);
+      
+      if (!creditNote) {
+        return res.status(404).json({ message: "Credit note not found" });
+      }
+      
+      res.json(creditNote);
+    } catch (error: any) {
+      console.error('Error fetching credit note:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get credit note line items
+  app.get("/api/credit-notes/:id/line-items", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const lineItems = await storage.getCreditNoteLineItems(id, tenantId);
+      res.json(lineItems);
+    } catch (error: any) {
+      console.error('Error fetching credit note line items:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Create credit note
+  app.post("/api/credit-notes", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { lineItems, ...creditNoteData } = req.body;
+      
+      // SECURITY: Use req.tenantId from middleware
+      const validatedCreditNote = insertCreditNoteSchema.parse({ ...creditNoteData, tenantId });
+      
+      // Validate line items
+      const validatedLineItems = lineItems.map((item: any) =>
+        insertCreditNoteLineItemSchema.parse({ ...item, tenantId })
+      );
+      
+      const creditNote = await storage.createCreditNote(validatedCreditNote, validatedLineItems);
+      res.status(201).json(creditNote);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error creating credit note:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Update credit note
+  app.patch("/api/credit-notes/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const { lineItems, subtotal, taxAmount, total, balanceRemaining, ...creditNoteData } = req.body;
+      
+      // SECURITY: Strip out client-provided totals (server will calculate)
+      const partialCreditNoteSchema = insertCreditNoteSchema.partial().omit({
+        subtotal: true,
+        taxAmount: true,
+        total: true,
+        balanceRemaining: true,
+      });
+      const validatedCreditNote = partialCreditNoteSchema.parse({ ...creditNoteData, tenantId });
+      
+      // Validate line items if provided
+      let validatedLineItems;
+      if (lineItems !== undefined) {
+        if (!Array.isArray(lineItems) || lineItems.length === 0) {
+          return res.status(422).json({ message: 'At least one line item is required' });
+        }
+        validatedLineItems = lineItems.map((item: any) =>
+          insertCreditNoteLineItemSchema.parse({ ...item, tenantId })
+        );
+      }
+      
+      const creditNote = await storage.updateCreditNote(id, tenantId, validatedCreditNote, validatedLineItems);
+      res.json(creditNote);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error updating credit note:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Delete credit note (soft delete)
+  app.delete("/api/credit-notes/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deleteCreditNote(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error('Error deleting credit note:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Apply credit note to invoice
+  app.post("/api/credit-notes/:id/apply-to-invoice", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const { invoiceId, amount } = req.body;
+      
+      if (!invoiceId || !amount) {
+        return res.status(400).json({ message: 'Invoice ID and amount are required' });
+      }
+      
+      await storage.applyCreditNoteToInvoice(id, invoiceId, amount, tenantId);
+      res.status(200).json({ message: 'Credit note applied successfully' });
+    } catch (error: any) {
+      console.error('Error applying credit note:', error);
       res.status(500).json({ message: error.message });
     }
   });

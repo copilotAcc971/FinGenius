@@ -870,6 +870,22 @@ export const insertCreditNoteLineItemSchema = createInsertSchema(creditNoteLineI
 export type InsertCreditNoteLineItem = z.infer<typeof insertCreditNoteLineItemSchema>;
 export type CreditNoteLineItem = typeof creditNoteLineItems.$inferSelect;
 
+// Credit Note Payload (for transactional create/update with line items)
+export const creditNotePayloadSchema = z.object({
+  creditNote: insertCreditNoteSchema.partial().required({ 
+    customerId: true,
+    creditNoteDate: true,
+    status: true,
+    subtotal: true,
+    taxAmount: true,
+    total: true,
+    balanceRemaining: true,
+  }),
+  lineItems: z.array(insertCreditNoteLineItemSchema.omit({ creditNoteId: true })).min(1, "At least one line item is required"),
+});
+
+export type CreditNotePayload = z.infer<typeof creditNotePayloadSchema>;
+
 // Customer Payments (Accounts Receivable - payments FROM customers)
 // Note: Renamed from 'payments' to avoid conflict with existing vendor payments table
 export const customerPayments = pgTable("customer_payments", {
@@ -906,6 +922,21 @@ export const insertCustomerPaymentSchema = createInsertSchema(customerPayments, 
 
 export type InsertCustomerPayment = z.infer<typeof insertCustomerPaymentSchema>;
 export type CustomerPayment = typeof customerPayments.$inferSelect;
+
+// Customer Payment Number Sequencing (per tenant)
+export const customerPaymentSequences = pgTable("customer_payment_sequences", {
+  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id),
+  lastNumber: integer("last_number").notNull().default(0),
+  prefix: varchar("prefix", { length: 20 }).default("PAY-"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertCustomerPaymentSequenceSchema = createInsertSchema(customerPaymentSequences).omit({
+  updatedAt: true,
+});
+
+export type InsertCustomerPaymentSequence = z.infer<typeof insertCustomerPaymentSequenceSchema>;
+export type CustomerPaymentSequence = typeof customerPaymentSequences.$inferSelect;
 
 // Recurring Invoices
 export const recurringInvoices = pgTable("recurring_invoices", {

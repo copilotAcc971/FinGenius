@@ -19,6 +19,7 @@ import Taxes from "@/pages/taxes";
 import Invoices from "@/pages/invoices";
 import Quotes from "@/pages/quotes";
 import SalesOrders from "@/pages/sales-orders";
+import CreditNotes from "@/pages/credit-notes";
 import Bills from "@/pages/bills";
 import Expenses from "@/pages/expenses";
 import Payments from "@/pages/payments";
@@ -44,6 +45,7 @@ function Router() {
           <Route path="/invoices" component={Invoices} />
           <Route path="/quotes" component={Quotes} />
           <Route path="/sales-orders" component={SalesOrders} />
+          <Route path="/credit-notes" component={CreditNotes} />
           <Route path="/bills" component={Bills} />
           <Route path="/expenses" component={Expenses} />
           <Route path="/payments" component={Payments} />
