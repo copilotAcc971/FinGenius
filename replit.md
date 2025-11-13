@@ -70,6 +70,14 @@ Building a comprehensive accounting application that matches Zoho Books function
 - ✅ Bills Module - PRODUCTION READY
   - Full CRUD API with multi-tenant security and financial integrity
   - AI-powered document data extraction using OpenAI GPT-5 with vision
+  - **Enhanced AI Extraction**:
+    - Line item extraction with description, quantity, unit price
+    - Category classification with confidence scores
+    - Predefined expense categories (Office Supplies, Travel, Utilities, Marketing, Software, etc.)
+    - Primary category detection across all line items
+    - Account type mapping (expense, asset, liability)
+    - Category badges displayed on line items with Tag icon
+    - Primary category alert banner at form top with Sparkles icon
   - Embedded file upload with AI extraction in bill dialog
   - Auto-numbering (BILL-0001)
   - Server-side financial calculations (line items, totals, tax)
@@ -188,7 +196,12 @@ Building a comprehensive accounting application that matches Zoho Books function
 - **Features**:
   - Base64 image input via image_url content type
   - Structured JSON output with response_format
-  - Extracts: vendor name, bill number, date, items, quantities, prices, totals
+  - Extracts: vendor name, bill number, date, line items with descriptions/quantities/prices, totals
+  - **Category Classification**: AI suggests expense categories for each line item
+  - **Account Type Mapping**: Automatically determines if expense, asset, or liability
+  - **Confidence Scoring**: Each category suggestion includes confidence level
+  - **Primary Category Detection**: Identifies the most common category across all line items
+  - **Predefined Categories**: Office Supplies, Travel & Transportation, Utilities, Marketing & Advertising, Software & Subscriptions, Professional Services, Rent & Lease, Meals & Entertainment, Equipment & Hardware, Insurance, Taxes & Fees, Bank Charges, Other
   - Error handling and validation
   - Embedded in bill dialog for seamless UX
 
