@@ -1894,9 +1894,15 @@ export const openBankingConnections = pgTable("open_banking_connections", {
   tokenExpiresAt: timestamp("token_expires_at"),
   
   // Encryption metadata (for AES-256-GCM)
+  // Access token encryption metadata
   encryptionIV: varchar("encryption_iv", { length: 255 }), // Base64-encoded initialization vector
   encryptionAuthTag: varchar("encryption_auth_tag", { length: 255 }), // Base64-encoded authentication tag
   encryptionKeyVersion: varchar("encryption_key_version", { length: 50 }), // For key rotation tracking
+  
+  // Refresh token encryption metadata (separate IV/authTag required for each encrypted value)
+  refreshTokenIV: varchar("refresh_token_iv", { length: 255 }),
+  refreshTokenAuthTag: varchar("refresh_token_auth_tag", { length: 255 }),
+  refreshTokenKeyVersion: varchar("refresh_token_key_version", { length: 50 }).default("v1"),
   
   // Bank/Connection metadata
   bankIdentifier: varchar("bank_identifier", { length: 100 }), 

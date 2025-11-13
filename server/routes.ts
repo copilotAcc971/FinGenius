@@ -8,7 +8,7 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
 import googleDriveRoutes from "./google-drive-routes";
-import { OpenBankingService } from './open-banking';
+import { OpenBankingService, EncryptedPayloadValidationError, TokenRefreshError, nonceStore } from './open-banking';
 import { openBankingProviderFactory } from './open-banking/providers';
 import { db } from './db';
 import { eq, and } from 'drizzle-orm';
@@ -3026,6 +3026,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: 'Invalid or expired state parameter' });
       }
 
+      // SECURITY: Check for nonce replay attack
+      if (nonceStore.isNonceUsed(statePayload.nonce)) {
+        console.log('[Open Banking] Callback failed: Nonce replay detected', {
+          nonce: statePayload.nonce,
+          clientIp,
+        });
+        return res.status(400).json({ message: 'Invalid or reused authorization state' });
+      }
+
       // SECURITY: Extract verified tenantId from JWT (NEVER trust query params)
       const { tenantId, entityType, entityId } = statePayload;
 
@@ -3069,6 +3078,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(403).json({ message: 'Entity validation failed' });
         }
       }
+
+      // SECURITY: Mark nonce as used IMMEDIATELY to prevent replay attacks
+      // This happens BEFORE any side effects (token exchange, connection creation)
+      // so that even if those operations fail, the nonce cannot be replayed
+      nonceStore.markNonceAsUsed(statePayload.nonce);
 
       // Construct redirect URI
       const baseUrl = process.env.REPLIT_DOMAINS?.split(',')[0] 
@@ -3211,7 +3225,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error: any) {
       console.error('[Open Banking] Refresh error:', error);
-      res.status(500).json({ 
+      
+      // Handle typed errors with appropriate status codes
+      if (error instanceof EncryptedPayloadValidationError) {
+        return res.status(400).json({ 
+          message: 'Invalid encrypted token data',
+          error: error.message 
+        });
+      }
+      
+      if (error instanceof TokenRefreshError) {
+        return res.status(400).json({ 
+          message: 'Token refresh failed',
+          error: error.message 
+        });
+      }
+      
+      // Generic error fallback
+      return res.status(500).json({ 
         message: "Failed to refresh connection",
         error: error.message 
       });

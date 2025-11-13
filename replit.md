@@ -34,8 +34,10 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - **OpenAI GPT-5:** Used for AI-powered document data extraction from bills and categorisation.
 - **Microsoft Graph API (Outlook):** For sending emails (e.g., invoices) with Mail.Send permission.
 - **Stripe:** Configured for payment processing, specifically for vendor payments via Stripe Connect.
-- **Lean Technologies (Planned):** Integration for Open Banking functionalities, including:
-    - Autonomous Reconciler (transaction webhooks, NLP parsing, auto-categorization, VAT calculation).
-    - AP/AR Command Center (live bank balance checks, bill payments, payment links).
-    - Cash Flow Co-Pilot (predictive forecasting).
-    - Onboarding & Trust Shield (KYC/KYB verification).
+- **Lean Technologies (Implemented):** Complete Open Banking integration with:
+    - **OAuth2 Flow:** JWT-based secure authorization with entity ownership validation
+    - **Token Management:** AES-256-GCM encryption with automatic refresh (pending KMS integration for production)
+    - **Provider Abstraction:** Capability-based architecture supporting data access, payments, and identity verification
+    - **Bank Connections UI:** Full connection management (connect, view, refresh, disconnect)
+    - **Security:** Multi-tenant isolation, signed state parameters, entity validation
+    - **Future Capabilities:** Ready for autonomous reconciliation, AP/AR command center, cash flow forecasting, KYC/KYB verification

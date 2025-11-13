@@ -26,6 +26,20 @@ import {
 } from './providers/base-provider';
 import { tokenEncryption } from './encryption';
 
+export class EncryptedPayloadValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EncryptedPayloadValidationError';
+  }
+}
+
+export class TokenRefreshError extends Error {
+  constructor(message: string, public cause?: Error) {
+    super(message);
+    this.name = 'TokenRefreshError';
+  }
+}
+
 export class CapabilityNotSupportedError extends Error {
   constructor(
     public providerId: string,
@@ -69,9 +83,14 @@ export class OpenBankingService {
         accessToken: encryptedAccessToken.ciphertext,
         refreshToken: encryptedRefreshToken.ciphertext,
         tokenExpiresAt,
+        // Access token encryption metadata
         encryptionIV: encryptedAccessToken.iv,
         encryptionAuthTag: encryptedAccessToken.authTag,
         encryptionKeyVersion: encryptedAccessToken.keyVersion,
+        // Refresh token encryption metadata (separate IV/authTag for each encrypted value)
+        refreshTokenIV: encryptedRefreshToken.iv,
+        refreshTokenAuthTag: encryptedRefreshToken.authTag,
+        refreshTokenKeyVersion: encryptedRefreshToken.keyVersion,
         bankIdentifier,
         bankName,
         accountType,
@@ -134,18 +153,35 @@ export class OpenBankingService {
       connection = await this.getConnection(connectionId);
 
       if (!connection.refreshToken) {
-        throw new Error('No refresh token available for this connection');
+        throw new TokenRefreshError('No refresh token available for this connection');
       }
 
-      const decryptedRefreshToken = await tokenEncryption.decrypt(
-        connection.refreshToken,
-        connection.encryptionIV!,
-        connection.encryptionAuthTag!,
-        connection.encryptionKeyVersion!
-      );
+      // CRITICAL FIX: Use refresh token's own IV/authTag for decryption
+      let decryptedRefreshToken: string;
+      try {
+        decryptedRefreshToken = await tokenEncryption.decrypt(
+          connection.refreshToken,
+          connection.refreshTokenIV!,  // Use refresh token's IV
+          connection.refreshTokenAuthTag!,  // Use refresh token's auth tag
+          connection.refreshTokenKeyVersion!  // Use refresh token's key version
+        );
+      } catch (error) {
+        throw new EncryptedPayloadValidationError(
+          `Failed to decrypt refresh token: ${error instanceof Error ? error.message : 'Invalid encryption parameters'}`
+        );
+      }
 
       const provider = openBankingProviderFactory.createProvider(connection.provider as OpenBankingProvider);
-      const newTokens = await provider.refreshAccessToken(decryptedRefreshToken);
+      
+      let newTokens;
+      try {
+        newTokens = await provider.refreshAccessToken(decryptedRefreshToken);
+      } catch (error) {
+        throw new TokenRefreshError(
+          `Provider failed to refresh token: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          error instanceof Error ? error : undefined
+        );
+      }
 
       await this.updateTokens(connectionId, newTokens);
 
@@ -157,9 +193,11 @@ export class OpenBankingService {
         error
       );
 
+      // Downgrade connection status to 'error' on refresh failure
       await db
         .update(openBankingConnections)
         .set({
+          status: 'error',  // Downgrade status
           syncErrors: newSyncErrorCount,
           lastSyncError: error instanceof Error ? error.message : 'Unknown error',
           updatedAt: new Date(),
@@ -171,8 +209,14 @@ export class OpenBankingService {
           )
         );
 
-      throw new Error(
-        `Failed to refresh Open Banking connection: ${error instanceof Error ? error.message : 'Unknown error'}`
+      // Re-throw typed errors as-is for proper handling in routes
+      if (error instanceof EncryptedPayloadValidationError || error instanceof TokenRefreshError) {
+        throw error;
+      }
+
+      throw new TokenRefreshError(
+        `Failed to refresh Open Banking connection: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error instanceof Error ? error : undefined
       );
     }
   }
@@ -493,19 +537,46 @@ export class OpenBankingService {
         throw new Error('Connection missing encrypted token data');
       }
 
+      // Decrypt ACCESS token using access token's own encryption metadata
+      const decryptedAccessToken = await tokenEncryption.decrypt(
+        connection.accessToken,
+        connection.encryptionIV,  // Access token IV
+        connection.encryptionAuthTag,  // Access token authTag
+        connection.encryptionKeyVersion
+      );
+
+      // Check if access token is expired
       const now = new Date();
       const tokenExpiresAt = connection.tokenExpiresAt ? new Date(connection.tokenExpiresAt) : null;
 
-      if (tokenExpiresAt && now >= tokenExpiresAt) {
+      if (tokenExpiresAt && tokenExpiresAt <= now) {
         console.log(`[OpenBankingService] Access token expired for connection ${connection.id}, refreshing...`);
+
+        // Validate refresh token exists and has required encryption metadata
+        if (!connection.refreshToken || !connection.refreshTokenIV || !connection.refreshTokenAuthTag || !connection.refreshTokenKeyVersion) {
+          throw new Error('Refresh token not available or missing encryption data');
+        }
+
+        // CRITICAL: Decrypt REFRESH token using refresh token's own encryption metadata
+        // This validates the refresh token can be decrypted before attempting refresh
+        const decryptedRefreshToken = await tokenEncryption.decrypt(
+          connection.refreshToken,
+          connection.refreshTokenIV,  // Refresh token IV (NOT access token IV)
+          connection.refreshTokenAuthTag,  // Refresh token authTag (NOT access token authTag)
+          connection.refreshTokenKeyVersion
+        );
+
+        // Refresh the token (this will use decryptedRefreshToken internally)
         await this.refreshConnection(connection.id);
 
+        // Re-fetch connection to get new access token
         const updatedConnection = await this.getConnection(connection.id);
 
         if (!updatedConnection.accessToken || !updatedConnection.encryptionIV || !updatedConnection.encryptionAuthTag || !updatedConnection.encryptionKeyVersion) {
           throw new Error('Failed to refresh token: missing encryption data');
         }
 
+        // Decrypt the new access token using its own encryption metadata
         return await tokenEncryption.decrypt(
           updatedConnection.accessToken,
           updatedConnection.encryptionIV,
@@ -514,12 +585,7 @@ export class OpenBankingService {
         );
       }
 
-      return await tokenEncryption.decrypt(
-        connection.accessToken,
-        connection.encryptionIV,
-        connection.encryptionAuthTag,
-        connection.encryptionKeyVersion
-      );
+      return decryptedAccessToken;
     } catch (error) {
       console.error('[OpenBankingService] Failed to ensure valid token:', error);
       throw new Error(
@@ -571,9 +637,14 @@ export class OpenBankingService {
           accessToken: encryptedAccessToken.ciphertext,
           refreshToken: encryptedRefreshToken.ciphertext,
           tokenExpiresAt,
+          // Access token encryption metadata
           encryptionIV: encryptedAccessToken.iv,
           encryptionAuthTag: encryptedAccessToken.authTag,
           encryptionKeyVersion: encryptedAccessToken.keyVersion,
+          // Refresh token encryption metadata (separate IV/authTag for each encrypted value)
+          refreshTokenIV: encryptedRefreshToken.iv,
+          refreshTokenAuthTag: encryptedRefreshToken.authTag,
+          refreshTokenKeyVersion: encryptedRefreshToken.keyVersion,
           updatedAt: new Date(),
         })
         .where(
