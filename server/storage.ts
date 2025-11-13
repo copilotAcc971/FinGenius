@@ -8,6 +8,8 @@ import {
   taxes,
   invoices,
   invoiceLineItems,
+  invoiceSequences,
+  invoiceAuditLogs,
   bills,
   billLineItems,
   expenses,
@@ -30,6 +32,7 @@ import {
   type InvoiceLineItem,
   type InsertInvoiceLineItem,
   type InvoicePayload,
+  type InsertInvoiceAuditLog,
   type Bill,
   type InsertBill,
   type BillLineItem,
@@ -43,7 +46,7 @@ import {
   type InsertDocument,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, ne } from "drizzle-orm";
+import { eq, and, desc, ne, isNull } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -85,12 +88,19 @@ export interface IStorage {
   deleteTax(id: string, tenantId: string): Promise<void>;
 
   // Invoice operations
-  getInvoicesByTenant(tenantId: string): Promise<Invoice[]>;
+  getInvoicesByTenant(tenantId: string, includeDeleted?: boolean): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
+  getInvoiceById(id: string, tenantId: string): Promise<Invoice | null>;
   getInvoiceLineItems(invoiceId: string): Promise<InvoiceLineItem[]>;
   createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice>;
   updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice>;
-  deleteInvoice(id: string, tenantId: string): Promise<void>;
+  deleteInvoice(id: string, tenantId: string): Promise<boolean>;
+  
+  // Invoice sequencing
+  getNextInvoiceNumber(tenantId: string): Promise<string>;
+  
+  // Audit logging
+  logInvoiceAudit(log: InsertInvoiceAuditLog): Promise<void>;
 
   // Bill operations
   getBillsByTenant(tenantId: string): Promise<Bill[]>;
@@ -396,17 +406,39 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Invoice operations
-  async getInvoicesByTenant(tenantId: string): Promise<Invoice[]> {
+  async getInvoicesByTenant(tenantId: string, includeDeleted: boolean = false): Promise<Invoice[]> {
+    const conditions = [eq(invoices.tenantId, tenantId)];
+    
+    if (!includeDeleted) {
+      conditions.push(isNull(invoices.deletedAt));
+    }
+    
     return await db
       .select()
       .from(invoices)
-      .where(eq(invoices.tenantId, tenantId))
+      .where(and(...conditions))
       .orderBy(desc(invoices.invoiceDate));
   }
 
   async getInvoice(id: string): Promise<Invoice | undefined> {
     const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
     return invoice;
+  }
+
+  async getInvoiceById(id: string, tenantId: string): Promise<Invoice | null> {
+    const [invoice] = await db
+      .select()
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.id, id),
+          eq(invoices.tenantId, tenantId),
+          isNull(invoices.deletedAt)
+        )
+      )
+      .limit(1);
+    
+    return invoice || null;
   }
 
   async getInvoiceLineItems(invoiceId: string): Promise<InvoiceLineItem[]> {
@@ -418,10 +450,16 @@ export class DatabaseStorage implements IStorage {
 
   async createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice> {
     return await db.transaction(async (tx) => {
+      // Validate tenantId exists
+      const tenantId = payload.invoice.tenantId;
+      if (!tenantId) {
+        throw new Error("Tenant ID is required");
+      }
+      
       const customer = await tx.select().from(customers)
         .where(and(
           eq(customers.id, payload.invoice.customerId),
-          eq(customers.tenantId, payload.invoice.tenantId)
+          eq(customers.tenantId, tenantId)
         ))
         .limit(1);
       
@@ -429,31 +467,62 @@ export class DatabaseStorage implements IStorage {
         throw new Error("Customer not found or doesn't belong to this tenant");
       }
       
+      // ALWAYS generate invoice number server-side (ignore client-provided value)
+      const invoiceNumber = await this.getNextInvoiceNumber(tenantId);
+      
       const [invoice] = await tx
         .insert(invoices)
-        .values(payload.invoice)
+        .values({
+          ...payload.invoice,
+          tenantId,
+          invoiceNumber,
+        })
         .returning();
       
       if (payload.lineItems.length > 0) {
         const lineItemsWithInvoiceId = payload.lineItems.map(item => ({
           ...item,
           invoiceId: invoice.id,
-          tenantId: payload.invoice.tenantId,
+          tenantId,
         }));
         await tx.insert(invoiceLineItems).values(lineItemsWithInvoiceId);
       }
+      
+      // Log creation with full invoice data
+      await tx.insert(invoiceAuditLogs).values({
+        tenantId,
+        invoiceId: invoice.id,
+        userId: null,
+        action: "created",
+        changes: {
+          after: invoice,
+          lineItemsCount: payload.lineItems.length,
+        },
+      });
       
       return invoice;
     });
   }
 
   async updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice> {
-    const invoice = await this.getInvoice(id);
-    if (!invoice || invoice.tenantId !== tenantId) {
-      throw new Error("Invoice not found");
-    }
-    
     return await db.transaction(async (tx) => {
+      // Fetch BEFORE state
+      const [existingInvoice] = await tx
+        .select()
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.id, id),
+            eq(invoices.tenantId, tenantId),
+            isNull(invoices.deletedAt)
+          )
+        )
+        .limit(1);
+      
+      if (!existingInvoice) {
+        throw new Error("Invoice not found or has been deleted");
+      }
+      
       const customer = await tx.select().from(customers)
         .where(and(
           eq(customers.id, payload.invoice.customerId),
@@ -467,11 +536,12 @@ export class DatabaseStorage implements IStorage {
       
       const { tenantId: _, ...safeInvoiceData } = payload.invoice;
       
+      // Update invoice
       const [updatedInvoice] = await tx
         .update(invoices)
         .set({ 
           ...safeInvoiceData, 
-          tenantId: invoice.tenantId,
+          tenantId: existingInvoice.tenantId,
           updatedAt: new Date() 
         })
         .where(eq(invoices.id, id))
@@ -487,24 +557,55 @@ export class DatabaseStorage implements IStorage {
         const lineItemsWithInvoiceId = payload.lineItems.map(item => ({
           ...item,
           invoiceId: id,
-          tenantId: invoice.tenantId,
+          tenantId: existingInvoice.tenantId,
         }));
         await tx.insert(invoiceLineItems).values(lineItemsWithInvoiceId);
       }
+      
+      // Log update with before/after
+      await tx.insert(invoiceAuditLogs).values({
+        tenantId: existingInvoice.tenantId,
+        invoiceId: id,
+        userId: null,
+        action: "updated",
+        changes: {
+          before: existingInvoice,
+          after: updatedInvoice,
+        },
+      });
       
       return updatedInvoice;
     });
   }
 
-  async deleteInvoice(id: string, tenantId: string): Promise<void> {
-    const invoice = await this.getInvoice(id);
-    if (!invoice || invoice.tenantId !== tenantId) {
-      throw new Error("Invoice not found");
-    }
-    
-    await db.transaction(async (tx) => {
-      await tx.delete(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, id));
-      await tx.delete(invoices).where(eq(invoices.id, id));
+  async deleteInvoice(id: string, tenantId: string): Promise<boolean> {
+    return await db.transaction(async (tx) => {
+      // Use getInvoiceById which filters soft-deleted invoices
+      const existingInvoice = await this.getInvoiceById(id, tenantId);
+      
+      if (!existingInvoice) {
+        // Already deleted or doesn't exist
+        return false;
+      }
+      
+      // Soft delete
+      await tx
+        .update(invoices)
+        .set({ deletedAt: new Date() })
+        .where(eq(invoices.id, id));
+      
+      // Log deletion with before state
+      await tx.insert(invoiceAuditLogs).values({
+        tenantId,
+        invoiceId: id,
+        userId: null,
+        action: "deleted",
+        changes: {
+          before: existingInvoice,
+        },
+      });
+      
+      return true;
     });
   }
 
@@ -717,6 +818,49 @@ export class DatabaseStorage implements IStorage {
       .where(eq(documents.id, id))
       .returning();
     return updatedDocument;
+  }
+
+  // Invoice sequencing
+  async getNextInvoiceNumber(tenantId: string): Promise<string> {
+    return await db.transaction(async (tx) => {
+      // Get or create sequence
+      let [sequence] = await tx
+        .select()
+        .from(invoiceSequences)
+        .where(eq(invoiceSequences.tenantId, tenantId))
+        .limit(1);
+      
+      if (!sequence) {
+        // Create initial sequence
+        [sequence] = await tx
+          .insert(invoiceSequences)
+          .values({
+            tenantId,
+            lastNumber: 1,
+            prefix: "INV-",
+          })
+          .returning();
+        
+        return `${sequence.prefix}${String(sequence.lastNumber).padStart(4, '0')}`;
+      }
+      
+      // Increment sequence
+      const nextNumber = sequence.lastNumber + 1;
+      await tx
+        .update(invoiceSequences)
+        .set({ 
+          lastNumber: nextNumber,
+          updatedAt: new Date(),
+        })
+        .where(eq(invoiceSequences.tenantId, tenantId));
+      
+      return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
+    });
+  }
+
+  // Audit logging
+  async logInvoiceAudit(log: InsertInvoiceAuditLog): Promise<void> {
+    await db.insert(invoiceAuditLogs).values(log);
   }
 }
 

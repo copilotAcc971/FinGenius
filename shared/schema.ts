@@ -10,6 +10,7 @@ import {
   integer,
   decimal,
   boolean,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -341,7 +342,8 @@ export const invoices = pgTable("invoices", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   customerId: varchar("customer_id").notNull().references(() => customers.id),
-  invoiceNumber: varchar("invoice_number", { length: 100 }).notNull(),
+  invoiceNumber: varchar("invoice_number", { length: 100 }),
+  poReference: varchar("po_reference", { length: 100 }), // Purchase Order reference
   invoiceDate: timestamp("invoice_date").notNull(),
   dueDate: timestamp("due_date").notNull(),
   status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, sent, paid, overdue, cancelled
@@ -349,9 +351,16 @@ export const invoices = pgTable("invoices", {
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
   notes: text("notes"),
+  deletedAt: timestamp("deleted_at"), // Soft delete
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  // Composite unique constraint: invoice_number must be unique per tenant
+  unique("unique_invoice_number_tenant").on(table.tenantId, table.invoiceNumber),
+  // Composite unique constraint: po_reference must be unique per tenant (when not null)
+  // Note: NULL values don't violate unique constraints in PostgreSQL
+  unique("unique_po_reference_tenant").on(table.tenantId, table.poReference),
+]);
 
 export const insertInvoiceSchema = createInsertSchema(invoices, {
   subtotal: decimalString,
@@ -359,8 +368,12 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   total: decimalString,
 }).omit({
   id: true,
+  deletedAt: true, // Managed by soft delete
   createdAt: true,
   updatedAt: true,
+}).extend({
+  // Explicitly make invoiceNumber optional (server-generated)
+  invoiceNumber: z.string().max(100).optional(),
 });
 
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
@@ -396,7 +409,6 @@ export type InvoiceLineItem = typeof invoiceLineItems.$inferSelect;
 export const invoicePayloadSchema = z.object({
   invoice: insertInvoiceSchema.partial().required({ 
     customerId: true,
-    invoiceNumber: true,
     invoiceDate: true,
     dueDate: true,
     status: true,
@@ -408,6 +420,40 @@ export const invoicePayloadSchema = z.object({
 });
 
 export type InvoicePayload = z.infer<typeof invoicePayloadSchema>;
+
+// Invoice Audit Logs (for compliance and tracking changes)
+export const invoiceAuditLogs = pgTable("invoice_audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  invoiceId: varchar("invoice_id").notNull().references(() => invoices.id),
+  userId: varchar("user_id").references(() => users.id),
+  action: varchar("action", { length: 50 }).notNull(), // created, updated, deleted, sent, paid, cancelled
+  changes: jsonb("changes"), // JSON of what changed
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+});
+
+export const insertInvoiceAuditLogSchema = createInsertSchema(invoiceAuditLogs).omit({
+  id: true,
+  timestamp: true,
+});
+
+export type InsertInvoiceAuditLog = z.infer<typeof insertInvoiceAuditLogSchema>;
+export type InvoiceAuditLog = typeof invoiceAuditLogs.$inferSelect;
+
+// Invoice Number Sequencing (per tenant)
+export const invoiceSequences = pgTable("invoice_sequences", {
+  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id),
+  lastNumber: integer("last_number").notNull().default(0),
+  prefix: varchar("prefix", { length: 20 }).default("INV-"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertInvoiceSequenceSchema = createInsertSchema(invoiceSequences).omit({
+  updatedAt: true,
+});
+
+export type InsertInvoiceSequence = z.infer<typeof insertInvoiceSequenceSchema>;
+export type InvoiceSequence = typeof invoiceSequences.$inferSelect;
 
 // Bills (Purchases from Vendors)
 export const bills = pgTable("bills", {

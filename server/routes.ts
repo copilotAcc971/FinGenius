@@ -444,6 +444,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/invoices/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const invoice = await storage.getInvoiceById(id, req.tenantId);
+      
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found or has been deleted" });
+      }
+      
+      res.json(invoice);
+    } catch (error) {
+      console.error("Error fetching invoice:", error);
+      res.status(500).json({ message: "Failed to fetch invoice" });
+    }
+  });
+
   app.get('/api/invoices/:id/line-items', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
       const { id } = req.params;
@@ -484,27 +500,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/invoices/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
       const { id } = req.params;
-      const userId = req.user.claims.sub;
       
-      const invoice = await storage.getInvoice(id);
-      if (!invoice) {
-        return res.status(404).json({ message: "Invoice not found" });
-      }
-      
-      const tenant = await storage.getTenant(invoice.tenantId);
-      if (!tenant || tenant.ownerId !== userId) {
-        return res.status(403).json({ message: "Access denied" });
+      // SECURITY: Verify invoice exists and belongs to tenant before update
+      const existing = await storage.getInvoiceById(id, req.tenantId);
+      if (!existing) {
+        return res.status(404).json({ message: "Invoice not found or has been deleted" });
       }
       
       const parsed = invoicePayloadSchema.parse({
-        invoice: { ...req.body.invoice, tenantId: invoice.tenantId },
+        invoice: { ...req.body.invoice, tenantId: req.tenantId },
         lineItems: req.body.lineItems || [],
       });
       
-      const updated = await storage.updateInvoiceWithItems(id, invoice.tenantId, parsed);
+      const updated = await storage.updateInvoiceWithItems(id, req.tenantId, parsed);
       res.json(updated);
     } catch (error: any) {
       console.error("Error updating invoice:", error);
+      if (error.message === "Invoice not found or has been deleted") {
+        return res.status(404).json({ message: error.message });
+      }
       res.status(400).json({ message: error.message || "Failed to update invoice" });
     }
   });
@@ -524,8 +538,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied" });
       }
       
-      await storage.deleteInvoice(id, invoice.tenantId);
-      res.json({ message: "Invoice deleted successfully" });
+      const success = await storage.deleteInvoice(id, invoice.tenantId);
+      if (success) {
+        res.json({ message: "Invoice deleted successfully" });
+      } else {
+        res.status(404).json({ message: "Invoice not found or already deleted" });
+      }
     } catch (error: any) {
       console.error("Error deleting invoice:", error);
       res.status(400).json({ message: error.message || "Failed to delete invoice" });

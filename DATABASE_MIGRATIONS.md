@@ -156,3 +156,76 @@ This file documents important database migrations that need to be run when deplo
 **Status:** ✅ Completed - Schema updated | ✅ Migration SQL executed successfully (0 rows updated) | ✅ tenant_company_profiles table created
 
 ---
+
+## Migration 4: Invoice Audit Trail, Uniqueness Constraints, and Soft Delete (2025-11-13)
+
+**Purpose:** Implement comprehensive invoice audit trail for compliance, enforce data integrity with unique constraints per tenant, and enable soft delete functionality for invoice recovery and historical tracking.
+
+**Schema Changes:**
+
+**Invoices Table:**
+- Added without defaults:
+  - `poReference` (varchar, length 100): Optional Purchase Order reference number
+  - `deletedAt` (timestamp): Soft delete timestamp (NULL means not deleted)
+- Added composite unique constraints:
+  - `unique_invoice_number_tenant`: Ensures invoice_number is unique per tenant
+  - `unique_po_reference_tenant`: Ensures po_reference is unique per tenant when not NULL
+  - Note: PostgreSQL allows multiple NULL values in UNIQUE constraints
+
+**Invoice Audit Logs Table (NEW):**
+- `id` (varchar): Primary key with UUID default
+- `tenantId` (varchar): Foreign key to tenants.id
+- `invoiceId` (varchar): Foreign key to invoices.id
+- `userId` (varchar): Foreign key to users.id (nullable) - who performed the action
+- `action` (varchar, length 50): Action type - created, updated, deleted, sent, paid, cancelled
+- `changes` (jsonb): Detailed JSON of what changed (before/after values)
+- `timestamp` (timestamp): When the action occurred (auto-set)
+
+**Invoice Sequences Table (NEW):**
+- `tenantId` (varchar): Primary key, foreign key to tenants.id
+- `lastNumber` (integer): Last used invoice number, default 0
+- `prefix` (varchar, length 20): Invoice number prefix (e.g., "INV-"), default "INV-"
+- `updatedAt` (timestamp): Last updated timestamp
+
+**Migration Files:**
+- Schema: `shared/schema.ts` (updated invoices, added invoiceAuditLogs, added invoiceSequences)
+- SQL Script: `migrations/004_invoice_audit_constraints.sql`
+
+**Execution Steps:**
+1. Run `npm run db:push` to sync schema
+2. Execute migration SQL (if needed for manual verification):
+   ```bash
+   # Development (using execute_sql_tool)
+   # Or Production:
+   psql $DATABASE_URL -f migrations/004_invoice_audit_constraints.sql
+   ```
+3. Verify invoices table has new columns: po_reference, deleted_at
+4. Verify unique constraints exist: unique_invoice_number_tenant, unique_po_reference_tenant
+5. Verify invoice_audit_logs table created with foreign keys
+6. Verify invoice_sequences table created with tenantId as primary key
+
+**What the Migration Does:**
+1. Adds `po_reference` column to invoices table (nullable)
+2. Adds `deleted_at` column to invoices table for soft delete (nullable)
+3. Creates composite unique constraints via Drizzle schema
+4. Creates `invoice_audit_logs` table for compliance tracking
+5. Creates `invoice_sequences` table for automatic invoice numbering per tenant
+
+**Key Changes:**
+- Updated `insertInvoiceSchema` to omit `deletedAt` (managed internally)
+- Added `InsertInvoiceAuditLog` and `InvoiceAuditLog` type exports
+- Added `InsertInvoiceSequence` and `InvoiceSequence` type exports
+- Unique constraints enforce data integrity at database level
+- Audit logs provide complete change history for regulatory compliance
+- Soft delete preserves invoice history while hiding from normal queries
+
+**Use Cases:**
+- **Audit Trail**: Track all invoice modifications for compliance (SOX, GDPR, etc.)
+- **Data Integrity**: Prevent duplicate invoice numbers within same tenant
+- **PO Tracking**: Link invoices to customer purchase orders with uniqueness guarantee
+- **Soft Delete**: Recover accidentally deleted invoices, maintain historical records
+- **Auto-numbering**: Generate sequential invoice numbers per tenant with custom prefix
+
+**Status:** ✅ Completed - Schema updated | ✅ db:push executed successfully | ✅ All tables and constraints created | ✅ No LSP errors
+
+---
