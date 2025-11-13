@@ -75,21 +75,61 @@ export const insertTenantMemberSchema = createInsertSchema(tenantMembers).omit({
 export type InsertTenantMember = z.infer<typeof insertTenantMemberSchema>;
 export type TenantMember = typeof tenantMembers.$inferSelect;
 
+// Address schema for JSONB fields
+export const addressSchema = z.object({
+  attention: z.string().optional(),
+  street: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zip: z.string().optional(),
+  country: z.string().optional(),
+});
+
+// Contact person schema for JSONB fields
+export const contactPersonSchema = z.object({
+  firstName: z.string(),
+  lastName: z.string().optional(),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  mobile: z.string().optional(),
+  designation: z.string().optional(),
+});
+
 // Customers
 export const customers = pgTable("customers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  
+  // Basic info (existing)
   name: varchar("name", { length: 255 }).notNull(),
   email: varchar("email", { length: 255 }),
   phone: varchar("phone", { length: 50 }),
   company: varchar("company", { length: 255 }),
+  
+  // NEW FIELDS for Zoho Books integration
+  displayName: varchar("display_name", { length: 255 }),
+  website: varchar("website", { length: 255 }),
+  customerType: varchar("customer_type", { length: 50 }).default("business"),
+  paymentTerms: integer("payment_terms").default(30),
+  currencyCode: varchar("currency_code", { length: 3 }).default("USD"),
+  
+  // Structured addresses (JSONB)
+  billingAddress: jsonb("billing_address").$type<z.infer<typeof addressSchema>>().default({}),
+  shippingAddress: jsonb("shipping_address").$type<z.infer<typeof addressSchema>>().default({}),
+  contactPersons: jsonb("contact_persons").$type<z.infer<typeof contactPersonSchema>[]>().default([]),
+  
+  // Keep existing fields
   address: text("address"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertCustomerSchema = createInsertSchema(customers).omit({
+export const insertCustomerSchema = createInsertSchema(customers, {
+  billingAddress: addressSchema.optional(),
+  shippingAddress: addressSchema.optional(),
+  contactPersons: z.array(contactPersonSchema).optional(),
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
