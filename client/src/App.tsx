@@ -17,6 +17,7 @@ import Vendors from "@/pages/vendors";
 import Items from "@/pages/items";
 import Taxes from "@/pages/taxes";
 import Invoices from "@/pages/invoices";
+import Quotes from "@/pages/quotes";
 import Bills from "@/pages/bills";
 import Expenses from "@/pages/expenses";
 import Payments from "@/pages/payments";
@@ -40,6 +41,7 @@ function Router() {
           <Route path="/items" component={Items} />
           <Route path="/taxes" component={Taxes} />
           <Route path="/invoices" component={Invoices} />
+          <Route path="/quotes" component={Quotes} />
           <Route path="/bills" component={Bills} />
           <Route path="/expenses" component={Expenses} />
           <Route path="/payments" component={Payments} />

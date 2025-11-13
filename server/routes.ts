@@ -24,6 +24,8 @@ import {
   insertExpenseSchema,
   insertPaymentSchema,
   insertDocumentSchema,
+  insertQuoteSchema,
+  insertQuoteLineItemSchema,
 } from "@shared/schema";
 
 // Initialize Stripe and OpenAI only if credentials are available
@@ -1098,6 +1100,141 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error generating PDF:', error);
       res.status(500).json({ error: error.message || 'Failed to generate PDF' });
+    }
+  });
+
+  // ===== QUOTES =====
+
+  // Get all quotes for tenant
+  app.get("/api/quotes", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const quotes = await storage.getQuotes(tenantId);
+      res.json(quotes);
+    } catch (error: any) {
+      console.error('Error fetching quotes:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get quote by ID
+  app.get("/api/quotes/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const quote = await storage.getQuoteById(id, tenantId);
+      
+      if (!quote) {
+        return res.status(404).json({ message: "Quote not found" });
+      }
+      
+      res.json(quote);
+    } catch (error: any) {
+      console.error('Error fetching quote:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get quote line items
+  app.get("/api/quotes/:id/line-items", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const lineItems = await storage.getQuoteLineItems(id, tenantId);
+      res.json(lineItems);
+    } catch (error: any) {
+      console.error('Error fetching quote line items:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Create quote
+  app.post("/api/quotes", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!; // From middleware - trusted source
+      const { lineItems, ...quoteData } = req.body;
+      
+      // SECURITY: IGNORE client-provided tenantId, use req.tenantId instead
+      const validatedQuote = insertQuoteSchema.parse({ ...quoteData, tenantId });
+      
+      // Validate line items - also use req.tenantId
+      const validatedLineItems = lineItems.map((item: any) =>
+        insertQuoteLineItemSchema.parse({ ...item, tenantId })
+      );
+      
+      const quote = await storage.createQuote(validatedQuote, validatedLineItems);
+      res.status(201).json(quote);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error creating quote:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Update quote
+  app.patch("/api/quotes/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!; // From middleware - trusted source
+      const { lineItems, subtotal, taxAmount, total, ...quoteData } = req.body;
+      
+      // SECURITY: Strip out any client-provided totals (server will calculate)
+      // Only allow non-financial fields to be updated
+      
+      const partialQuoteSchema = insertQuoteSchema.partial().omit({
+        subtotal: true,
+        taxAmount: true,
+        total: true,
+      });
+      const validatedQuote = partialQuoteSchema.parse({ ...quoteData, tenantId });
+      
+      // Validate line items if provided
+      let validatedLineItems;
+      if (lineItems !== undefined) {
+        if (!Array.isArray(lineItems) || lineItems.length === 0) {
+          return res.status(422).json({ message: 'At least one line item is required' });
+        }
+        validatedLineItems = lineItems.map((item: any) =>
+          insertQuoteLineItemSchema.parse({ ...item, tenantId })
+        );
+      }
+      
+      const quote = await storage.updateQuote(id, tenantId, validatedQuote, validatedLineItems);
+      res.json(quote);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error updating quote:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Delete quote (soft delete)
+  app.delete("/api/quotes/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deleteQuote(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error('Error deleting quote:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Convert quote to invoice
+  app.post("/api/quotes/:id/convert-to-invoice", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const invoice = await storage.convertQuoteToInvoice(id, tenantId);
+      res.status(201).json(invoice);
+    } catch (error: any) {
+      console.error('Error converting quote to invoice:', error);
+      res.status(500).json({ message: error.message });
     }
   });
 

@@ -16,6 +16,8 @@ import {
   expenses,
   payments,
   documents,
+  quotes,
+  quoteLineItems,
   type User,
   type UpsertUser,
   type Tenant,
@@ -47,6 +49,10 @@ import {
   type InsertPayment,
   type Document,
   type InsertDocument,
+  type Quote,
+  type InsertQuote,
+  type QuoteLineItem,
+  type InsertQuoteLineItem,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull } from "drizzle-orm";
@@ -146,6 +152,15 @@ export interface IStorage {
   getDocumentsByTenant(tenantId: string): Promise<Document[]>;
   createDocument(document: InsertDocument): Promise<Document>;
   updateDocument(id: string, tenantId: string, document: Partial<InsertDocument>): Promise<Document>;
+
+  // Quote operations
+  getQuotes(tenantId: string): Promise<Quote[]>;
+  getQuoteById(id: string, tenantId: string): Promise<Quote | null>;
+  createQuote(quote: InsertQuote, lineItems: InsertQuoteLineItem[]): Promise<Quote>;
+  updateQuote(id: string, tenantId: string, quote: Partial<InsertQuote>, lineItems?: InsertQuoteLineItem[]): Promise<Quote>;
+  deleteQuote(id: string, tenantId: string): Promise<void>;
+  getQuoteLineItems(quoteId: string, tenantId: string): Promise<QuoteLineItem[]>;
+  convertQuoteToInvoice(quoteId: string, tenantId: string): Promise<Invoice>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1032,6 +1047,325 @@ export class DatabaseStorage implements IStorage {
   async logInvoiceAudit(log: InsertInvoiceAuditLog): Promise<void> {
     await db.insert(invoiceAuditLogs).values(log);
   }
+
+  // Quote operations
+  async getQuotes(tenantId: string): Promise<Quote[]> {
+    return await db
+      .select()
+      .from(quotes)
+      .where(and(
+        eq(quotes.tenantId, tenantId),
+        isNull(quotes.deletedAt)
+      ))
+      .orderBy(desc(quotes.createdAt));
+  }
+
+  async getQuoteById(id: string, tenantId: string): Promise<Quote | null> {
+    const results = await db
+      .select()
+      .from(quotes)
+      .where(and(
+        eq(quotes.id, id),
+        eq(quotes.tenantId, tenantId),
+        isNull(quotes.deletedAt)
+      ));
+    return results[0] || null;
+  }
+
+  async createQuote(quote: InsertQuote, lineItems: InsertQuoteLineItem[]): Promise<Quote> {
+    const result = await db.transaction(async (tx) => {
+      // Generate quote number if not provided
+      let quoteNumber = quote.quoteNumber;
+      if (!quoteNumber) {
+        const lastQuote = await tx
+          .select({ quoteNumber: quotes.quoteNumber })
+          .from(quotes)
+          .where(eq(quotes.tenantId, quote.tenantId))
+          .orderBy(desc(quotes.createdAt))
+          .limit(1);
+        
+        const lastNumber = lastQuote[0]?.quoteNumber;
+        const nextNumber = lastNumber 
+          ? parseInt(lastNumber.replace('QUO-', '')) + 1 
+          : 1;
+        quoteNumber = `QUO-${nextNumber.toString().padStart(4, '0')}`;
+      }
+
+      // SECURITY: Calculate totals from line items (don't trust client)
+      let subtotal = 0;
+      let taxAmount = 0;
+
+      if (lineItems.length > 0) {
+        // Calculate subtotal from line items
+        subtotal = lineItems.reduce((sum, item) => {
+          return sum + parseFloat(item.amount);
+        }, 0);
+
+        // Calculate tax from line items
+        const taxCalculations = await Promise.all(lineItems.map(async (item) => {
+          if (!item.taxId) return 0;
+          const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
+          if (!tax) return 0;
+          const amount = parseFloat(item.amount);
+          const rate = parseFloat(tax.rate);
+          return (amount * rate) / 100;
+        }));
+        taxAmount = taxCalculations.reduce((sum, amt) => sum + amt, 0);
+      }
+
+      const total = subtotal + taxAmount;
+
+      // Override client-provided totals with server-calculated values
+      const quoteDataWithCalculatedTotals = {
+        ...quote,
+        quoteNumber,
+        subtotal: subtotal.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        total: total.toFixed(2),
+      };
+
+      // Create quote with calculated totals
+      const [newQuote] = await tx
+        .insert(quotes)
+        .values(quoteDataWithCalculatedTotals)
+        .returning();
+
+      // Create line items
+      if (lineItems.length > 0) {
+        await tx.insert(quoteLineItems).values(
+          lineItems.map(item => ({
+            ...item,
+            quoteId: newQuote.id,
+            tenantId: quote.tenantId,
+          }))
+        );
+      }
+
+      return newQuote;
+    });
+
+    return result;
+  }
+
+  async updateQuote(
+    id: string, 
+    tenantId: string, 
+    quote: Partial<InsertQuote>, 
+    lineItems?: InsertQuoteLineItem[]
+  ): Promise<Quote> {
+    const result = await db.transaction(async (tx) => {
+      // Determine which line items to use for calculation
+      let lineItemsForCalculation: InsertQuoteLineItem[];
+      
+      if (lineItems !== undefined) {
+        // New line items provided - use these
+        lineItemsForCalculation = lineItems;
+        
+        // Validate that at least one line item is provided
+        if (lineItems.length === 0) {
+          throw new Error('At least one line item is required');
+        }
+      } else {
+        // No new line items - fetch existing ones from database
+        const existing = await tx
+          .select()
+          .from(quoteLineItems)
+          .where(and(
+            eq(quoteLineItems.quoteId, id),
+            eq(quoteLineItems.tenantId, tenantId)
+          ));
+        
+        lineItemsForCalculation = existing.map(item => ({
+          tenantId: item.tenantId,
+          itemId: item.itemId || undefined,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discount: item.discount || "0",
+          amount: item.amount,
+          taxId: item.taxId || undefined,
+        }));
+      }
+
+      // ALWAYS calculate totals from line items (don't trust client)
+      const subtotal = lineItemsForCalculation.reduce((sum, item) => {
+        return sum + parseFloat(item.amount);
+      }, 0);
+
+      // Calculate tax from line items
+      const taxCalculations = await Promise.all(lineItemsForCalculation.map(async (item) => {
+        if (!item.taxId) return 0;
+        const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
+        if (!tax) return 0;
+        const amount = parseFloat(item.amount);
+        const rate = parseFloat(tax.rate);
+        return (amount * rate) / 100;
+      }));
+      const taxAmount = taxCalculations.reduce((sum, amt) => sum + amt, 0);
+
+      const total = subtotal + taxAmount;
+
+      // Override client-provided totals with calculated values
+      const updatedQuote = {
+        ...quote,
+        subtotal: subtotal.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        total: total.toFixed(2),
+        updatedAt: new Date(),
+      };
+
+      // Update quote
+      const [updated] = await tx
+        .update(quotes)
+        .set(updatedQuote)
+        .where(and(
+          eq(quotes.id, id),
+          eq(quotes.tenantId, tenantId),
+          isNull(quotes.deletedAt)
+        ))
+        .returning();
+
+      if (!updated) {
+        throw new Error('Quote not found');
+      }
+
+      // Update line items if new ones provided
+      if (lineItems !== undefined) {
+        // Delete existing line items
+        await tx
+          .delete(quoteLineItems)
+          .where(and(
+            eq(quoteLineItems.quoteId, id),
+            eq(quoteLineItems.tenantId, tenantId)
+          ));
+
+        // Insert new line items
+        await tx.insert(quoteLineItems).values(
+          lineItems.map(item => ({
+            ...item,
+            quoteId: id,
+            tenantId,
+          }))
+        );
+      }
+
+      return updated;
+    });
+
+    return result;
+  }
+
+  async deleteQuote(id: string, tenantId: string): Promise<void> {
+    await db
+      .update(quotes)
+      .set({ deletedAt: new Date() })
+      .where(and(
+        eq(quotes.id, id),
+        eq(quotes.tenantId, tenantId)
+      ));
+  }
+
+  async getQuoteLineItems(quoteId: string, tenantId: string): Promise<QuoteLineItem[]> {
+    return await db
+      .select()
+      .from(quoteLineItems)
+      .where(and(
+        eq(quoteLineItems.quoteId, quoteId),
+        eq(quoteLineItems.tenantId, tenantId)
+      ));
+  }
+
+  async convertQuoteToInvoice(quoteId: string, tenantId: string): Promise<Invoice> {
+    const result = await db.transaction(async (tx) => {
+      const [quote] = await tx
+        .select()
+        .from(quotes)
+        .where(and(
+          eq(quotes.id, quoteId),
+          eq(quotes.tenantId, tenantId),
+          isNull(quotes.deletedAt)
+        ));
+
+      if (!quote) {
+        throw new Error('Quote not found');
+      }
+
+      if (quote.status === 'converted') {
+        throw new Error('Quote already converted to invoice');
+      }
+
+      const lineItems = await tx
+        .select()
+        .from(quoteLineItems)
+        .where(and(
+          eq(quoteLineItems.quoteId, quoteId),
+          eq(quoteLineItems.tenantId, tenantId)
+        ));
+
+      const lastInvoice = await tx
+        .select({ invoiceNumber: invoices.invoiceNumber })
+        .from(invoices)
+        .where(eq(invoices.tenantId, tenantId))
+        .orderBy(desc(invoices.createdAt))
+        .limit(1);
+      
+      const lastNumber = lastInvoice[0]?.invoiceNumber;
+      const nextNumber = lastNumber 
+        ? parseInt(lastNumber.replace('INV-', '')) + 1 
+        : 1;
+      const invoiceNumber = `INV-${nextNumber.toString().padStart(4, '0')}`;
+
+      const [newInvoice] = await tx
+        .insert(invoices)
+        .values({
+          tenantId,
+          customerId: quote.customerId,
+          invoiceNumber,
+          invoiceSubject: quote.quoteSubject || undefined,
+          issuerTaxId: quote.issuerTaxId || undefined,
+          customerTaxId: quote.customerTaxId || undefined,
+          invoiceDate: new Date(),
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          status: 'draft',
+          subtotal: quote.subtotal,
+          taxAmount: quote.taxAmount,
+          total: quote.total,
+          notes: quote.notes || undefined,
+        })
+        .returning();
+
+      if (lineItems.length > 0) {
+        await tx.insert(invoiceLineItems).values(
+          lineItems.map(item => ({
+            tenantId,
+            invoiceId: newInvoice.id,
+            itemId: item.itemId || undefined,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discount: item.discount || '0',
+            amount: item.amount,
+            taxId: item.taxId || undefined,
+            accountId: undefined,
+          }))
+        );
+      }
+
+      await tx
+        .update(quotes)
+        .set({
+          status: 'converted',
+          convertedToInvoiceId: newInvoice.id,
+          convertedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(quotes.id, quoteId));
+
+      return newInvoice;
+    });
+
+    return result;
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -1654,6 +1988,35 @@ export class MemStorage implements IStorage {
     const index = this.documents.findIndex(d => d.id === id);
     this.documents[index] = updated;
     return updated;
+  }
+
+  // Quotes - stub implementation
+  async getQuotes(tenantId: string): Promise<Quote[]> {
+    throw new Error('Quotes not implemented in MemStorage');
+  }
+
+  async getQuoteById(id: string, tenantId: string): Promise<Quote | null> {
+    throw new Error('Quotes not implemented in MemStorage');
+  }
+
+  async createQuote(quote: InsertQuote, lineItems: InsertQuoteLineItem[]): Promise<Quote> {
+    throw new Error('Quotes not implemented in MemStorage');
+  }
+
+  async updateQuote(id: string, tenantId: string, quote: Partial<InsertQuote>, lineItems?: InsertQuoteLineItem[]): Promise<Quote> {
+    throw new Error('Quotes not implemented in MemStorage');
+  }
+
+  async deleteQuote(id: string, tenantId: string): Promise<void> {
+    throw new Error('Quotes not implemented in MemStorage');
+  }
+
+  async getQuoteLineItems(quoteId: string, tenantId: string): Promise<QuoteLineItem[]> {
+    throw new Error('Quotes not implemented in MemStorage');
+  }
+
+  async convertQuoteToInvoice(quoteId: string, tenantId: string): Promise<Invoice> {
+    throw new Error('Quotes not implemented in MemStorage');
   }
 }
 
