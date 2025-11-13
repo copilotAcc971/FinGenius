@@ -48,7 +48,7 @@ export default function Assets() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: assets = [], isLoading } = useQuery<Asset[]>({
-    queryKey: ["/api/assets", currentTenant?.id],
+    queryKey: ["/api/assets", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -58,7 +58,7 @@ export default function Assets() {
       await apiRequest(`/api/assets/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/assets", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/assets", { tenantId: currentTenant?.id }] });
       toast({
         title: "Asset deleted",
         description: "Asset has been removed successfully.",

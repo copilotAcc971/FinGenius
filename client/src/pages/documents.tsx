@@ -35,7 +35,7 @@ export default function Documents() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: documents = [], isLoading } = useQuery<Document[]>({
-    queryKey: ["/api/documents", currentTenant?.id],
+    queryKey: ["/api/documents", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 

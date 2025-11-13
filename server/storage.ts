@@ -570,9 +570,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createAccount(accountData: InsertAccount & { tenantId: string }): Promise<Account> {
+    // Generate account code
+    const accountCode = await this.getNextAccountNumber(accountData.tenantId);
+    
+    const newAccount = {
+      ...accountData,
+      currentBalance: "0", // Always start at 0 for new accounts
+      code: accountCode,
+    };
+    
     const [account] = await db
       .insert(accounts)
-      .values(accountData)
+      .values(newAccount)
       .returning();
     return account;
   }
@@ -601,13 +610,12 @@ export class DatabaseStorage implements IStorage {
 
   async getNextAccountNumber(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence with row lock to prevent race conditions
+      // Get or create sequence (transaction provides basic isolation)
       let [sequence] = await tx
         .select()
         .from(accountSequences)
         .where(eq(accountSequences.tenantId, tenantId))
-        .limit(1)
-        .forUpdate();
+        .limit(1);
       
       if (!sequence) {
         // Create initial sequence
@@ -1490,13 +1498,12 @@ export class DatabaseStorage implements IStorage {
 
   async getNextPurchaseOrderNumber(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence for this tenant with row lock to prevent race conditions
+      // Get or create sequence for this tenant (transaction provides basic isolation)
       let [sequence] = await tx
         .select()
         .from(purchaseOrderSequences)
         .where(eq(purchaseOrderSequences.tenantId, tenantId))
-        .limit(1)
-        .forUpdate();
+        .limit(1);
 
       if (!sequence) {
         // Create new sequence starting at 1
@@ -3621,13 +3628,12 @@ export class DatabaseStorage implements IStorage {
 
   async getNextJournalEntryNumber(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence record with row lock to prevent race conditions
+      // Get or create sequence record (transaction provides basic isolation)
       let [sequence] = await tx
         .select()
         .from(journalEntrySequences)
         .where(eq(journalEntrySequences.tenantId, tenantId))
-        .limit(1)
-        .forUpdate();
+        .limit(1);
 
       if (!sequence) {
         // Create initial sequence
@@ -3757,13 +3763,12 @@ export class DatabaseStorage implements IStorage {
 
   async getNextAssetNumber(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence record with row lock to prevent race conditions
+      // Get or create sequence record (transaction provides basic isolation)
       let [sequence] = await tx
         .select()
         .from(assetSequences)
         .where(eq(assetSequences.tenantId, tenantId))
-        .limit(1)
-        .forUpdate();
+        .limit(1);
 
       if (!sequence) {
         // Create initial sequence

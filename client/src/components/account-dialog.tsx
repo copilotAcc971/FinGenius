@@ -56,7 +56,7 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
   const { currentTenant } = useTenant();
 
   const { data: accounts = [] } = useQuery<Account[]>({
-    queryKey: ["/api/accounts", currentTenant?.id],
+    queryKey: ["/api/accounts", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
@@ -111,8 +111,8 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
       }
       return await apiRequest("/api/accounts", "POST", payload);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/accounts", currentTenant?.id] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/accounts", { tenantId: currentTenant?.id }] });
       toast({
         title: account ? "Account updated" : "Account created",
         description: `Account has been ${account ? "updated" : "created"} successfully.`,

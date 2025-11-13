@@ -46,7 +46,7 @@ export default function JournalEntries() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: journalEntries = [], isLoading } = useQuery<JournalEntry[]>({
-    queryKey: ["/api/journal-entries", currentTenant?.id],
+    queryKey: ["/api/journal-entries", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -56,7 +56,7 @@ export default function JournalEntries() {
       await apiRequest(`/api/journal-entries/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/journal-entries", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/journal-entries", { tenantId: currentTenant?.id }] });
       toast({
         title: "Journal entry deleted",
         description: "Journal entry has been removed successfully.",

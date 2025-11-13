@@ -47,7 +47,7 @@ export default function Customers() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: customers = [], isLoading } = useQuery<Customer[]>({
-    queryKey: ["/api/customers", currentTenant?.id],
+    queryKey: ["/api/customers", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 

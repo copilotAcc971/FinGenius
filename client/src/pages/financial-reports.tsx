@@ -104,25 +104,25 @@ export default function FinancialReports() {
 
   // Profit & Loss Query
   const { data: plReport, isLoading: plLoading } = useQuery<ProfitLossReport>({
-    queryKey: ["/api/reports/profit-loss", currentTenant?.id, plStartDate, plEndDate],
+    queryKey: ["/api/reports/profit-loss", { tenantId: currentTenant?.id, startDate: plStartDate, endDate: plEndDate }],
     enabled: !!currentTenant?.id && fetchPL,
   });
 
   // Balance Sheet Query
   const { data: bsReport, isLoading: bsLoading } = useQuery<BalanceSheetReport>({
-    queryKey: ["/api/reports/balance-sheet", currentTenant?.id, bsAsOfDate],
+    queryKey: ["/api/reports/balance-sheet", { tenantId: currentTenant?.id, asOfDate: bsAsOfDate }],
     enabled: !!currentTenant?.id && fetchBS,
   });
 
   // Trial Balance Query
   const { data: tbReport, isLoading: tbLoading } = useQuery<TrialBalanceReport>({
-    queryKey: ["/api/reports/trial-balance", currentTenant?.id, tbAsOfDate],
+    queryKey: ["/api/reports/trial-balance", { tenantId: currentTenant?.id, asOfDate: tbAsOfDate }],
     enabled: !!currentTenant?.id && fetchTB,
   });
 
   // Cash Flow Query
   const { data: cfReport, isLoading: cfLoading } = useQuery<CashFlowReport>({
-    queryKey: ["/api/reports/cash-flow", currentTenant?.id, cfStartDate, cfEndDate],
+    queryKey: ["/api/reports/cash-flow", { tenantId: currentTenant?.id, startDate: cfStartDate, endDate: cfEndDate }],
     enabled: !!currentTenant?.id && fetchCF,
   });
 

@@ -46,12 +46,12 @@ export default function Invoices() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: invoices = [], isLoading } = useQuery<Invoice[]>({
-    queryKey: ["/api/invoices", currentTenant?.id],
+    queryKey: ["/api/invoices", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
   const { data: customers = [] } = useQuery<Customer[]>({
-    queryKey: ["/api/customers", currentTenant?.id],
+    queryKey: ["/api/customers", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -80,7 +80,7 @@ export default function Invoices() {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices", { tenantId: currentTenant?.id }] });
       toast({
         title: "Invoice sent successfully",
         description: "The invoice has been emailed to the customer.",
@@ -112,7 +112,7 @@ export default function Invoices() {
       await apiRequest(`/api/invoices/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices", { tenantId: currentTenant?.id }] });
       toast({
         title: "Invoice deleted",
         description: "Invoice has been removed successfully.",

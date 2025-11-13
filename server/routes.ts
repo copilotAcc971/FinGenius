@@ -359,14 +359,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const tenantId = req.tenantId!;
       
-      // Parse req.body - insertAccountSchema omits tenantId
+      // Parse req.body - insertAccountSchema omits tenantId, code, and currentBalance
       const parsed = insertAccountSchema.parse(req.body);
       
-      // Auto-generate account code if not provided
-      const code = parsed.code || await storage.getNextAccountNumber(tenantId);
-      
-      // Add verified tenantId and code back AFTER parsing
-      const account = await storage.createAccount({ ...parsed, code, tenantId });
+      // createAccount will handle code generation and currentBalance default
+      const account = await storage.createAccount({ ...parsed, tenantId });
       res.status(201).json(account);
     } catch (error: any) {
       console.error("Error creating account:", error);

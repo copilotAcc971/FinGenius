@@ -87,20 +87,12 @@ export function JournalEntryDialog({ open, onOpenChange, journalEntry }: Journal
   const { currentTenant } = useTenant();
 
   const { data: accounts = [] } = useQuery<Account[]>({
-    queryKey: ["/api/accounts", currentTenant?.id],
+    queryKey: ["/api/accounts", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
   const { data: legs, isLoading: legsLoading } = useQuery<JournalEntryLeg[]>({
-    queryKey: ["/api/journal-entries", journalEntry?.id, "legs", currentTenant?.id],
-    queryFn: async () => {
-      if (!journalEntry?.id || !currentTenant?.id) return [];
-      const response = await fetch(`/api/journal-entries/${journalEntry.id}/legs?tenantId=${currentTenant.id}`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to fetch journal entry legs");
-      return response.json();
-    },
+    queryKey: [`/api/journal-entries/${journalEntry?.id}/legs`, { tenantId: currentTenant?.id }],
     enabled: !!journalEntry?.id && !!currentTenant?.id && open,
   });
 
@@ -245,7 +237,7 @@ export function JournalEntryDialog({ open, onOpenChange, journalEntry }: Journal
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/journal-entries", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/journal-entries", { tenantId: currentTenant?.id }] });
       toast({
         title: journalEntry ? "Journal entry updated" : "Journal entry created",
         description: `Journal entry has been ${journalEntry ? "updated" : "created"} successfully.`,

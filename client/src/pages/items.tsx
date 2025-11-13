@@ -48,15 +48,7 @@ export default function Items() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: items = [], isLoading } = useQuery<Item[]>({
-    queryKey: ["/api/items", currentTenant?.id],
-    queryFn: async () => {
-      if (!currentTenant?.id) return [];
-      const response = await fetch(`/api/items?tenantId=${currentTenant.id}`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to fetch items");
-      return response.json();
-    },
+    queryKey: ["/api/items", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -66,7 +58,7 @@ export default function Items() {
       await apiRequest(`/api/items/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/items", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/items", { tenantId: currentTenant?.id }] });
       toast({
         title: "Item deleted",
         description: "Item has been removed successfully.",

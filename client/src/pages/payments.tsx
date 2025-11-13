@@ -36,7 +36,7 @@ export default function Payments() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: payments = [], isLoading } = useQuery<Payment[]>({
-    queryKey: ["/api/payments", currentTenant?.id],
+    queryKey: ["/api/payments", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 

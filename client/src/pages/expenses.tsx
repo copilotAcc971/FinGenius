@@ -35,7 +35,7 @@ export default function Expenses() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: expenses = [], isLoading } = useQuery<Expense[]>({
-    queryKey: ["/api/expenses", currentTenant?.id],
+    queryKey: ["/api/expenses", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 

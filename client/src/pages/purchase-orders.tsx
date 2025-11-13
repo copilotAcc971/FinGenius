@@ -46,12 +46,12 @@ export default function PurchaseOrders() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: purchaseOrders = [], isLoading } = useQuery<PurchaseOrder[]>({
-    queryKey: ["/api/purchase-orders", currentTenant?.id],
+    queryKey: ["/api/purchase-orders", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
   const { data: vendors = [] } = useQuery<Vendor[]>({
-    queryKey: ["/api/vendors", currentTenant?.id],
+    queryKey: ["/api/vendors", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 

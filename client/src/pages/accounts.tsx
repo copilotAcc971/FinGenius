@@ -48,7 +48,7 @@ export default function Accounts() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: accounts = [], isLoading } = useQuery<Account[]>({
-    queryKey: ["/api/accounts", currentTenant?.id],
+    queryKey: ["/api/accounts", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -58,7 +58,7 @@ export default function Accounts() {
       await apiRequest(`/api/accounts/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/accounts", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts", { tenantId: currentTenant?.id }] });
       toast({
         title: "Account deleted",
         description: "Account has been removed successfully.",

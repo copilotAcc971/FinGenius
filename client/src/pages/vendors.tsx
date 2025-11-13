@@ -48,7 +48,7 @@ export default function Vendors() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: vendors = [], isLoading } = useQuery<Vendor[]>({
-    queryKey: ["/api/vendors", currentTenant?.id],
+    queryKey: ["/api/vendors", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 

@@ -50,12 +50,12 @@ export default function Bills() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: bills = [], isLoading } = useQuery<Bill[]>({
-    queryKey: ["/api/bills", currentTenant?.id],
+    queryKey: ["/api/bills", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
   const { data: vendors = [] } = useQuery<Vendor[]>({
-    queryKey: ["/api/vendors", currentTenant?.id],
+    queryKey: ["/api/vendors", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 

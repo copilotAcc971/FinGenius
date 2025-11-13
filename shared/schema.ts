@@ -281,14 +281,13 @@ export const accounts = pgTable("accounts", {
 export const insertAccountSchema = createInsertSchema(accounts, {
   type: z.enum(['asset', 'liability', 'equity', 'income', 'expense']),
   openingBalance: decimalString,
-  currentBalance: decimalString,
 }).omit({
   id: true,
+  code: true,
+  currentBalance: true, // Omit from insert, will be set by backend
+  tenantId: true,
   createdAt: true,
   updatedAt: true,
-}).extend({
-  // Explicitly make code optional (server-generated)
-  code: z.string().max(50).optional(),
 });
 
 export type InsertAccount = z.infer<typeof insertAccountSchema>;

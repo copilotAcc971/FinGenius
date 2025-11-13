@@ -95,30 +95,22 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
   const { currentTenant } = useTenant();
 
   const { data: vendors = [] } = useQuery<Vendor[]>({
-    queryKey: ["/api/vendors", currentTenant?.id],
+    queryKey: ["/api/vendors", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
   const { data: items = [] } = useQuery<Item[]>({
-    queryKey: ["/api/items", currentTenant?.id],
+    queryKey: ["/api/items", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
   const { data: taxes = [] } = useQuery<Tax[]>({
-    queryKey: ["/api/taxes", currentTenant?.id],
+    queryKey: ["/api/taxes", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
   const { data: lineItems, isLoading: lineItemsLoading } = useQuery<PurchaseOrderLineItem[]>({
-    queryKey: ["/api/purchase-orders", purchaseOrder?.id, "line-items", currentTenant?.id],
-    queryFn: async () => {
-      if (!purchaseOrder?.id || !currentTenant?.id) return [];
-      const response = await fetch(`/api/purchase-orders/${purchaseOrder.id}/line-items?tenantId=${currentTenant.id}`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to fetch line items");
-      return response.json();
-    },
+    queryKey: [`/api/purchase-orders/${purchaseOrder?.id}/line-items`, { tenantId: currentTenant?.id }],
     enabled: !!purchaseOrder?.id && !!currentTenant?.id && open,
   });
 

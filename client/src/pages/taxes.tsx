@@ -48,15 +48,7 @@ export default function Taxes() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: taxes = [], isLoading } = useQuery<Tax[]>({
-    queryKey: ["/api/taxes", currentTenant?.id],
-    queryFn: async () => {
-      if (!currentTenant?.id) return [];
-      const response = await fetch(`/api/taxes?tenantId=${currentTenant.id}`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to fetch taxes");
-      return response.json();
-    },
+    queryKey: ["/api/taxes", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -66,7 +58,7 @@ export default function Taxes() {
       await apiRequest(`/api/taxes/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/taxes", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/taxes", { tenantId: currentTenant?.id }] });
       toast({
         title: "Tax deleted",
         description: "Tax has been removed successfully.",

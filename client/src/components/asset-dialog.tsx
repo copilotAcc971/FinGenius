@@ -71,7 +71,7 @@ export function AssetDialog({ open, onOpenChange, asset }: AssetDialogProps) {
 
   // Fetch accounts for dropdowns
   const { data: accounts = [] } = useQuery<Account[]>({
-    queryKey: ["/api/accounts", currentTenant?.id],
+    queryKey: ["/api/accounts", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
@@ -130,7 +130,7 @@ export function AssetDialog({ open, onOpenChange, asset }: AssetDialogProps) {
       return await apiRequest("/api/assets", "POST", payload);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/assets", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/assets", { tenantId: currentTenant?.id }] });
       toast({
         title: asset ? "Asset updated" : "Asset created",
         description: `Asset has been ${asset ? "updated" : "created"} successfully.`,

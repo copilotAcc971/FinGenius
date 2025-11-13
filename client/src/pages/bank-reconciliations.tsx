@@ -46,12 +46,12 @@ export default function BankReconciliations() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: reconciliations = [], isLoading } = useQuery<BankReconciliation[]>({
-    queryKey: ["/api/bank-reconciliations", currentTenant?.id],
+    queryKey: ["/api/bank-reconciliations", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
   const { data: accounts = [] } = useQuery<Account[]>({
-    queryKey: ["/api/accounts", currentTenant?.id],
+    queryKey: ["/api/accounts", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -66,7 +66,7 @@ export default function BankReconciliations() {
       await apiRequest(`/api/bank-reconciliations/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/bank-reconciliations", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bank-reconciliations", { tenantId: currentTenant?.id }] });
       toast({
         title: "Bank reconciliation deleted",
         description: "Bank reconciliation has been removed successfully.",

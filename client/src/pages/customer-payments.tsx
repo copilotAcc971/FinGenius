@@ -53,17 +53,17 @@ export default function CustomerPayments() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: payments = [], isLoading } = useQuery<CustomerPayment[]>({
-    queryKey: ["/api/customer-payments", currentTenant?.id],
+    queryKey: ["/api/customer-payments", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
   const { data: customers = [] } = useQuery<Customer[]>({
-    queryKey: ["/api/customers", currentTenant?.id],
+    queryKey: ["/api/customers", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
   const { data: invoices = [] } = useQuery<Invoice[]>({
-    queryKey: ["/api/invoices", currentTenant?.id],
+    queryKey: ["/api/invoices", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -72,8 +72,8 @@ export default function CustomerPayments() {
       return apiRequest(`/api/customer-payments/${id}`, "DELETE");
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/customer-payments", currentTenant?.id] });
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customer-payments", { tenantId: currentTenant?.id }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices", { tenantId: currentTenant?.id }] });
       toast({
         title: "Payment deleted",
         description: "The payment has been deleted successfully.",

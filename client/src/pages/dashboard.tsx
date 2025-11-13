@@ -26,7 +26,7 @@ export default function Dashboard() {
   }, [isAuthenticated, authLoading, toast]);
 
   const { data: stats, isLoading } = useQuery({
-    queryKey: ["/api/dashboard/stats", currentTenant?.id],
+    queryKey: ["/api/dashboard/stats", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 

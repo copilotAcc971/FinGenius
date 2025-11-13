@@ -98,25 +98,17 @@ export function BankReconciliationDialog({ open, onOpenChange, reconciliation }:
   const { currentTenant } = useTenant();
 
   const { data: accounts = [] } = useQuery<Account[]>({
-    queryKey: ["/api/accounts", currentTenant?.id],
+    queryKey: ["/api/accounts", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
   const { data: journalEntries = [] } = useQuery<JournalEntry[]>({
-    queryKey: ["/api/journal-entries", currentTenant?.id],
+    queryKey: ["/api/journal-entries", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
   const { data: items, isLoading: itemsLoading } = useQuery<BankReconciliationItem[]>({
-    queryKey: ["/api/bank-reconciliations", reconciliation?.id, "items", currentTenant?.id],
-    queryFn: async () => {
-      if (!reconciliation?.id || !currentTenant?.id) return [];
-      const response = await fetch(`/api/bank-reconciliations/${reconciliation.id}/items?tenantId=${currentTenant.id}`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to fetch items");
-      return response.json();
-    },
+    queryKey: [`/api/bank-reconciliations/${reconciliation?.id}/items`, { tenantId: currentTenant?.id }],
     enabled: !!reconciliation?.id && !!currentTenant?.id && open,
   });
 
