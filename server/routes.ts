@@ -1976,6 +1976,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/bills/extract-bulk', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { images } = req.body;
+      
+      if (!images || !Array.isArray(images) || images.length === 0) {
+        return res.status(400).json({ message: "No images provided. Please provide an array of base64 images." });
+      }
+
+      if (images.length > 20) {
+        return res.status(400).json({ message: "Too many images. Maximum 20 documents per batch." });
+      }
+
+      const { extractBillData } = await import('./ai-bill-extractor');
+      
+      const results = await Promise.allSettled(
+        images.map(async (image: string, index: number) => {
+          try {
+            const extractedData = await extractBillData(image);
+            return {
+              success: true,
+              index,
+              data: extractedData,
+              fileName: `Document ${index + 1}`
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              index,
+              error: error.message || "Extraction failed",
+              fileName: `Document ${index + 1}`
+            };
+          }
+        })
+      );
+
+      const processedResults = results.map((result, index) => {
+        if (result.status === 'fulfilled') {
+          return result.value;
+        } else {
+          return {
+            success: false,
+            index,
+            error: result.reason?.message || "Extraction failed",
+            fileName: `Document ${index + 1}`
+          };
+        }
+      });
+
+      const successCount = processedResults.filter(r => r.success).length;
+      const failureCount = processedResults.filter(r => !r.success).length;
+
+      res.json({
+        results: processedResults,
+        summary: {
+          total: images.length,
+          successful: successCount,
+          failed: failureCount
+        }
+      });
+    } catch (error: any) {
+      console.error("Error in bulk extraction:", error);
+      res.status(500).json({ message: error.message || "Failed to process bulk extraction" });
+    }
+  });
+
   // Expense routes
   app.get('/api/expenses', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {

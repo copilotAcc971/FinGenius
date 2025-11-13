@@ -8,6 +8,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { UserMenu } from "@/components/user-menu";
 import { useAuth } from "@/hooks/useAuth";
+import { TenantProvider } from "@/contexts/TenantContext";
 
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
@@ -115,7 +116,9 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <AppContent />
+        <TenantProvider>
+          <AppContent />
+        </TenantProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

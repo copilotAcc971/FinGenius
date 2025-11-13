@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { Plus, MoreVertical, Pencil, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,7 @@ import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { BillDialog } from "@/components/bill-dialog";
+import { BulkBillUpload } from "@/components/bulk-bill-upload";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Bill, Vendor } from "@shared/schema";
 
@@ -32,6 +33,7 @@ export default function Bills() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [showDialog, setShowDialog] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
 
   useEffect(() => {
@@ -135,10 +137,20 @@ export default function Bills() {
           <h1 className="text-3xl font-semibold">Bills</h1>
           <p className="text-muted-foreground">Manage bills from vendors</p>
         </div>
-        <Button onClick={handleAddBill} data-testid="button-create-bill">
-          <Plus className="mr-2 h-4 w-4" />
-          Add Bill
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            onClick={() => setShowBulkUpload(true)} 
+            data-testid="button-bulk-upload"
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            Bulk Upload
+          </Button>
+          <Button onClick={handleAddBill} data-testid="button-create-bill">
+            <Plus className="mr-2 h-4 w-4" />
+            Add Bill
+          </Button>
+        </div>
       </div>
 
       {!isLoading && bills.length > 0 && (
@@ -250,6 +262,14 @@ export default function Bills() {
         onOpenChange={setShowDialog} 
         bill={editingBill} 
       />
+
+      {currentTenant?.id && (
+        <BulkBillUpload
+          open={showBulkUpload}
+          onOpenChange={setShowBulkUpload}
+          tenantId={currentTenant.id}
+        />
+      )}
     </div>
   );
 }
