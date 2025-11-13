@@ -39,6 +39,7 @@ import BankReconciliations from "@/pages/bank-reconciliations";
 import FinancialReports from "@/pages/financial-reports";
 import ARAgingReport from "@/pages/ar-aging";
 import APAgingReport from "@/pages/ap-aging";
+import BankConnections from "@/pages/bank-connections";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -58,6 +59,7 @@ function Router() {
           <Route path="/journal-entries" component={JournalEntries} />
           <Route path="/assets" component={Assets} />
           <Route path="/bank-reconciliations" component={BankReconciliations} />
+          <Route path="/bank-connections" component={BankConnections} />
           <Route path="/invoices" component={Invoices} />
           <Route path="/quotes" component={Quotes} />
           <Route path="/sales-orders" component={SalesOrders} />

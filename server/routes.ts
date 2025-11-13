@@ -2861,6 +2861,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // OPEN BANKING ROUTES
   // ============================================================================
 
+  // GET /api/open-banking/connections
+  // List all Open Banking connections for tenant
+  app.get('/api/open-banking/connections', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      
+      const connections = await db.select()
+        .from(openBankingConnections)
+        .where(eq(openBankingConnections.tenantId, tenantId));
+      
+      res.json(connections);
+    } catch (error: any) {
+      console.error('[Open Banking] Error fetching connections:', error);
+      res.status(500).json({ message: 'Failed to fetch connections' });
+    }
+  });
+
   // GET /api/open-banking/lean/authorize
   // Generate authorization URL for bank connection
   app.get('/api/open-banking/lean/authorize', isAuthenticated, verifyTenantAccess, async (req: any, res) => {

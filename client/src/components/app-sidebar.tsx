@@ -17,6 +17,7 @@ import {
   BookOpen,
   TrendingUp,
   Clock,
+  Landmark,
 } from "lucide-react";
 import {
   Sidebar,
@@ -61,6 +62,7 @@ const accountingItems = [
   { title: "Journal Entries", url: "/journal-entries", icon: FileText },
   { title: "Fixed Assets", url: "/assets", icon: Package },
   { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
+  { title: "Bank Connections", url: "/bank-connections", icon: Landmark },
   { title: "Financial Reports", url: "/financial-reports", icon: TrendingUp },
   { title: "AR Aging Report", url: "/ar-aging", icon: Clock },
   { title: "AP Aging Report", url: "/ap-aging", icon: Clock },
