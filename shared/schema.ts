@@ -253,6 +253,12 @@ export type InsertVendor = z.infer<typeof insertVendorSchema>;
 export type VendorFormValues = z.infer<typeof vendorFormSchema>;
 export type Vendor = typeof vendors.$inferSelect;
 
+// Helper to preprocess decimal values (accept both string and number)
+const decimalString = z.preprocess(
+  (val) => (typeof val === 'number' ? val.toString() : val),
+  z.string()
+);
+
 // Chart of Accounts
 export const accounts = pgTable("accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -260,15 +266,23 @@ export const accounts = pgTable("accounts", {
   code: varchar("code", { length: 50 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   type: varchar("type", { length: 50 }).notNull(), // asset, liability, equity, income, expense
+  accountCategory: varchar("account_category", { length: 100 }), // Current Assets, Fixed Assets, Current Liabilities, etc.
   subtype: varchar("subtype", { length: 100 }), // e.g., current_asset, fixed_asset
   parentId: varchar("parent_id"),
   description: text("description"),
+  isSystemAccount: boolean("is_system_account").default(false),
+  openingBalance: decimal("opening_balance", { precision: 12, scale: 2 }).default("0"),
+  currentBalance: decimal("current_balance", { precision: 12, scale: 2 }).default("0"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertAccountSchema = createInsertSchema(accounts).omit({
+export const insertAccountSchema = createInsertSchema(accounts, {
+  type: z.enum(['asset', 'liability', 'equity', 'income', 'expense']),
+  openingBalance: decimalString,
+  currentBalance: decimalString,
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -277,24 +291,24 @@ export const insertAccountSchema = createInsertSchema(accounts).omit({
 export type InsertAccount = z.infer<typeof insertAccountSchema>;
 export type Account = typeof accounts.$inferSelect;
 
-// Helper to preprocess decimal values (accept both string and number)
-const decimalString = z.preprocess(
-  (val) => (typeof val === 'number' ? val.toString() : val),
-  z.string()
-);
-
-// Items/Products
+// Items/Products (with Inventory Tracking)
 export const items = pgTable("items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   sku: varchar("sku", { length: 100 }),
-  rate: decimal("rate", { precision: 12, scale: 2 }).notNull(),
+  rate: decimal("rate", { precision: 12, scale: 2 }).notNull(), // Sale price
+  purchasePrice: decimal("purchase_price", { precision: 12, scale: 2 }), // Cost/purchase price
   unit: varchar("unit", { length: 50 }),
   type: varchar("type", { length: 50 }).notNull(),
   accountId: varchar("account_id").references(() => accounts.id),
   taxId: varchar("tax_id"),
+  
+  // Inventory tracking fields
+  quantityOnHand: decimal("quantity_on_hand", { precision: 10, scale: 2 }).default("0"),
+  reorderLevel: decimal("reorder_level", { precision: 10, scale: 2 }),
+  
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -302,6 +316,9 @@ export const items = pgTable("items", {
 
 export const insertItemSchema = createInsertSchema(items, {
   rate: decimalString,
+  purchasePrice: decimalString,
+  quantityOnHand: decimalString,
+  reorderLevel: decimalString,
 }).omit({
   id: true,
   createdAt: true,
@@ -485,6 +502,36 @@ export const insertInvoiceSequenceSchema = createInsertSchema(invoiceSequences).
 
 export type InsertInvoiceSequence = z.infer<typeof insertInvoiceSequenceSchema>;
 export type InvoiceSequence = typeof invoiceSequences.$inferSelect;
+
+// Journal Entry Number Sequencing (per tenant)
+export const journalEntrySequences = pgTable("journal_entry_sequences", {
+  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id),
+  lastNumber: integer("last_number").notNull().default(0),
+  prefix: varchar("prefix", { length: 20 }).default("JE-"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type JournalEntrySequence = typeof journalEntrySequences.$inferSelect;
+
+// Purchase Order Number Sequencing (per tenant)
+export const purchaseOrderSequences = pgTable("purchase_order_sequences", {
+  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id),
+  lastNumber: integer("last_number").notNull().default(0),
+  prefix: varchar("prefix", { length: 20 }).default("PO-"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type PurchaseOrderSequence = typeof purchaseOrderSequences.$inferSelect;
+
+// Asset Number Sequencing (per tenant)
+export const assetSequences = pgTable("asset_sequences", {
+  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id),
+  lastNumber: integer("last_number").notNull().default(0),
+  prefix: varchar("prefix", { length: 20 }).default("ASSET-"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type AssetSequence = typeof assetSequences.$inferSelect;
 
 // Bills (Purchases from Vendors)
 export const bills = pgTable("bills", {
@@ -1224,3 +1271,330 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
     references: [expenses.id],
   }),
 }));
+
+// ====================================
+// ACCOUNTING MODULES
+// ====================================
+
+// Journal Entries (Double-Entry Bookkeeping)
+export const journalEntries = pgTable("journal_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  journalEntryNumber: varchar("journal_entry_number", { length: 100 }), // Auto-generated server-side
+  entryDate: timestamp("entry_date").notNull(),
+  referenceNumber: varchar("reference_number", { length: 100 }),
+  description: text("description"),
+  notes: text("notes"),
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, posted
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_journal_entry_number_tenant").on(table.tenantId, table.journalEntryNumber),
+  sql`CONSTRAINT check_journal_entry_status CHECK (status IN ('draft', 'posted'))`,
+]);
+
+export const insertJournalEntrySchema = createInsertSchema(journalEntries, {
+  status: z.enum(['draft', 'posted']),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  journalEntryNumber: true, // Auto-generated
+});
+
+export type InsertJournalEntry = z.infer<typeof insertJournalEntrySchema>;
+export type JournalEntry = typeof journalEntries.$inferSelect;
+
+// Journal Entry Legs (Debit/Credit Lines)
+export const journalEntryLegs = pgTable("journal_entry_legs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  journalEntryId: varchar("journal_entry_id").notNull().references(() => journalEntries.id),
+  accountId: varchar("account_id").notNull().references(() => accounts.id),
+  type: varchar("type", { length: 10 }).notNull(), // 'Debit' or 'Credit'
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  // Database-level constraint: type must be 'Debit' or 'Credit'
+  sql`CONSTRAINT check_leg_type CHECK (type IN ('Debit', 'Credit'))`,
+]);
+
+export const insertJournalEntryLegSchema = createInsertSchema(journalEntryLegs, {
+  amount: decimalString,
+  type: z.enum(['Debit', 'Credit']), // Enforce at Zod level too
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+});
+
+export type InsertJournalEntryLeg = z.infer<typeof insertJournalEntryLegSchema>;
+export type JournalEntryLeg = typeof journalEntryLegs.$inferSelect;
+
+// Journal Entry Payload (for transactional create/update with legs)
+export const journalEntryPayloadSchema = z.object({
+  journalEntry: insertJournalEntrySchema.partial().required({ 
+    entryDate: true,
+    status: true,
+  }),
+  legs: z.array(insertJournalEntryLegSchema.omit({ journalEntryId: true })).min(2, "At least two legs are required for double-entry"),
+}).refine((data) => {
+  // Validate double-entry: debits must equal credits
+  const debits = data.legs.filter(leg => leg.type === 'Debit').reduce((sum, leg) => sum + parseFloat(leg.amount.toString()), 0);
+  const credits = data.legs.filter(leg => leg.type === 'Credit').reduce((sum, leg) => sum + parseFloat(leg.amount.toString()), 0);
+  return Math.abs(debits - credits) < 0.01; // Allow for floating point rounding
+}, {
+  message: "Debits must equal credits in double-entry bookkeeping",
+  path: ["legs"],
+});
+
+export type JournalEntryPayload = z.infer<typeof journalEntryPayloadSchema>;
+
+// Database Trigger: Double-Entry Validation
+// This trigger ensures SUM(debits) = SUM(credits) for each journal entry at the database level
+export const journalEntryBalanceTriggerFunction = sql`
+  CREATE OR REPLACE FUNCTION check_journal_entry_balance()
+  RETURNS TRIGGER AS $$
+  DECLARE
+    debit_total DECIMAL;
+    credit_total DECIMAL;
+  BEGIN
+    SELECT COALESCE(SUM(amount), 0) INTO debit_total
+    FROM journal_entry_legs
+    WHERE journal_entry_id = COALESCE(NEW.journal_entry_id, OLD.journal_entry_id)
+    AND type = 'Debit';
+    
+    SELECT COALESCE(SUM(amount), 0) INTO credit_total
+    FROM journal_entry_legs
+    WHERE journal_entry_id = COALESCE(NEW.journal_entry_id, OLD.journal_entry_id)
+    AND type = 'Credit';
+    
+    IF ABS(debit_total - credit_total) > 0.01 THEN
+      RAISE EXCEPTION 'Journal entry debits (%) must equal credits (%)', debit_total, credit_total;
+    END IF;
+    
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+`;
+
+export const journalEntryBalanceTrigger = sql`
+  DROP TRIGGER IF EXISTS check_journal_entry_balance_trigger ON journal_entry_legs;
+  
+  CREATE TRIGGER check_journal_entry_balance_trigger
+  AFTER INSERT OR UPDATE OR DELETE ON journal_entry_legs
+  FOR EACH ROW
+  EXECUTE FUNCTION check_journal_entry_balance();
+`;
+
+// Purchase Orders
+export const purchaseOrders = pgTable("purchase_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  vendorId: varchar("vendor_id").notNull().references(() => vendors.id),
+  poNumber: varchar("po_number", { length: 100 }),
+  orderDate: timestamp("order_date").notNull(),
+  expectedDate: timestamp("expected_date"),
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, approved, sent, partially_received, received, billed, cancelled
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
+  notes: text("notes"),
+  terms: text("terms"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_po_number_tenant").on(table.tenantId, table.poNumber),
+  sql`CONSTRAINT check_purchase_order_status CHECK (status IN ('draft', 'approved', 'sent', 'partially_received', 'received', 'billed', 'cancelled'))`,
+]);
+
+export const insertPurchaseOrderSchema = createInsertSchema(purchaseOrders, {
+  status: z.enum(['draft', 'approved', 'sent', 'partially_received', 'received', 'billed', 'cancelled']),
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  poNumber: true, // Auto-generated
+});
+
+export type InsertPurchaseOrder = z.infer<typeof insertPurchaseOrderSchema>;
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+
+// Purchase Order Line Items
+export const purchaseOrderLineItems = pgTable("purchase_order_line_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  purchaseOrderId: varchar("purchase_order_id").notNull().references(() => purchaseOrders.id),
+  itemId: varchar("item_id").references(() => items.id),
+  description: text("description").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  taxId: varchar("tax_id").references(() => taxes.id),
+  receivedQuantity: decimal("received_quantity", { precision: 10, scale: 2 }).default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPurchaseOrderLineItemSchema = createInsertSchema(purchaseOrderLineItems, {
+  quantity: decimalString,
+  unitPrice: decimalString,
+  amount: decimalString,
+  receivedQuantity: decimalString,
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+});
+
+export type InsertPurchaseOrderLineItem = z.infer<typeof insertPurchaseOrderLineItemSchema>;
+export type PurchaseOrderLineItem = typeof purchaseOrderLineItems.$inferSelect;
+
+// Purchase Order Payload
+export const purchaseOrderPayloadSchema = z.object({
+  purchaseOrder: insertPurchaseOrderSchema.partial().required({ 
+    vendorId: true,
+    orderDate: true,
+    status: true,
+    subtotal: true,
+    taxAmount: true,
+    total: true,
+  }),
+  lineItems: z.array(insertPurchaseOrderLineItemSchema.omit({ purchaseOrderId: true })).min(1, "At least one line item is required"),
+});
+
+export type PurchaseOrderPayload = z.infer<typeof purchaseOrderPayloadSchema>;
+
+// Asset Management (Fixed Assets)
+export const assets = pgTable("assets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  assetNumber: varchar("asset_number", { length: 100 }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 100 }),
+  
+  // Financial details
+  purchaseDate: timestamp("purchase_date").notNull(),
+  purchasePrice: decimal("purchase_price", { precision: 12, scale: 2 }).notNull(),
+  salvageValue: decimal("salvage_value", { precision: 12, scale: 2 }).default("0"),
+  
+  // Depreciation
+  depreciationMethod: varchar("depreciation_method", { length: 50 }).notNull(), // straight_line, declining_balance, units_of_production
+  usefulLife: integer("useful_life"), // in months or units
+  accumulatedDepreciation: decimal("accumulated_depreciation", { precision: 12, scale: 2 }).default("0"),
+  
+  // Status
+  status: varchar("status", { length: 50 }).notNull().default("active"), // active, disposed, sold
+  disposalDate: timestamp("disposal_date"),
+  disposalAmount: decimal("disposal_amount", { precision: 12, scale: 2 }),
+  
+  // Accounting
+  assetAccountId: varchar("asset_account_id").references(() => accounts.id),
+  depreciationAccountId: varchar("depreciation_account_id").references(() => accounts.id),
+  
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_asset_number_tenant").on(table.tenantId, table.assetNumber),
+  sql`CONSTRAINT check_asset_status CHECK (status IN ('active', 'disposed', 'sold'))`,
+  sql`CONSTRAINT check_asset_depreciation_method CHECK (depreciation_method IN ('straight_line', 'declining_balance', 'units_of_production'))`,
+]);
+
+export const insertAssetSchema = createInsertSchema(assets, {
+  status: z.enum(['active', 'disposed', 'sold']),
+  depreciationMethod: z.enum(['straight_line', 'declining_balance', 'units_of_production']),
+  purchasePrice: decimalString,
+  salvageValue: decimalString,
+  accumulatedDepreciation: decimalString,
+  disposalAmount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  assetNumber: true, // Auto-generated
+});
+
+export type InsertAsset = z.infer<typeof insertAssetSchema>;
+export type Asset = typeof assets.$inferSelect;
+
+// Asset Depreciation Schedule
+export const assetDepreciationSchedules = pgTable("asset_depreciation_schedules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  assetId: varchar("asset_id").notNull().references(() => assets.id),
+  periodDate: timestamp("period_date").notNull(),
+  depreciationAmount: decimal("depreciation_amount", { precision: 12, scale: 2 }).notNull(),
+  bookValue: decimal("book_value", { precision: 12, scale: 2 }).notNull(),
+  journalEntryId: varchar("journal_entry_id").references(() => journalEntries.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertAssetDepreciationScheduleSchema = createInsertSchema(assetDepreciationSchedules, {
+  depreciationAmount: decimalString,
+  bookValue: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAssetDepreciationSchedule = z.infer<typeof insertAssetDepreciationScheduleSchema>;
+export type AssetDepreciationSchedule = typeof assetDepreciationSchedules.$inferSelect;
+
+// Bank Reconciliation
+export const bankReconciliations = pgTable("bank_reconciliations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  accountId: varchar("account_id").notNull().references(() => accounts.id),
+  reconciliationDate: timestamp("reconciliation_date").notNull(),
+  statementDate: timestamp("statement_date").notNull(),
+  statementBalance: decimal("statement_balance", { precision: 12, scale: 2 }).notNull(),
+  bookBalance: decimal("book_balance", { precision: 12, scale: 2 }).notNull(),
+  difference: decimal("difference", { precision: 12, scale: 2 }).notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("in_progress"), // in_progress, reconciled
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertBankReconciliationSchema = createInsertSchema(bankReconciliations, {
+  statementBalance: decimalString,
+  bookBalance: decimalString,
+  difference: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertBankReconciliation = z.infer<typeof insertBankReconciliationSchema>;
+export type BankReconciliation = typeof bankReconciliations.$inferSelect;
+
+// Bank Reconciliation Items (matched journal entries)
+export const bankReconciliationItems = pgTable("bank_reconciliation_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  reconciliationId: varchar("reconciliation_id").notNull().references(() => bankReconciliations.id),
+  journalEntryId: varchar("journal_entry_id").references(() => journalEntries.id),
+  transactionDate: timestamp("transaction_date").notNull(),
+  description: text("description"),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  isMatched: boolean("is_matched").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertBankReconciliationItemSchema = createInsertSchema(bankReconciliationItems, {
+  amount: decimalString,
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+});
+
+export type InsertBankReconciliationItem = z.infer<typeof insertBankReconciliationItemSchema>;
+export type BankReconciliationItem = typeof bankReconciliationItems.$inferSelect;
