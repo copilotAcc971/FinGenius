@@ -1026,20 +1026,33 @@ export const insertRecurringInvoiceLineItemSchema = createInsertSchema(recurring
 export type InsertRecurringInvoiceLineItem = z.infer<typeof insertRecurringInvoiceLineItemSchema>;
 export type RecurringInvoiceLineItem = typeof recurringInvoiceLineItems.$inferSelect;
 
-// Retainer Invoices (Advance Payment Invoices)
+// Retainer Invoices (Advance Payment Invoices with Line Items)
 export const retainerInvoices = pgTable("retainer_invoices", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   customerId: varchar("customer_id").notNull().references(() => customers.id),
   retainerNumber: varchar("retainer_number", { length: 100 }),
   
-  retainerDate: timestamp("retainer_date").notNull(),
-  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, sent, paid, partially_used, fully_used, cancelled
+  // Invoice details
+  invoiceDate: timestamp("invoice_date").notNull(),
+  invoiceSubject: text("invoice_subject"),
+  issuerTaxId: varchar("issuer_tax_id", { length: 100 }),
+  customerTaxId: varchar("customer_tax_id", { length: 100 }),
   
-  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
-  balanceRemaining: decimal("balance_remaining", { precision: 12, scale: 2 }).notNull(),
+  // Financial fields (server-side calculated)
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
+  
+  // Retainer-specific tracking
+  amountUsed: decimal("amount_used", { precision: 12, scale: 2 }).notNull().default("0"),
+  remainingBalance: decimal("remaining_balance", { precision: 12, scale: 2 }).notNull().default("0"),
+  
+  // Status: draft, sent, paid, partially_applied, fully_applied
+  status: varchar("status", { length: 50 }).notNull().default("draft"),
   
   notes: text("notes"),
+  terms: text("terms"),
   
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -1049,8 +1062,11 @@ export const retainerInvoices = pgTable("retainer_invoices", {
 ]);
 
 export const insertRetainerInvoiceSchema = createInsertSchema(retainerInvoices, {
-  amount: decimalString,
-  balanceRemaining: decimalString,
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+  amountUsed: decimalString,
+  remainingBalance: decimalString,
 }).omit({
   id: true,
   deletedAt: true,
@@ -1058,10 +1074,43 @@ export const insertRetainerInvoiceSchema = createInsertSchema(retainerInvoices, 
   updatedAt: true,
 }).extend({
   retainerNumber: z.string().max(100).optional(),
+  invoiceSubject: z.string().optional(),
+  issuerTaxId: z.string().max(100).optional(),
+  customerTaxId: z.string().max(100).optional(),
 });
 
 export type InsertRetainerInvoice = z.infer<typeof insertRetainerInvoiceSchema>;
 export type RetainerInvoice = typeof retainerInvoices.$inferSelect;
+
+// Retainer Invoice Line Items
+export const retainerInvoiceLineItems = pgTable("retainer_invoice_line_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  retainerInvoiceId: varchar("retainer_invoice_id").notNull().references(() => retainerInvoices.id),
+  itemId: varchar("item_id").references(() => items.id),
+  description: text("description").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  taxId: varchar("tax_id").references(() => taxes.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertRetainerInvoiceLineItemSchema = createInsertSchema(retainerInvoiceLineItems, {
+  quantity: decimalString,
+  unitPrice: decimalString,
+  discount: decimalString,
+  amount: decimalString,
+}).omit({
+  id: true,
+  tenantId: true,
+  retainerInvoiceId: true,
+  createdAt: true,
+});
+
+export type InsertRetainerInvoiceLineItem = z.infer<typeof insertRetainerInvoiceLineItemSchema>;
+export type RetainerInvoiceLineItem = typeof retainerInvoiceLineItems.$inferSelect;
 
 // Retainer Drawdowns (usage of retainer balance)
 export const retainerDrawdowns = pgTable("retainer_drawdowns", {

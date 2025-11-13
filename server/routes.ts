@@ -33,6 +33,8 @@ import {
   insertCustomerPaymentSchema,
   insertRecurringInvoiceSchema,
   insertRecurringInvoiceLineItemSchema,
+  insertRetainerInvoiceSchema,
+  insertRetainerInvoiceLineItemSchema,
 } from "@shared/schema";
 
 // Initialize Stripe and OpenAI only if credentials are available
@@ -1715,6 +1717,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error('Error processing recurring invoices:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Retainer Invoice routes
+  app.get("/api/retainer-invoices", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const retainerInvoices = await storage.getRetainerInvoices(tenantId);
+      res.json(retainerInvoices);
+    } catch (error: any) {
+      console.error('Error fetching retainer invoices:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/retainer-invoices/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const retainerInvoice = await storage.getRetainerInvoiceById(id, tenantId);
+      if (!retainerInvoice) {
+        return res.status(404).json({ message: "Retainer invoice not found" });
+      }
+      res.json(retainerInvoice);
+    } catch (error: any) {
+      console.error('Error fetching retainer invoice:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/retainer-invoices/:id/line-items", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const lineItems = await storage.getRetainerInvoiceLineItems(id, tenantId);
+      res.json(lineItems);
+    } catch (error: any) {
+      console.error('Error fetching retainer invoice line items:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/retainer-invoices", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { lineItems, ...retainerData } = req.body;
+      
+      // Validate retainer invoice data
+      const validatedData = insertRetainerInvoiceSchema.parse({ ...retainerData, tenantId });
+      
+      // Validate line items
+      const validatedLineItems = lineItems.map((item: any) => 
+        insertRetainerInvoiceLineItemSchema.parse(item)
+      );
+      
+      const retainerInvoice = await storage.createRetainerInvoice(validatedData, validatedLineItems);
+      res.status(201).json(retainerInvoice);
+    } catch (error: any) {
+      console.error('Error creating retainer invoice:', error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Invalid retainer invoice data', errors: error.errors });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/retainer-invoices/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const { lineItems, ...retainerData } = req.body;
+      
+      // Validate retainer invoice data
+      const validatedData = insertRetainerInvoiceSchema.partial().parse(retainerData);
+      
+      // Validate line items if provided
+      let validatedLineItems;
+      if (lineItems) {
+        validatedLineItems = lineItems.map((item: any) => 
+          insertRetainerInvoiceLineItemSchema.parse(item)
+        );
+      }
+      
+      const retainerInvoice = await storage.updateRetainerInvoice(id, tenantId, validatedData, validatedLineItems);
+      res.json(retainerInvoice);
+    } catch (error: any) {
+      console.error('Error updating retainer invoice:', error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Invalid retainer invoice data', errors: error.errors });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/retainer-invoices/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deleteRetainerInvoice(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error('Error deleting retainer invoice:', error);
       res.status(500).json({ message: error.message });
     }
   });

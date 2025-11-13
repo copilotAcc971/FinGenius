@@ -21,6 +21,7 @@ import Quotes from "@/pages/quotes";
 import SalesOrders from "@/pages/sales-orders";
 import CreditNotes from "@/pages/credit-notes";
 import RecurringInvoices from "@/pages/recurring-invoices";
+import RetainerInvoices from "@/pages/retainer-invoices";
 import Bills from "@/pages/bills";
 import Expenses from "@/pages/expenses";
 import Payments from "@/pages/payments";
@@ -49,6 +50,7 @@ function Router() {
           <Route path="/sales-orders" component={SalesOrders} />
           <Route path="/credit-notes" component={CreditNotes} />
           <Route path="/recurring-invoices" component={RecurringInvoices} />
+          <Route path="/retainer-invoices" component={RetainerInvoices} />
           <Route path="/bills" component={Bills} />
           <Route path="/expenses" component={Expenses} />
           <Route path="/payments" component={Payments} />

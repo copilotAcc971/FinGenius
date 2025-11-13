@@ -26,6 +26,8 @@ import {
   customerPaymentSequences,
   recurringInvoices,
   recurringInvoiceLineItems,
+  retainerInvoices,
+  retainerInvoiceLineItems,
   type User,
   type UpsertUser,
   type Tenant,
@@ -75,6 +77,10 @@ import {
   type InsertRecurringInvoice,
   type RecurringInvoiceLineItem,
   type InsertRecurringInvoiceLineItem,
+  type RetainerInvoice,
+  type InsertRetainerInvoice,
+  type RetainerInvoiceLineItem,
+  type InsertRetainerInvoiceLineItem,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull } from "drizzle-orm";
@@ -219,6 +225,15 @@ export interface IStorage {
   getRecurringInvoiceLineItems(recurringInvoiceId: string, tenantId: string): Promise<RecurringInvoiceLineItem[]>;
   generateInvoiceFromRecurring(recurringId: string, tenantId: string): Promise<Invoice>;
   processRecurringInvoices(tenantId: string): Promise<Invoice[]>;
+
+  // Retainer Invoice operations
+  getRetainerInvoices(tenantId: string): Promise<RetainerInvoice[]>;
+  getRetainerInvoiceById(id: string, tenantId: string): Promise<RetainerInvoice | null>;
+  createRetainerInvoice(data: InsertRetainerInvoice, lineItems: InsertRetainerInvoiceLineItem[]): Promise<RetainerInvoice>;
+  updateRetainerInvoice(id: string, tenantId: string, data: Partial<InsertRetainerInvoice>, lineItems?: InsertRetainerInvoiceLineItem[]): Promise<RetainerInvoice>;
+  deleteRetainerInvoice(id: string, tenantId: string): Promise<void>;
+  getRetainerInvoiceLineItems(retainerInvoiceId: string, tenantId: string): Promise<RetainerInvoiceLineItem[]>;
+  getNextRetainerNumber(tenantId: string): Promise<string>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2632,6 +2647,261 @@ export class DatabaseStorage implements IStorage {
     }
 
     return createdInvoices;
+  }
+
+  // Retainer Invoice operations
+  async getRetainerInvoices(tenantId: string): Promise<RetainerInvoice[]> {
+    return await db
+      .select()
+      .from(retainerInvoices)
+      .where(and(
+        eq(retainerInvoices.tenantId, tenantId),
+        isNull(retainerInvoices.deletedAt)
+      ))
+      .orderBy(desc(retainerInvoices.createdAt));
+  }
+
+  async getRetainerInvoiceById(id: string, tenantId: string): Promise<RetainerInvoice | null> {
+    const results = await db
+      .select()
+      .from(retainerInvoices)
+      .where(and(
+        eq(retainerInvoices.id, id),
+        eq(retainerInvoices.tenantId, tenantId),
+        isNull(retainerInvoices.deletedAt)
+      ));
+    return results[0] || null;
+  }
+
+  async createRetainerInvoice(data: InsertRetainerInvoice, lineItems: InsertRetainerInvoiceLineItem[]): Promise<RetainerInvoice> {
+    return await db.transaction(async (tx) => {
+      // Generate retainer number (RET-0001)
+      const lastRetainer = await tx
+        .select({ retainerNumber: retainerInvoices.retainerNumber })
+        .from(retainerInvoices)
+        .where(eq(retainerInvoices.tenantId, data.tenantId))
+        .orderBy(desc(retainerInvoices.createdAt))
+        .limit(1);
+      
+      const lastNumber = lastRetainer[0]?.retainerNumber;
+      const nextNumber = lastNumber 
+        ? parseInt(lastNumber.replace('RET-', '')) + 1 
+        : 1;
+      const retainerNumber = `RET-${nextNumber.toString().padStart(4, '0')}`;
+
+      // Calculate line item amounts server-side
+      const lineItemsWithCalculatedAmounts = lineItems.map(item => {
+        const quantity = parseFloat(item.quantity);
+        const unitPrice = parseFloat(item.unitPrice);
+        const discount = parseFloat(item.discount || "0");
+        const calculatedAmount = (quantity * unitPrice) - discount;
+        
+        return {
+          ...item,
+          amount: calculatedAmount.toFixed(2),
+        };
+      });
+
+      // Calculate totals from line items
+      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+        return sum + parseFloat(item.amount);
+      }, 0);
+
+      // Calculate tax amount
+      let taxAmount = 0;
+      for (const item of lineItemsWithCalculatedAmounts) {
+        if (item.taxId) {
+          const [taxRecord] = await tx
+            .select()
+            .from(taxes)
+            .where(eq(taxes.id, item.taxId))
+            .limit(1);
+          
+          if (taxRecord) {
+            const itemAmount = parseFloat(item.amount);
+            const taxRate = parseFloat(taxRecord.rate);
+            taxAmount += (itemAmount * taxRate) / 100;
+          }
+        }
+      }
+
+      const total = subtotal + taxAmount;
+
+      // Initialize balances
+      // remainingBalance = total when status = 'paid', otherwise 0
+      const remainingBalance = data.status === 'paid' ? total : 0;
+
+      // Create retainer invoice
+      const [createdRetainer] = await tx
+        .insert(retainerInvoices)
+        .values({
+          ...data,
+          retainerNumber,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
+          amountUsed: "0",
+          remainingBalance: remainingBalance.toFixed(2),
+        })
+        .returning();
+
+      // Insert line items
+      if (lineItemsWithCalculatedAmounts.length > 0) {
+        await tx.insert(retainerInvoiceLineItems).values(
+          lineItemsWithCalculatedAmounts.map(item => ({
+            ...item,
+            tenantId: data.tenantId,
+            retainerInvoiceId: createdRetainer.id,
+          }))
+        );
+      }
+
+      return createdRetainer;
+    });
+  }
+
+  async updateRetainerInvoice(id: string, tenantId: string, data: Partial<InsertRetainerInvoice>, lineItems?: InsertRetainerInvoiceLineItem[]): Promise<RetainerInvoice> {
+    return await db.transaction(async (tx) => {
+      // Verify ownership
+      const existing = await this.getRetainerInvoiceById(id, tenantId);
+      if (!existing) {
+        throw new Error("Retainer invoice not found");
+      }
+
+      let updateData = { ...data };
+
+      // If line items are provided, recalculate totals
+      if (lineItems) {
+        // Delete existing line items
+        await tx
+          .delete(retainerInvoiceLineItems)
+          .where(eq(retainerInvoiceLineItems.retainerInvoiceId, id));
+
+        // Calculate new line item amounts
+        const lineItemsWithCalculatedAmounts = lineItems.map(item => {
+          const quantity = parseFloat(item.quantity);
+          const unitPrice = parseFloat(item.unitPrice);
+          const discount = parseFloat(item.discount || "0");
+          const calculatedAmount = (quantity * unitPrice) - discount;
+          
+          return {
+            ...item,
+            amount: calculatedAmount.toFixed(2),
+          };
+        });
+
+        // Calculate totals
+        const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+          return sum + parseFloat(item.amount);
+        }, 0);
+
+        let taxAmount = 0;
+        for (const item of lineItemsWithCalculatedAmounts) {
+          if (item.taxId) {
+            const [taxRecord] = await tx
+              .select()
+              .from(taxes)
+              .where(eq(taxes.id, item.taxId))
+              .limit(1);
+            
+            if (taxRecord) {
+              const itemAmount = parseFloat(item.amount);
+              const taxRate = parseFloat(taxRecord.rate);
+              taxAmount += (itemAmount * taxRate) / 100;
+            }
+          }
+        }
+
+        const total = subtotal + taxAmount;
+
+        // Calculate new remaining balance
+        const amountUsed = parseFloat(existing.amountUsed);
+        const newRemainingBalance = Math.max(0, total - amountUsed);
+
+        updateData = {
+          ...updateData,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
+          remainingBalance: newRemainingBalance.toFixed(2),
+        };
+
+        // Insert new line items
+        if (lineItemsWithCalculatedAmounts.length > 0) {
+          await tx.insert(retainerInvoiceLineItems).values(
+            lineItemsWithCalculatedAmounts.map(item => ({
+              ...item,
+              tenantId,
+              retainerInvoiceId: id,
+            }))
+          );
+        }
+      }
+
+      // If status changed to 'paid', initialize remaining balance
+      if (updateData.status === 'paid' && existing.status !== 'paid') {
+        const total = parseFloat(updateData.total || existing.total);
+        const amountUsed = parseFloat(existing.amountUsed);
+        updateData.remainingBalance = Math.max(0, total - amountUsed).toFixed(2);
+      }
+
+      // Update retainer invoice
+      const [updated] = await tx
+        .update(retainerInvoices)
+        .set({
+          ...updateData,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(retainerInvoices.id, id),
+          eq(retainerInvoices.tenantId, tenantId)
+        ))
+        .returning();
+
+      if (!updated) {
+        throw new Error("Failed to update retainer invoice");
+      }
+
+      return updated;
+    });
+  }
+
+  async deleteRetainerInvoice(id: string, tenantId: string): Promise<void> {
+    await db
+      .update(retainerInvoices)
+      .set({ deletedAt: new Date() })
+      .where(and(
+        eq(retainerInvoices.id, id),
+        eq(retainerInvoices.tenantId, tenantId)
+      ));
+  }
+
+  async getRetainerInvoiceLineItems(retainerInvoiceId: string, tenantId: string): Promise<RetainerInvoiceLineItem[]> {
+    return await db
+      .select()
+      .from(retainerInvoiceLineItems)
+      .where(and(
+        eq(retainerInvoiceLineItems.retainerInvoiceId, retainerInvoiceId),
+        eq(retainerInvoiceLineItems.tenantId, tenantId)
+      ));
+  }
+
+  async getNextRetainerNumber(tenantId: string): Promise<string> {
+    return await db.transaction(async (tx) => {
+      const lastRetainer = await tx
+        .select({ retainerNumber: retainerInvoices.retainerNumber })
+        .from(retainerInvoices)
+        .where(eq(retainerInvoices.tenantId, tenantId))
+        .orderBy(desc(retainerInvoices.createdAt))
+        .limit(1);
+      
+      const lastNumber = lastRetainer[0]?.retainerNumber;
+      const nextNumber = lastNumber 
+        ? parseInt(lastNumber.replace('RET-', '')) + 1 
+        : 1;
+      
+      return `RET-${nextNumber.toString().padStart(4, '0')}`;
+    });
   }
 }
 
