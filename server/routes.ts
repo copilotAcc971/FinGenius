@@ -812,14 +812,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // Validate dates - reject null/empty/whitespace values before conversion
+      const invoiceDateStr = typeof invoice.invoiceDate === 'string' 
+        ? invoice.invoiceDate.trim() 
+        : invoice.invoiceDate;
+      const dueDateStr = typeof invoice.dueDate === 'string' 
+        ? invoice.dueDate.trim() 
+        : invoice.dueDate;
+
+      if (!invoiceDateStr || !dueDateStr) {
+        return res.status(400).json({ 
+          error: "Missing invoice or due date - unable to generate PDF" 
+        });
+      }
+
+      const invoiceDate = new Date(invoiceDateStr);
+      const dueDate = new Date(dueDateStr);
+      
+      if (isNaN(invoiceDate.getTime()) || isNaN(dueDate.getTime())) {
+        return res.status(400).json({ 
+          error: "Invalid invoice or due date - unable to generate PDF" 
+        });
+      }
+
+      // Validate numeric fields - reject null/empty values
+      if (invoice.subtotal == null || invoice.subtotal === '' ||
+          invoice.taxAmount == null || invoice.taxAmount === '' ||
+          invoice.total == null || invoice.total === '') {
+        return res.status(400).json({ 
+          error: "Missing invoice totals - unable to generate PDF" 
+        });
+      }
+
       // Convert all numeric fields from strings to numbers with validation
-      const subtotal = parseFloat(invoice.subtotal?.toString() || '0');
-      const taxAmount = parseFloat(invoice.taxAmount?.toString() || '0');
-      const total = parseFloat(invoice.total?.toString() || '0');
+      const subtotal = parseFloat(invoice.subtotal.toString());
+      const taxAmount = parseFloat(invoice.taxAmount.toString());
+      const total = parseFloat(invoice.total.toString());
 
       // Validate numeric conversions
       if (isNaN(subtotal) || isNaN(taxAmount) || isNaN(total)) {
-        return res.status(500).json({ 
+        return res.status(400).json({ 
           error: "Invalid invoice totals - unable to generate PDF" 
         });
       }
@@ -829,8 +861,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoice: {
           id: invoice.id,
           invoiceNumber: invoice.invoiceNumber || '',
-          invoiceDate: invoice.invoiceDate,
-          dueDate: invoice.dueDate,
+          invoiceDate: invoiceDate.toISOString().split('T')[0],
+          dueDate: dueDate.toISOString().split('T')[0],
           invoiceSubject: invoice.invoiceSubject || undefined,
           status: invoice.status,
           subtotal: subtotal,        // number
