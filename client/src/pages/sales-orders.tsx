@@ -1,0 +1,235 @@
+import { useQuery } from "@tanstack/react-query";
+import { Plus, Edit, Trash2, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import { useTenant } from "@/hooks/useTenant";
+import { type SalesOrder } from "@shared/schema";
+import { SalesOrderDialog } from "@/components/sales-order-dialog";
+import { useState } from "react";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+export default function SalesOrdersPage() {
+  const { currentTenant } = useTenant();
+  const { toast } = useToast();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<SalesOrder | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
+  const [convertingOrderId, setConvertingOrderId] = useState<string | null>(null);
+
+  const { data: orders, isLoading } = useQuery<SalesOrder[]>({
+    queryKey: ["/api/sales-orders", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const handleCreate = () => {
+    setSelectedOrder(null);
+    setDialogOpen(true);
+  };
+
+  const handleEdit = (order: SalesOrder) => {
+    setSelectedOrder(order);
+    setDialogOpen(true);
+  };
+
+  const handleDeleteClick = (orderId: string) => {
+    setOrderToDelete(orderId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!orderToDelete || !currentTenant?.id) return;
+
+    try {
+      await apiRequest(`/api/sales-orders/${orderToDelete}?tenantId=${currentTenant.id}`, "DELETE", {});
+
+      await queryClient.invalidateQueries({ queryKey: ["/api/sales-orders", { tenantId: currentTenant.id }] });
+      toast({ title: "Sales order deleted successfully" });
+    } catch (error: any) {
+      toast({ 
+        title: "Error deleting sales order", 
+        description: error.message,
+        variant: "destructive" 
+      });
+    } finally {
+      setDeleteDialogOpen(false);
+      setOrderToDelete(null);
+    }
+  };
+
+  const handleConvertToInvoice = async (orderId: string) => {
+    if (!currentTenant?.id) return;
+
+    setConvertingOrderId(orderId);
+    try {
+      await apiRequest(`/api/sales-orders/${orderId}/convert-to-invoice?tenantId=${currentTenant.id}`, "POST", {});
+
+      await queryClient.invalidateQueries({ queryKey: ["/api/sales-orders", { tenantId: currentTenant.id }] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/invoices", { tenantId: currentTenant.id }] });
+      
+      toast({ 
+        title: "Sales order converted to invoice", 
+        description: "Successfully created invoice from sales order" 
+      });
+    } catch (error: any) {
+      toast({ 
+        title: "Error converting sales order", 
+        description: error.message,
+        variant: "destructive" 
+      });
+    } finally {
+      setConvertingOrderId(null);
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+      draft: "secondary",
+      confirmed: "default",
+      packed: "default",
+      shipped: "default",
+      delivered: "default",
+      invoiced: "outline",
+      cancelled: "destructive",
+    };
+    return <Badge variant={variants[status] || "default"} data-testid={`badge-status-${status}`}>{status}</Badge>;
+  };
+
+  if (!currentTenant) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] gap-4">
+        <div className="text-center">
+          <h2 className="text-2xl font-semibold mb-2">No Workspace Selected</h2>
+          <p className="text-muted-foreground">Please select or create a workspace to continue</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold">Sales Orders</h1>
+          <p className="text-muted-foreground">Manage your sales orders</p>
+        </div>
+        <Button onClick={handleCreate} data-testid="button-create-order">
+          <Plus className="w-4 h-4 mr-2" />
+          New Sales Order
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+        </div>
+      ) : orders && orders.length > 0 ? (
+        <div className="grid gap-4">
+          {orders.map((order) => (
+            <Card key={order.id} data-testid={`card-order-${order.id}`}>
+              <CardHeader>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <CardTitle className="text-lg" data-testid={`text-order-number-${order.id}`}>
+                      {order.orderNumber || order.id}
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Order Date: {new Date(order.orderDate).toLocaleDateString()}
+                      {order.deliveryDate && (
+                        <> - Delivery: {new Date(order.deliveryDate).toLocaleDateString()}</>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {getStatusBadge(order.status)}
+                    <span className="text-lg font-semibold" data-testid={`text-order-total-${order.id}`}>
+                      ${parseFloat(order.total).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => handleEdit(order)}
+                    data-testid={`button-edit-order-${order.id}`}
+                  >
+                    <Edit className="w-4 h-4 mr-2" />
+                    Edit
+                  </Button>
+                  {order.status !== 'invoiced' && order.status !== 'cancelled' && (
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      onClick={() => handleConvertToInvoice(order.id)}
+                      disabled={convertingOrderId === order.id}
+                      data-testid={`button-convert-order-${order.id}`}
+                    >
+                      <FileText className="w-4 h-4 mr-2" />
+                      {convertingOrderId === order.id ? 'Converting...' : 'Convert to Invoice'}
+                    </Button>
+                  )}
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => handleDeleteClick(order.id)}
+                    data-testid={`button-delete-order-${order.id}`}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
+          <p className="text-lg font-medium mb-2">No sales orders yet</p>
+          <p className="text-sm text-muted-foreground mb-4">Create your first sales order to get started</p>
+          <Button onClick={handleCreate} data-testid="button-create-first-order">
+            <Plus className="mr-2 h-4 w-4" />
+            Create Sales Order
+          </Button>
+        </div>
+      )}
+
+      <SalesOrderDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        order={selectedOrder}
+      />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Sales Order</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this sales order? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} data-testid="button-confirm-delete">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

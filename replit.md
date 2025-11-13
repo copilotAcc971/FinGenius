@@ -24,11 +24,20 @@ Building a comprehensive accounting application that matches Zoho Books function
 - ⏳ PDF generation with company logo and tax details
 - ⏳ Email templates with PDF attachments
 
-### Phase 3: Advanced Sales Modules - PENDING
-- ⏳ Quotes Module with conversion to invoices
-- ⏳ Sales Orders with conversion
+### Phase 3: Advanced Sales Modules - IN PROGRESS
+- ✅ Quotes Module - PRODUCTION READY
+  - Full CRUD API with server-side security and financial integrity
+  - Line item amounts calculated server-side: (quantity × unitPrice) - discount
+  - Totals calculated server-side from line items with database tax rates
+  - Auto-numbering (QUO-0001), quote-to-invoice conversion
+  - UI with list, create/edit dialog, status badges, convert action
+- ✅ Sales Orders Module - PRODUCTION READY
+  - Full CRUD API with server-side security and financial integrity
+  - Same calculation patterns as Quotes for consistency
+  - Auto-numbering (SO-0001), order-to-invoice conversion
+  - UI with list, create/edit dialog, status badges, convert action
 - ⏳ Credit Notes linked to invoices
-- ⏳ Payment Tracking
+- ⏳ Customer Payment Tracking
 - ⏳ Retainer Invoices
 - ⏳ Recurring Invoicing
 
@@ -39,6 +48,14 @@ Building a comprehensive accounting application that matches Zoho Books function
 - All API routes protected with `verifyTenantAccess` middleware
 - tenantId sent as query parameter: `?tenantId=xxx`
 - Database queries filtered by tenantId
+- **CRITICAL**: Backend NEVER trusts client-provided tenantId - always uses req.tenantId from middleware
+
+### Financial Integrity Pattern (Quotes & Sales Orders)
+- **Server-Side Line Item Calculation**: amount = (quantity × unitPrice) - discount
+- **Server-Side Totals**: subtotal = sum of line items, tax = database rates × amounts, total = subtotal + tax
+- **Client Protection**: PATCH routes strip client totals, validate with .omit({ subtotal, taxAmount, total })
+- **Database Integrity**: updateQuote/updateSalesOrder ALWAYS recalculate and persist correct amounts
+- **No Tampering Possible**: Client cannot manipulate any financial data
 
 ### Query Parameters Handling
 - Updated `getQueryFn` in `client/src/lib/queryClient.ts` to handle query parameters

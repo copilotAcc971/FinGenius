@@ -18,6 +18,8 @@ import {
   documents,
   quotes,
   quoteLineItems,
+  salesOrders,
+  salesOrderLineItems,
   type User,
   type UpsertUser,
   type Tenant,
@@ -53,6 +55,10 @@ import {
   type InsertQuote,
   type QuoteLineItem,
   type InsertQuoteLineItem,
+  type SalesOrder,
+  type InsertSalesOrder,
+  type SalesOrderLineItem,
+  type InsertSalesOrderLineItem,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull } from "drizzle-orm";
@@ -161,6 +167,15 @@ export interface IStorage {
   deleteQuote(id: string, tenantId: string): Promise<void>;
   getQuoteLineItems(quoteId: string, tenantId: string): Promise<QuoteLineItem[]>;
   convertQuoteToInvoice(quoteId: string, tenantId: string): Promise<Invoice>;
+
+  // Sales Order operations
+  getSalesOrders(tenantId: string): Promise<SalesOrder[]>;
+  getSalesOrderById(id: string, tenantId: string): Promise<SalesOrder | null>;
+  createSalesOrder(order: InsertSalesOrder, lineItems: InsertSalesOrderLineItem[]): Promise<SalesOrder>;
+  updateSalesOrder(id: string, tenantId: string, order: Partial<InsertSalesOrder>, lineItems?: InsertSalesOrderLineItem[]): Promise<SalesOrder>;
+  deleteSalesOrder(id: string, tenantId: string): Promise<void>;
+  getSalesOrderLineItems(salesOrderId: string, tenantId: string): Promise<SalesOrderLineItem[]>;
+  convertSalesOrderToInvoice(salesOrderId: string, tenantId: string): Promise<Invoice>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1091,27 +1106,37 @@ export class DatabaseStorage implements IStorage {
         quoteNumber = `QUO-${nextNumber.toString().padStart(4, '0')}`;
       }
 
-      // SECURITY: Calculate totals from line items (don't trust client)
-      let subtotal = 0;
-      let taxAmount = 0;
+      // SECURITY: Calculate each line item's amount from quantity, price, discount
+      // Don't trust client-provided amounts
+      const lineItemsWithCalculatedAmounts = lineItems.map(item => {
+        const quantity = parseFloat(item.quantity);
+        const unitPrice = parseFloat(item.unitPrice);
+        const discount = parseFloat(item.discount || "0");
+        
+        // Calculate amount: (quantity * unitPrice) - discount
+        const calculatedAmount = (quantity * unitPrice) - discount;
+        
+        return {
+          ...item,
+          amount: calculatedAmount.toFixed(2), // Override client amount
+        };
+      });
 
-      if (lineItems.length > 0) {
-        // Calculate subtotal from line items
-        subtotal = lineItems.reduce((sum, item) => {
-          return sum + parseFloat(item.amount);
-        }, 0);
+      // Calculate subtotal from calculated amounts (not client amounts)
+      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+        return sum + parseFloat(item.amount);
+      }, 0);
 
-        // Calculate tax from line items
-        const taxCalculations = await Promise.all(lineItems.map(async (item) => {
-          if (!item.taxId) return 0;
-          const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
-          if (!tax) return 0;
-          const amount = parseFloat(item.amount);
-          const rate = parseFloat(tax.rate);
-          return (amount * rate) / 100;
-        }));
-        taxAmount = taxCalculations.reduce((sum, amt) => sum + amt, 0);
-      }
+      // Calculate tax from calculated amounts
+      const taxCalculations = await Promise.all(lineItemsWithCalculatedAmounts.map(async (item) => {
+        if (!item.taxId) return 0;
+        const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
+        if (!tax) return 0;
+        const amount = parseFloat(item.amount); // Use calculated amount
+        const rate = parseFloat(tax.rate);
+        return (amount * rate) / 100;
+      }));
+      const taxAmount = taxCalculations.reduce((sum, amt) => sum + amt, 0);
 
       const total = subtotal + taxAmount;
 
@@ -1130,10 +1155,10 @@ export class DatabaseStorage implements IStorage {
         .values(quoteDataWithCalculatedTotals)
         .returning();
 
-      // Create line items
-      if (lineItems.length > 0) {
+      // Create line items with calculated amounts
+      if (lineItemsWithCalculatedAmounts.length > 0) {
         await tx.insert(quoteLineItems).values(
-          lineItems.map(item => ({
+          lineItemsWithCalculatedAmounts.map(item => ({
             ...item,
             quoteId: newQuote.id,
             tenantId: quote.tenantId,
@@ -1154,19 +1179,28 @@ export class DatabaseStorage implements IStorage {
     lineItems?: InsertQuoteLineItem[]
   ): Promise<Quote> {
     const result = await db.transaction(async (tx) => {
-      // Determine which line items to use for calculation
-      let lineItemsForCalculation: InsertQuoteLineItem[];
+      // Always determine line items with recalculated amounts
+      let lineItemsWithCalculatedAmounts: Array<InsertQuoteLineItem & { amount: string }>;
       
       if (lineItems !== undefined) {
-        // New line items provided - use these
-        lineItemsForCalculation = lineItems;
-        
-        // Validate that at least one line item is provided
+        // New line items provided - calculate their amounts
         if (lineItems.length === 0) {
           throw new Error('At least one line item is required');
         }
+        
+        lineItemsWithCalculatedAmounts = lineItems.map(item => {
+          const quantity = parseFloat(item.quantity);
+          const unitPrice = parseFloat(item.unitPrice);
+          const discount = parseFloat(item.discount || "0");
+          const calculatedAmount = (quantity * unitPrice) - discount;
+          
+          return {
+            ...item,
+            amount: calculatedAmount.toFixed(2),
+          };
+        });
       } else {
-        // No new line items - fetch existing ones from database
+        // Fetch existing - recalculate their amounts
         const existing = await tx
           .select()
           .from(quoteLineItems)
@@ -1175,25 +1209,32 @@ export class DatabaseStorage implements IStorage {
             eq(quoteLineItems.tenantId, tenantId)
           ));
         
-        lineItemsForCalculation = existing.map(item => ({
-          tenantId: item.tenantId,
-          itemId: item.itemId || undefined,
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discount: item.discount || "0",
-          amount: item.amount,
-          taxId: item.taxId || undefined,
-        }));
+        lineItemsWithCalculatedAmounts = existing.map(item => {
+          const quantity = parseFloat(item.quantity);
+          const unitPrice = parseFloat(item.unitPrice);
+          const discount = parseFloat(item.discount || "0");
+          const calculatedAmount = (quantity * unitPrice) - discount;
+          
+          return {
+            tenantId: item.tenantId,
+            itemId: item.itemId || undefined,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discount: item.discount || "0",
+            amount: calculatedAmount.toFixed(2),
+            taxId: item.taxId || undefined,
+          };
+        });
       }
 
-      // ALWAYS calculate totals from line items (don't trust client)
-      const subtotal = lineItemsForCalculation.reduce((sum, item) => {
+      // Calculate subtotal from calculated amounts
+      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
         return sum + parseFloat(item.amount);
       }, 0);
 
-      // Calculate tax from line items
-      const taxCalculations = await Promise.all(lineItemsForCalculation.map(async (item) => {
+      // Calculate tax from calculated amounts
+      const taxCalculations = await Promise.all(lineItemsWithCalculatedAmounts.map(async (item) => {
         if (!item.taxId) return 0;
         const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
         if (!tax) return 0;
@@ -1229,25 +1270,21 @@ export class DatabaseStorage implements IStorage {
         throw new Error('Quote not found');
       }
 
-      // Update line items if new ones provided
-      if (lineItems !== undefined) {
-        // Delete existing line items
-        await tx
-          .delete(quoteLineItems)
-          .where(and(
-            eq(quoteLineItems.quoteId, id),
-            eq(quoteLineItems.tenantId, tenantId)
-          ));
+      // ✅ ALWAYS persist recalculated line items
+      await tx
+        .delete(quoteLineItems)
+        .where(and(
+          eq(quoteLineItems.quoteId, id),
+          eq(quoteLineItems.tenantId, tenantId)
+        ));
 
-        // Insert new line items
-        await tx.insert(quoteLineItems).values(
-          lineItems.map(item => ({
-            ...item,
-            quoteId: id,
-            tenantId,
-          }))
-        );
-      }
+      await tx.insert(quoteLineItems).values(
+        lineItemsWithCalculatedAmounts.map(item => ({
+          ...item,
+          quoteId: id,
+          tenantId,
+        }))
+      );
 
       return updated;
     });
@@ -1360,6 +1397,342 @@ export class DatabaseStorage implements IStorage {
           updatedAt: new Date(),
         })
         .where(eq(quotes.id, quoteId));
+
+      return newInvoice;
+    });
+
+    return result;
+  }
+
+  // Sales Order operations
+  async getSalesOrders(tenantId: string): Promise<SalesOrder[]> {
+    return await db
+      .select()
+      .from(salesOrders)
+      .where(and(
+        eq(salesOrders.tenantId, tenantId),
+        isNull(salesOrders.deletedAt)
+      ))
+      .orderBy(desc(salesOrders.createdAt));
+  }
+
+  async getSalesOrderById(id: string, tenantId: string): Promise<SalesOrder | null> {
+    const results = await db
+      .select()
+      .from(salesOrders)
+      .where(and(
+        eq(salesOrders.id, id),
+        eq(salesOrders.tenantId, tenantId),
+        isNull(salesOrders.deletedAt)
+      ));
+    return results[0] || null;
+  }
+
+  async createSalesOrder(order: InsertSalesOrder, lineItems: InsertSalesOrderLineItem[]): Promise<SalesOrder> {
+    const result = await db.transaction(async (tx) => {
+      // Generate order number if not provided
+      let orderNumber = order.orderNumber;
+      if (!orderNumber) {
+        const lastOrder = await tx
+          .select({ orderNumber: salesOrders.orderNumber })
+          .from(salesOrders)
+          .where(eq(salesOrders.tenantId, order.tenantId))
+          .orderBy(desc(salesOrders.createdAt))
+          .limit(1);
+        
+        const lastNumber = lastOrder[0]?.orderNumber;
+        const nextNumber = lastNumber 
+          ? parseInt(lastNumber.replace('SO-', '')) + 1 
+          : 1;
+        orderNumber = `SO-${nextNumber.toString().padStart(4, '0')}`;
+      }
+
+      // SECURITY: Calculate each line item's amount from quantity, price, discount
+      // Don't trust client-provided amounts
+      const lineItemsWithCalculatedAmounts = lineItems.map(item => {
+        const quantity = parseFloat(item.quantity);
+        const unitPrice = parseFloat(item.unitPrice);
+        const discount = parseFloat(item.discount || "0");
+        
+        // Calculate amount: (quantity * unitPrice) - discount
+        const calculatedAmount = (quantity * unitPrice) - discount;
+        
+        return {
+          ...item,
+          amount: calculatedAmount.toFixed(2), // Override client amount
+        };
+      });
+
+      // Calculate subtotal from calculated amounts (not client amounts)
+      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+        return sum + parseFloat(item.amount);
+      }, 0);
+
+      // Calculate tax from calculated amounts
+      const taxCalculations = await Promise.all(lineItemsWithCalculatedAmounts.map(async (item) => {
+        if (!item.taxId) return 0;
+        const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
+        if (!tax) return 0;
+        const amount = parseFloat(item.amount); // Use calculated amount
+        const rate = parseFloat(tax.rate);
+        return (amount * rate) / 100;
+      }));
+      const taxAmount = taxCalculations.reduce((sum, amt) => sum + amt, 0);
+
+      const total = subtotal + taxAmount;
+
+      // Override client-provided totals with server-calculated values
+      const orderDataWithCalculatedTotals = {
+        ...order,
+        orderNumber,
+        subtotal: subtotal.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        total: total.toFixed(2),
+      };
+
+      const [newOrder] = await tx
+        .insert(salesOrders)
+        .values(orderDataWithCalculatedTotals)
+        .returning();
+
+      // Insert line items with calculated amounts
+      if (lineItemsWithCalculatedAmounts.length > 0) {
+        const lineItemsWithOrderId = lineItemsWithCalculatedAmounts.map(item => ({
+          ...item,
+          salesOrderId: newOrder.id,
+        }));
+        await tx.insert(salesOrderLineItems).values(lineItemsWithOrderId);
+      }
+
+      return newOrder;
+    });
+
+    return result;
+  }
+
+  async updateSalesOrder(
+    id: string, 
+    tenantId: string, 
+    order: Partial<InsertSalesOrder>, 
+    lineItems?: InsertSalesOrderLineItem[]
+  ): Promise<SalesOrder> {
+    const result = await db.transaction(async (tx) => {
+      // Always determine line items with recalculated amounts
+      let lineItemsWithCalculatedAmounts: Array<InsertSalesOrderLineItem & { amount: string }>;
+      
+      if (lineItems !== undefined) {
+        // New line items provided - calculate their amounts
+        if (lineItems.length === 0) {
+          throw new Error('At least one line item is required');
+        }
+        
+        lineItemsWithCalculatedAmounts = lineItems.map(item => {
+          const quantity = parseFloat(item.quantity);
+          const unitPrice = parseFloat(item.unitPrice);
+          const discount = parseFloat(item.discount || "0");
+          const calculatedAmount = (quantity * unitPrice) - discount;
+          
+          return {
+            ...item,
+            amount: calculatedAmount.toFixed(2),
+          };
+        });
+      } else {
+        // Fetch existing - recalculate their amounts
+        const existing = await tx
+          .select()
+          .from(salesOrderLineItems)
+          .where(and(
+            eq(salesOrderLineItems.salesOrderId, id),
+            eq(salesOrderLineItems.tenantId, tenantId)
+          ));
+        
+        lineItemsWithCalculatedAmounts = existing.map(item => {
+          const quantity = parseFloat(item.quantity);
+          const unitPrice = parseFloat(item.unitPrice);
+          const discount = parseFloat(item.discount || "0");
+          const calculatedAmount = (quantity * unitPrice) - discount;
+          
+          return {
+            tenantId: item.tenantId,
+            itemId: item.itemId || undefined,
+            description: item.description,
+            quantity: item.quantity,
+            quantityFulfilled: item.quantityFulfilled || '0',
+            unitPrice: item.unitPrice,
+            discount: item.discount || "0",
+            amount: calculatedAmount.toFixed(2),
+            taxId: item.taxId || undefined,
+          };
+        });
+      }
+
+      // Calculate subtotal from calculated amounts
+      const subtotal = lineItemsWithCalculatedAmounts.reduce((sum, item) => {
+        return sum + parseFloat(item.amount);
+      }, 0);
+
+      // Calculate tax from calculated amounts
+      const taxCalculations = await Promise.all(lineItemsWithCalculatedAmounts.map(async (item) => {
+        if (!item.taxId) return 0;
+        const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
+        if (!tax) return 0;
+        const amount = parseFloat(item.amount);
+        const rate = parseFloat(tax.rate);
+        return (amount * rate) / 100;
+      }));
+      const taxAmount = taxCalculations.reduce((sum, amt) => sum + amt, 0);
+
+      const total = subtotal + taxAmount;
+
+      // Override any client-provided totals with calculated values
+      const orderDataWithCalculatedTotals = {
+        ...order,
+        subtotal: subtotal.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        total: total.toFixed(2),
+        updatedAt: new Date(),
+      };
+
+      const [updatedOrder] = await tx
+        .update(salesOrders)
+        .set(orderDataWithCalculatedTotals)
+        .where(and(
+          eq(salesOrders.id, id),
+          eq(salesOrders.tenantId, tenantId),
+          isNull(salesOrders.deletedAt)
+        ))
+        .returning();
+
+      if (!updatedOrder) {
+        throw new Error('Sales order not found');
+      }
+
+      // ✅ ALWAYS persist recalculated line items
+      await tx
+        .delete(salesOrderLineItems)
+        .where(and(
+          eq(salesOrderLineItems.salesOrderId, id),
+          eq(salesOrderLineItems.tenantId, tenantId)
+        ));
+
+      await tx.insert(salesOrderLineItems).values(
+        lineItemsWithCalculatedAmounts.map(item => ({
+          ...item,
+          salesOrderId: id,
+          tenantId,
+        }))
+      );
+
+      return updatedOrder;
+    });
+
+    return result;
+  }
+
+  async deleteSalesOrder(id: string, tenantId: string): Promise<void> {
+    await db
+      .update(salesOrders)
+      .set({ deletedAt: new Date() })
+      .where(and(
+        eq(salesOrders.id, id),
+        eq(salesOrders.tenantId, tenantId)
+      ));
+  }
+
+  async getSalesOrderLineItems(salesOrderId: string, tenantId: string): Promise<SalesOrderLineItem[]> {
+    return await db
+      .select()
+      .from(salesOrderLineItems)
+      .where(and(
+        eq(salesOrderLineItems.salesOrderId, salesOrderId),
+        eq(salesOrderLineItems.tenantId, tenantId)
+      ));
+  }
+
+  async convertSalesOrderToInvoice(salesOrderId: string, tenantId: string): Promise<Invoice> {
+    const result = await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(salesOrders)
+        .where(and(
+          eq(salesOrders.id, salesOrderId),
+          eq(salesOrders.tenantId, tenantId),
+          isNull(salesOrders.deletedAt)
+        ))
+        .limit(1);
+
+      if (!order) {
+        throw new Error('Sales order not found');
+      }
+
+      if (order.convertedToInvoiceId) {
+        throw new Error('Sales order has already been converted to an invoice');
+      }
+
+      const lineItems = await tx
+        .select()
+        .from(salesOrderLineItems)
+        .where(and(
+          eq(salesOrderLineItems.salesOrderId, salesOrderId),
+          eq(salesOrderLineItems.tenantId, tenantId)
+        ));
+
+      const lastInvoice = await tx
+        .select({ invoiceNumber: invoices.invoiceNumber })
+        .from(invoices)
+        .where(eq(invoices.tenantId, tenantId))
+        .orderBy(desc(invoices.invoiceDate))
+        .limit(1);
+      
+      const lastNumber = lastInvoice[0]?.invoiceNumber;
+      const nextNumber = lastNumber 
+        ? parseInt(lastNumber.replace('INV-', '')) + 1 
+        : 1;
+      const invoiceNumber = `INV-${nextNumber.toString().padStart(4, '0')}`;
+
+      const [newInvoice] = await tx
+        .insert(invoices)
+        .values({
+          tenantId,
+          customerId: order.customerId,
+          invoiceNumber,
+          invoiceDate: new Date(),
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          status: 'draft',
+          subtotal: order.subtotal,
+          taxAmount: order.taxAmount,
+          total: order.total,
+          notes: order.notes || undefined,
+        })
+        .returning();
+
+      if (lineItems.length > 0) {
+        await tx.insert(invoiceLineItems).values(
+          lineItems.map(item => ({
+            tenantId,
+            invoiceId: newInvoice.id,
+            itemId: item.itemId || undefined,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discount: item.discount || '0',
+            amount: item.amount,
+            taxId: item.taxId || undefined,
+            accountId: undefined,
+          }))
+        );
+      }
+
+      await tx
+        .update(salesOrders)
+        .set({
+          status: 'invoiced',
+          convertedToInvoiceId: newInvoice.id,
+          convertedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(salesOrders.id, salesOrderId));
 
       return newInvoice;
     });
@@ -2017,6 +2390,35 @@ export class MemStorage implements IStorage {
 
   async convertQuoteToInvoice(quoteId: string, tenantId: string): Promise<Invoice> {
     throw new Error('Quotes not implemented in MemStorage');
+  }
+
+  // Sales Order operations
+  async getSalesOrders(tenantId: string): Promise<SalesOrder[]> {
+    throw new Error('Sales orders not implemented in MemStorage');
+  }
+
+  async getSalesOrderById(id: string, tenantId: string): Promise<SalesOrder | null> {
+    throw new Error('Sales orders not implemented in MemStorage');
+  }
+
+  async createSalesOrder(order: InsertSalesOrder, lineItems: InsertSalesOrderLineItem[]): Promise<SalesOrder> {
+    throw new Error('Sales orders not implemented in MemStorage');
+  }
+
+  async updateSalesOrder(id: string, tenantId: string, order: Partial<InsertSalesOrder>, lineItems?: InsertSalesOrderLineItem[]): Promise<SalesOrder> {
+    throw new Error('Sales orders not implemented in MemStorage');
+  }
+
+  async deleteSalesOrder(id: string, tenantId: string): Promise<void> {
+    throw new Error('Sales orders not implemented in MemStorage');
+  }
+
+  async getSalesOrderLineItems(salesOrderId: string, tenantId: string): Promise<SalesOrderLineItem[]> {
+    throw new Error('Sales orders not implemented in MemStorage');
+  }
+
+  async convertSalesOrderToInvoice(salesOrderId: string, tenantId: string): Promise<Invoice> {
+    throw new Error('Sales orders not implemented in MemStorage');
   }
 }
 

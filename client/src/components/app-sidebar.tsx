@@ -29,6 +29,7 @@ import { Link, useLocation } from "wouter";
 const salesItems = [
   { title: "Invoices", url: "/invoices", icon: FileText },
   { title: "Quotes", url: "/quotes", icon: FileText },
+  { title: "Sales Orders", url: "/sales-orders", icon: FileText },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Items", url: "/items", icon: Package },
   { title: "Taxes", url: "/taxes", icon: Percent },

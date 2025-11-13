@@ -26,6 +26,8 @@ import {
   insertDocumentSchema,
   insertQuoteSchema,
   insertQuoteLineItemSchema,
+  insertSalesOrderSchema,
+  insertSalesOrderLineItemSchema,
 } from "@shared/schema";
 
 // Initialize Stripe and OpenAI only if credentials are available
@@ -1234,6 +1236,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(invoice);
     } catch (error: any) {
       console.error('Error converting quote to invoice:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Sales Order routes
+  // List sales orders
+  app.get("/api/sales-orders", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const orders = await storage.getSalesOrders(tenantId);
+      res.json(orders);
+    } catch (error: any) {
+      console.error('Error fetching sales orders:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get sales order by ID
+  app.get("/api/sales-orders/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const order = await storage.getSalesOrderById(id, tenantId);
+      
+      if (!order) {
+        return res.status(404).json({ message: "Sales order not found" });
+      }
+      
+      res.json(order);
+    } catch (error: any) {
+      console.error('Error fetching sales order:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get sales order line items
+  app.get("/api/sales-orders/:id/line-items", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const lineItems = await storage.getSalesOrderLineItems(id, tenantId);
+      res.json(lineItems);
+    } catch (error: any) {
+      console.error('Error fetching sales order line items:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Create sales order
+  app.post("/api/sales-orders", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!; // From middleware - trusted source
+      const { lineItems, ...orderData } = req.body;
+      
+      // SECURITY: IGNORE client-provided tenantId, use req.tenantId instead
+      const validatedOrder = insertSalesOrderSchema.parse({ ...orderData, tenantId });
+      
+      // Validate line items - also use req.tenantId
+      const validatedLineItems = lineItems.map((item: any) =>
+        insertSalesOrderLineItemSchema.parse({ ...item, tenantId })
+      );
+      
+      const order = await storage.createSalesOrder(validatedOrder, validatedLineItems);
+      res.status(201).json(order);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error creating sales order:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Update sales order
+  app.patch("/api/sales-orders/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!; // From middleware - trusted source
+      const { lineItems, subtotal, taxAmount, total, ...orderData } = req.body;
+      
+      // SECURITY: Strip out any client-provided totals (server will calculate)
+      // Only allow non-financial fields to be updated
+      
+      const partialOrderSchema = insertSalesOrderSchema.partial().omit({
+        subtotal: true,
+        taxAmount: true,
+        total: true,
+      });
+      const validatedOrder = partialOrderSchema.parse({ ...orderData, tenantId });
+      
+      // Validate line items if provided
+      let validatedLineItems;
+      if (lineItems !== undefined) {
+        if (!Array.isArray(lineItems) || lineItems.length === 0) {
+          return res.status(422).json({ message: 'At least one line item is required' });
+        }
+        validatedLineItems = lineItems.map((item: any) =>
+          insertSalesOrderLineItemSchema.parse({ ...item, tenantId })
+        );
+      }
+      
+      const order = await storage.updateSalesOrder(id, tenantId, validatedOrder, validatedLineItems);
+      res.json(order);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error('Error updating sales order:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Delete sales order (soft delete)
+  app.delete("/api/sales-orders/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      await storage.deleteSalesOrder(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error('Error deleting sales order:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Convert sales order to invoice
+  app.post("/api/sales-orders/:id/convert-to-invoice", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const invoice = await storage.convertSalesOrderToInvoice(id, tenantId);
+      res.status(201).json(invoice);
+    } catch (error: any) {
+      console.error('Error converting sales order to invoice:', error);
       res.status(500).json({ message: error.message });
     }
   });
