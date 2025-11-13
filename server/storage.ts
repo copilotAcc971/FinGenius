@@ -2,6 +2,7 @@ import {
   users,
   tenants,
   tenantMembers,
+  tenantCompanyProfiles,
   customers,
   vendors,
   items,
@@ -19,6 +20,8 @@ import {
   type UpsertUser,
   type Tenant,
   type InsertTenant,
+  type TenantCompanyProfile,
+  type InsertTenantCompanyProfile,
   type Customer,
   type InsertCustomer,
   type Vendor,
@@ -59,6 +62,11 @@ export interface IStorage {
   createTenant(tenant: InsertTenant): Promise<Tenant>;
   updateTenant(id: string, userId: string, tenant: Partial<InsertTenant>): Promise<Tenant>;
   isTenantMember(tenantId: string, userId: string): Promise<boolean>;
+
+  // Company Profile operations
+  getCompanyProfile(tenantId: string): Promise<TenantCompanyProfile | null>;
+  createCompanyProfile(profile: InsertTenantCompanyProfile): Promise<TenantCompanyProfile>;
+  updateCompanyProfile(tenantId: string, data: Partial<Omit<InsertTenantCompanyProfile, 'tenantId'>>): Promise<TenantCompanyProfile>;
 
   // Customer operations
   getCustomersByTenant(tenantId: string): Promise<Customer[]>;
@@ -207,6 +215,52 @@ export class DatabaseStorage implements IStorage {
       .limit(1);
     
     return !!member;
+  }
+
+  // Company Profile operations
+  async getCompanyProfile(tenantId: string): Promise<TenantCompanyProfile | null> {
+    const [profile] = await db
+      .select()
+      .from(tenantCompanyProfiles)
+      .where(eq(tenantCompanyProfiles.tenantId, tenantId))
+      .limit(1);
+    
+    return profile || null;
+  }
+
+  async createCompanyProfile(profileData: InsertTenantCompanyProfile): Promise<TenantCompanyProfile> {
+    const [profile] = await db
+      .insert(tenantCompanyProfiles)
+      .values(profileData)
+      .returning();
+    return profile;
+  }
+
+  async updateCompanyProfile(
+    tenantId: string,
+    data: Partial<Omit<InsertTenantCompanyProfile, 'tenantId'>>
+  ): Promise<TenantCompanyProfile> {
+    const existing = await this.getCompanyProfile(tenantId);
+    if (!existing) {
+      throw new Error("Company profile not found");
+    }
+    
+    const [updatedProfile] = await db
+      .update(tenantCompanyProfiles)
+      .set({
+        ...data,
+        // SECURITY: Never allow tenantId to be overwritten
+        // Explicitly exclude it from the update
+        updatedAt: new Date(),
+      })
+      .where(eq(tenantCompanyProfiles.tenantId, tenantId))
+      .returning();
+    
+    if (!updatedProfile) {
+      throw new Error("Company profile not found");
+    }
+    
+    return updatedProfile;
   }
 
   // Customer operations

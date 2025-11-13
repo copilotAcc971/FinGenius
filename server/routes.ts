@@ -6,6 +6,8 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import {
   insertTenantSchema,
+  insertTenantCompanyProfileSchema,
+  updateTenantCompanyProfileSchema,
   insertCustomerSchema,
   updateCustomerSchema,
   insertVendorSchema,
@@ -118,6 +120,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error updating tenant:", error);
       res.status(400).json({ message: error.message || "Failed to update tenant" });
+    }
+  });
+
+  // Company Profile routes
+  app.get('/api/company-profile', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const profile = await storage.getCompanyProfile(req.tenantId);
+      res.json(profile);
+    } catch (error) {
+      console.error("Error fetching company profile:", error);
+      res.status(500).json({ message: "Failed to fetch company profile" });
+    }
+  });
+
+  app.post('/api/company-profile', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const parsed = insertTenantCompanyProfileSchema.parse({ ...req.body, tenantId: req.tenantId });
+      const profile = await storage.createCompanyProfile(parsed);
+      res.json(profile);
+    } catch (error: any) {
+      console.error("Error creating company profile:", error);
+      res.status(400).json({ message: error.message || "Failed to create company profile" });
+    }
+  });
+
+  app.patch('/api/company-profile', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      if (!req.tenantId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      // SECURITY: Use schema that excludes tenantId to prevent tampering
+      const parsed = updateTenantCompanyProfileSchema.parse(req.body);
+      
+      const updated = await storage.updateCompanyProfile(req.tenantId, parsed);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating company profile:", error);
+      res.status(400).json({ message: error.message || "Failed to update company profile" });
     }
   });
 
@@ -495,6 +536,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoice: { ...req.body.invoice, tenantId: req.tenantId },
         lineItems: req.body.lineItems || [],
       });
+      
+      // Validate issuerTaxId is present for tax compliance
+      if (!parsed.invoice.issuerTaxId || parsed.invoice.issuerTaxId.trim() === '') {
+        return res.status(400).json({ 
+          message: "Issuer tax registration number is required for invoices" 
+        });
+      }
+      
       const invoice = await storage.createInvoiceWithItems(parsed);
       res.json(invoice);
     } catch (error: any) {
@@ -517,6 +566,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoice: { ...req.body.invoice, tenantId: req.tenantId },
         lineItems: req.body.lineItems || [],
       });
+      
+      // Validate issuerTaxId is present for tax compliance
+      if (!parsed.invoice.issuerTaxId || parsed.invoice.issuerTaxId.trim() === '') {
+        return res.status(400).json({ 
+          message: "Issuer tax registration number is required for invoices" 
+        });
+      }
       
       const updated = await storage.updateInvoiceWithItems(id, req.tenantId, parsed);
       res.json(updated);

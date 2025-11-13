@@ -46,6 +46,7 @@ const paymentsItems = [
 const otherItems = [
   { title: "Documents", url: "/documents", icon: Upload },
   { title: "Reports", url: "/reports", icon: BarChart3 },
+  { title: "Company Profile", url: "/company-profile", icon: Building2 },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 

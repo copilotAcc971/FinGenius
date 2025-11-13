@@ -2,7 +2,15 @@ import { useEffect, useMemo } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useFieldArray, useWatch } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { invoicePayloadSchema, type Invoice, type Customer, type InvoiceLineItem } from "@shared/schema";
+import { 
+  invoicePayloadSchema, 
+  type Invoice, 
+  type Customer, 
+  type InvoiceLineItem,
+  type Item,
+  type Tax,
+  type TenantCompanyProfile
+} from "@shared/schema";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,13 +36,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { useTenant } from "@/hooks/useTenant";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Loader2, AlertCircle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Link } from "wouter";
 
 const safeParseFloat = (value: string | number | null | undefined): number => {
   if (value === '' || value === null || value === undefined) return 0;
@@ -44,29 +60,37 @@ const safeParseFloat = (value: string | number | null | undefined): number => {
 
 const decimalString = z.string().refine(
   (val) => {
+    if (val === '' || val === '0' || val === '0.00') return true;
     const parsed = parseFloat(val);
-    return !isNaN(parsed) && parsed > 0;
+    return !isNaN(parsed) && parsed >= 0;
   },
-  { message: "Must be greater than 0" }
+  { message: "Must be a valid number" }
 );
 
 const formSchema = z.object({
   invoice: z.object({
     tenantId: z.string(),
     customerId: z.string().min(1, "Customer is required"),
-    invoiceNumber: z.string().min(1, "Invoice number is required"),
+    invoiceNumber: z.string().optional(),
     invoiceDate: z.string().min(1, "Invoice date is required"),
     dueDate: z.string().min(1, "Due date is required"),
     status: z.string(),
+    invoiceSubject: z.string().optional(),
+    poReference: z.string().optional(),
+    issuerTaxId: z.string().min(1, "Company tax registration number required"),
+    customerTaxId: z.string().optional(),
     subtotal: z.string(),
     taxAmount: z.string(),
     total: z.string(),
     notes: z.string().optional(),
   }),
   lineItems: z.array(z.object({
+    itemId: z.string().nullable().optional(),
     description: z.string().min(1, "Description is required"),
     quantity: decimalString,
     unitPrice: decimalString,
+    discount: decimalString.optional(),
+    taxId: z.string().nullable().optional(),
     amount: z.string(),
     accountId: z.string().nullable().optional(),
   })).min(1, "At least one line item is required"),
@@ -86,7 +110,22 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
 
   const { data: customers = [] } = useQuery<Customer[]>({
     queryKey: ["/api/customers", currentTenant?.id],
-    enabled: !!currentTenant?.id,
+    enabled: !!currentTenant?.id && open,
+  });
+
+  const { data: items = [] } = useQuery<Item[]>({
+    queryKey: ["/api/items", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
+  });
+
+  const { data: taxes = [] } = useQuery<Tax[]>({
+    queryKey: ["/api/taxes", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
+  });
+
+  const { data: companyProfile, isLoading: profileLoading } = useQuery<TenantCompanyProfile>({
+    queryKey: ["/api/company-profile", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
   });
 
   const { data: lineItems, isLoading: lineItemsLoading } = useQuery<InvoiceLineItem[]>({
@@ -99,7 +138,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
       if (!response.ok) throw new Error("Failed to fetch line items");
       return response.json();
     },
-    enabled: !!invoice?.id && !!currentTenant?.id,
+    enabled: !!invoice?.id && !!currentTenant?.id && open,
   });
 
   const form = useForm<FormValues>({
@@ -112,15 +151,22 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
         invoiceDate: new Date().toISOString().split('T')[0],
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: "draft",
+        invoiceSubject: "",
+        poReference: "",
+        issuerTaxId: "",
+        customerTaxId: "",
         subtotal: "0.00",
         taxAmount: "0.00",
         total: "0.00",
         notes: "",
       },
       lineItems: [{
+        itemId: null,
         description: "",
         quantity: "1",
         unitPrice: "0.00",
+        discount: "0.00",
+        taxId: null,
         amount: "0.00",
         accountId: null,
       }],
@@ -132,45 +178,124 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
     name: "lineItems",
   });
 
-  // Use useWatch to watch form values without causing side effects
   const watchedLineItems = useWatch({
     control: form.control,
     name: "lineItems",
   });
 
-  const watchedTaxAmount = useWatch({
+  const watchedCustomerId = useWatch({
     control: form.control,
-    name: "invoice.taxAmount",
+    name: "invoice.customerId",
   });
 
-  // Calculate amounts and totals using useMemo to avoid recursion
+  // Reinitialize form when tenant/profile data loads (for new invoices)
+  // This ensures tenantId and issuerTaxId are populated even if form initialized before data loaded
+  useEffect(() => {
+    if (!open || invoice) return; // Only for new invoices
+    if (!currentTenant) return; // Wait for tenant to load
+    if (profileLoading) return; // Wait for profile to finish loading
+    
+    // Reset form with loaded data while preserving any user edits
+    const currentValues = form.getValues();
+    form.reset({
+      invoice: {
+        ...currentValues.invoice,
+        tenantId: currentTenant.id,
+        issuerTaxId: companyProfile?.taxRegistrationNumber || "",
+      },
+      lineItems: currentValues.lineItems,
+    });
+  }, [open, invoice, currentTenant, companyProfile, profileLoading, form]);
+
+  // Auto-populate customer tax ID when customer is selected
+  useEffect(() => {
+    if (watchedCustomerId) {
+      const customer = customers.find(c => c.id === watchedCustomerId);
+      if (customer?.taxRegistrationNumber) {
+        form.setValue("invoice.customerTaxId", customer.taxRegistrationNumber, { shouldValidate: false });
+      } else {
+        form.setValue("invoice.customerTaxId", "", { shouldValidate: false });
+      }
+    }
+  }, [watchedCustomerId, customers, form]);
+
+  // Handle item selection - auto-populate description, unit price, and tax
+  const handleItemSelect = (itemId: string | null, index: number) => {
+    if (itemId) {
+      const item = items.find(i => i.id === itemId);
+      if (item) {
+        form.setValue(`lineItems.${index}.description`, item.description || item.name, { shouldValidate: false });
+        form.setValue(`lineItems.${index}.unitPrice`, item.rate, { shouldValidate: false });
+        if (item.taxId) {
+          form.setValue(`lineItems.${index}.taxId`, item.taxId, { shouldValidate: false });
+        }
+      }
+    }
+  };
+
+  // Calculate amounts and totals using useMemo
   const calculatedValues = useMemo(() => {
     const lineItems = watchedLineItems || [];
     
     // Calculate individual line item amounts
     const itemsWithCalculatedAmounts = lineItems.map((item) => {
-      if (!item) return { amount: "0.00" };
+      if (!item) return { 
+        amount: "0.00", 
+        taxAmount: 0, 
+        discount: 0, 
+        baseAmount: 0 
+      };
+      
       const qty = safeParseFloat(item.quantity);
       const price = safeParseFloat(item.unitPrice);
-      const amount = (qty * price).toFixed(2);
-      return { amount };
+      const discount = safeParseFloat(item.discount || "0");
+      
+      // Calculate base amount before tax
+      const baseAmount = (qty * price) - discount;
+      
+      // Calculate tax amount
+      let taxAmount = 0;
+      if (item.taxId) {
+        const tax = taxes.find(t => t.id === item.taxId);
+        if (tax) {
+          taxAmount = baseAmount * (safeParseFloat(tax.rate) / 100);
+        }
+      }
+      
+      // Final amount includes tax
+      const amount = baseAmount + taxAmount;
+      
+      return { 
+        amount: amount.toFixed(2),
+        taxAmount,
+        discount,
+        baseAmount
+      };
     });
 
-    // Calculate subtotal
+    // Calculate totals
     const subtotal = itemsWithCalculatedAmounts.reduce((sum, item) => {
-      return sum + safeParseFloat(item.amount);
+      return sum + item.baseAmount + item.discount;
     }, 0);
     
-    // Calculate total
-    const taxAmount = safeParseFloat(watchedTaxAmount);
-    const total = subtotal + taxAmount;
+    const totalDiscount = itemsWithCalculatedAmounts.reduce((sum, item) => {
+      return sum + item.discount;
+    }, 0);
+    
+    const totalTax = itemsWithCalculatedAmounts.reduce((sum, item) => {
+      return sum + item.taxAmount;
+    }, 0);
+    
+    const total = subtotal - totalDiscount + totalTax;
 
     return {
       itemsWithCalculatedAmounts,
       subtotal: subtotal.toFixed(2),
+      totalDiscount: totalDiscount.toFixed(2),
+      totalTax: totalTax.toFixed(2),
       total: total.toFixed(2),
     };
-  }, [watchedLineItems, watchedTaxAmount]);
+  }, [watchedLineItems, taxes]);
 
   // Update form values when calculated values change
   useEffect(() => {
@@ -182,10 +307,15 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
     });
 
     const currentSubtotal = form.getValues('invoice.subtotal');
+    const currentTaxAmount = form.getValues('invoice.taxAmount');
     const currentTotal = form.getValues('invoice.total');
     
     if (currentSubtotal !== calculatedValues.subtotal) {
       form.setValue('invoice.subtotal', calculatedValues.subtotal, { shouldValidate: false });
+    }
+    
+    if (currentTaxAmount !== calculatedValues.totalTax) {
+      form.setValue('invoice.taxAmount', calculatedValues.totalTax, { shouldValidate: false });
     }
     
     if (currentTotal !== calculatedValues.total) {
@@ -201,25 +331,35 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
       invoice: {
         tenantId: invoice.tenantId,
         customerId: invoice.customerId,
-        invoiceNumber: invoice.invoiceNumber,
+        invoiceNumber: invoice.invoiceNumber || "",
         invoiceDate: new Date(invoice.invoiceDate).toISOString().split('T')[0],
         dueDate: new Date(invoice.dueDate).toISOString().split('T')[0],
         status: invoice.status,
+        invoiceSubject: invoice.invoiceSubject || "",
+        poReference: invoice.poReference || "",
+        issuerTaxId: invoice.issuerTaxId || "",
+        customerTaxId: invoice.customerTaxId || "",
         subtotal: invoice.subtotal,
         taxAmount: invoice.taxAmount,
         total: invoice.total,
         notes: invoice.notes || "",
       },
       lineItems: lineItems.length > 0 ? lineItems.map(item => ({
+        itemId: item.itemId || null,
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
+        discount: item.discount || "0.00",
+        taxId: item.taxId || null,
         amount: item.amount,
         accountId: item.accountId || null,
       })) : [{
+        itemId: null,
         description: "",
         quantity: "1",
         unitPrice: "0.00",
+        discount: "0.00",
+        taxId: null,
         amount: "0.00",
         accountId: null,
       }],
@@ -234,54 +374,67 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
       invoice: {
         tenantId: currentTenant?.id || "",
         customerId: "",
-        invoiceNumber: `INV-${Date.now()}`,
+        invoiceNumber: "",
         invoiceDate: new Date().toISOString().split('T')[0],
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: "draft",
+        invoiceSubject: "",
+        poReference: "",
+        issuerTaxId: companyProfile?.taxRegistrationNumber || "",
+        customerTaxId: "",
         subtotal: "0.00",
         taxAmount: "0.00",
         total: "0.00",
         notes: "",
       },
       lineItems: [{
+        itemId: null,
         description: "",
         quantity: "1",
         unitPrice: "0.00",
+        discount: "0.00",
+        taxId: null,
         amount: "0.00",
         accountId: null,
       }],
     });
-  }, [invoice, currentTenant, form, open]);
+  }, [invoice, currentTenant, companyProfile, form, open]);
 
   const saveMutation = useMutation({
-    mutationFn: async (values: FormValues) => {
+    mutationFn: async (values: FormValues & { saveAndSend?: boolean }) => {
       const payload = {
-        tenantId: currentTenant?.id,
         invoice: {
           tenantId: values.invoice.tenantId,
           customerId: values.invoice.customerId,
-          invoiceNumber: values.invoice.invoiceNumber,
+          invoiceNumber: values.invoice.invoiceNumber || undefined,
           invoiceDate: new Date(values.invoice.invoiceDate).toISOString(),
           dueDate: new Date(values.invoice.dueDate).toISOString(),
-          status: values.invoice.status,
+          status: values.saveAndSend ? "sent" : values.invoice.status,
+          invoiceSubject: values.invoice.invoiceSubject || undefined,
+          poReference: values.invoice.poReference || undefined,
+          issuerTaxId: values.invoice.issuerTaxId || undefined,
+          customerTaxId: values.invoice.customerTaxId || undefined,
           subtotal: values.invoice.subtotal,
           taxAmount: values.invoice.taxAmount,
           total: values.invoice.total,
-          notes: values.invoice.notes || "",
+          notes: values.invoice.notes || undefined,
         },
         lineItems: values.lineItems.map(item => ({
+          itemId: item.itemId || undefined,
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
+          discount: item.discount || "0.00",
+          taxId: item.taxId || undefined,
           amount: item.amount,
-          accountId: item.accountId || null,
+          accountId: item.accountId || undefined,
         })),
       };
 
       if (invoice) {
-        return await apiRequest("PATCH", `/api/invoices/${invoice.id}`, payload);
+        return await apiRequest(`/api/invoices/${invoice.id}`, "PATCH", payload);
       }
-      return await apiRequest("POST", "/api/invoices", payload);
+      return await apiRequest("/api/invoices", "POST", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
@@ -304,146 +457,235 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
         return;
       }
       toast({
-        title: "Error",
-        description: `Failed to ${invoice ? "update" : "create"} invoice.`,
+        title: `Failed to ${invoice ? "update" : "create"} invoice`,
+        description: error.message,
         variant: "destructive",
       });
     },
   });
 
-  const onSubmit = (values: FormValues) => {
-    const hasNaN = 
-      isNaN(safeParseFloat(values.invoice.subtotal)) ||
-      isNaN(safeParseFloat(values.invoice.taxAmount)) ||
-      isNaN(safeParseFloat(values.invoice.total)) ||
-      values.lineItems.some(item => 
-        isNaN(safeParseFloat(item.quantity)) ||
-        isNaN(safeParseFloat(item.unitPrice)) ||
-        isNaN(safeParseFloat(item.amount))
-      );
-
-    if (hasNaN) {
-      toast({
-        title: "Invalid Data",
-        description: "Please ensure all numeric fields have valid values.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    saveMutation.mutate(values);
+  const onSubmit = (values: FormValues, saveAndSend = false) => {
+    saveMutation.mutate({ ...values, saveAndSend });
   };
+
+  const selectedCustomer = customers.find(c => c.id === watchedCustomerId);
+
+  // Check if critical data is ready for new invoice creation
+  // Require company profile to exist AND have tax registration number
+  const isDataReady = !!currentTenant && 
+                      !!companyProfile && 
+                      !!companyProfile.taxRegistrationNumber;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto" data-testid="dialog-invoice">
+      <DialogContent className="sm:max-w-[1000px] max-h-[90vh] overflow-y-auto" data-testid="dialog-invoice">
         <DialogHeader>
           <DialogTitle>{invoice ? "Edit Invoice" : "Create Invoice"}</DialogTitle>
           <DialogDescription>
             {invoice ? "Update invoice information" : "Create a new invoice for your customer"}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Show loading state while critical data loads for new invoices */}
+        {!invoice && (!currentTenant || profileLoading) && (
+          <div className="flex items-center justify-center p-8 gap-2 text-muted-foreground" data-testid="loading-critical-data">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Loading...</span>
+          </div>
+        )}
+
         {lineItemsLoading && (
           <div className="flex items-center justify-center py-6 gap-2 text-muted-foreground" data-testid="loading-indicator">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span>Loading invoice details...</span>
           </div>
         )}
+
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="invoice.customerId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Customer *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-customer">
-                          <SelectValue placeholder="Select customer" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {customers.map((customer) => (
-                          <SelectItem key={customer.id} value={customer.id}>
-                            {customer.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="invoice.invoiceNumber"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Invoice Number *</FormLabel>
-                    <FormControl>
-                      <Input placeholder="INV-001" {...field} data-testid="input-invoice-number" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          <form onSubmit={form.handleSubmit((values) => onSubmit(values, false))} className="space-y-6">
+            
+            {/* Issuer Section */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold">Issuer Information</h3>
+              {profileLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Loading company profile...</span>
+                </div>
+              ) : !companyProfile || !companyProfile.taxRegistrationNumber ? (
+                <Alert variant="destructive" data-testid="alert-company-profile-missing">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Company Profile Required</AlertTitle>
+                  <AlertDescription>
+                    You must set up your company profile with a tax registration number before creating invoices.
+                    <Link to="/company-profile" className="underline ml-1" data-testid="link-company-profile">
+                      Set up company profile
+                    </Link>
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <div className="p-4 border rounded-lg bg-muted/50 space-y-2" data-testid="section-issuer">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Company Legal Name</p>
+                      <p className="font-medium" data-testid="text-company-name">{companyProfile.legalName}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Tax Registration Number</p>
+                      <p className="font-medium font-mono" data-testid="text-issuer-tax-id">
+                        {companyProfile.taxRegistrationNumber}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <FormField
-                control={form.control}
-                name="invoice.invoiceDate"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Invoice Date *</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} data-testid="input-invoice-date" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="invoice.dueDate"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Due Date *</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} data-testid="input-due-date" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="invoice.status"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+            {/* Header Section */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold">Invoice Details</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <FormField
+                  control={form.control}
+                  name="invoice.invoiceNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Invoice Number</FormLabel>
                       <FormControl>
-                        <SelectTrigger data-testid="select-status">
-                          <SelectValue />
-                        </SelectTrigger>
+                        <Input 
+                          placeholder="Auto-generated" 
+                          {...field} 
+                          disabled
+                          className="bg-muted"
+                          data-testid="input-invoice-number" 
+                        />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="draft">Draft</SelectItem>
-                        <SelectItem value="sent">Sent</SelectItem>
-                        <SelectItem value="paid">Paid</SelectItem>
-                        <SelectItem value="overdue">Overdue</SelectItem>
-                        <SelectItem value="cancelled">Cancelled</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="invoice.invoiceDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Invoice Date *</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} data-testid="input-invoice-date" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="invoice.dueDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Due Date *</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} data-testid="input-due-date" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <FormField
+                  control={form.control}
+                  name="invoice.status"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Status</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-status">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="draft">Draft</SelectItem>
+                          <SelectItem value="sent">Sent</SelectItem>
+                          <SelectItem value="paid">Paid</SelectItem>
+                          <SelectItem value="overdue">Overdue</SelectItem>
+                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="invoice.invoiceSubject"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Invoice Subject</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Optional" {...field} data-testid="input-invoice-subject" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="invoice.poReference"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>PO Reference</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Optional" {...field} data-testid="input-po-reference" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             </div>
 
+            {/* Customer Section */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold">Customer Information</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="invoice.customerId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Customer *</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-customer">
+                            <SelectValue placeholder="Select customer" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {customers.map((customer) => (
+                            <SelectItem key={customer.id} value={customer.id}>
+                              {customer.displayName || customer.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Customer Tax Registration Number</p>
+                  <div className="h-10 px-3 py-2 border rounded-md bg-muted flex items-center">
+                    <p className="font-mono text-sm" data-testid="text-customer-tax-id">
+                      {selectedCustomer?.taxRegistrationNumber || "Not available"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Line Items Section */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Line Items</h3>
@@ -452,131 +694,224 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                   variant="outline"
                   size="sm"
                   onClick={() => append({
+                    itemId: null,
                     description: "",
                     quantity: "1",
                     unitPrice: "0.00",
+                    discount: "0.00",
+                    taxId: null,
                     amount: "0.00",
                     accountId: null,
                   })}
                   data-testid="button-add-line-item"
                 >
                   <Plus className="h-4 w-4 mr-1" />
-                  Add Item
+                  Add Line Item
                 </Button>
               </div>
 
               <div className="space-y-3">
                 {fields.map((field, index) => (
-                  <div key={field.id} className="grid grid-cols-12 gap-2 items-start border rounded-md p-3">
-                    <div className="col-span-5">
-                      <FormField
-                        control={form.control}
-                        name={`lineItems.${index}.description`}
-                        render={({ field }) => (
-                          <FormItem>
-                            {index === 0 && <FormLabel>Description *</FormLabel>}
-                            <FormControl>
-                              <Input placeholder="Item description" {...field} data-testid={`input-description-${index}`} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
+                  <div key={field.id} className="border rounded-lg p-4 space-y-3">
+                    <div className="grid grid-cols-12 gap-3 items-start">
+                      {/* Item Selector */}
+                      <div className="col-span-3">
+                        <FormField
+                          control={form.control}
+                          name={`lineItems.${index}.itemId`}
+                          render={({ field }) => (
+                            <FormItem>
+                              {index === 0 && <FormLabel>Item</FormLabel>}
+                              <Select 
+                                onValueChange={(value) => {
+                                  field.onChange(value === "custom" ? null : value);
+                                  handleItemSelect(value === "custom" ? null : value, index);
+                                }}
+                                value={field.value || "custom"}
+                              >
+                                <FormControl>
+                                  <SelectTrigger data-testid={`select-item-${index}`}>
+                                    <SelectValue placeholder="Select item" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="custom">Custom Item</SelectItem>
+                                  {items.filter(i => i.isActive).map((item) => (
+                                    <SelectItem key={item.id} value={item.id}>
+                                      {item.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      {/* Description */}
+                      <div className="col-span-3">
+                        <FormField
+                          control={form.control}
+                          name={`lineItems.${index}.description`}
+                          render={({ field }) => (
+                            <FormItem>
+                              {index === 0 && <FormLabel>Description *</FormLabel>}
+                              <FormControl>
+                                <Input placeholder="Item description" {...field} data-testid={`input-description-${index}`} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      {/* Quantity */}
+                      <div className="col-span-1">
+                        <FormField
+                          control={form.control}
+                          name={`lineItems.${index}.quantity`}
+                          render={({ field }) => (
+                            <FormItem>
+                              {index === 0 && <FormLabel>Qty *</FormLabel>}
+                              <FormControl>
+                                <Input type="number" step="0.01" min="0" placeholder="1" {...field} data-testid={`input-quantity-${index}`} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      {/* Unit Price */}
+                      <div className="col-span-2">
+                        <FormField
+                          control={form.control}
+                          name={`lineItems.${index}.unitPrice`}
+                          render={({ field }) => (
+                            <FormItem>
+                              {index === 0 && <FormLabel>Price *</FormLabel>}
+                              <FormControl>
+                                <Input type="number" step="0.01" min="0" placeholder="0.00" {...field} data-testid={`input-unit-price-${index}`} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      {/* Discount */}
+                      <div className="col-span-1">
+                        <FormField
+                          control={form.control}
+                          name={`lineItems.${index}.discount`}
+                          render={({ field }) => (
+                            <FormItem>
+                              {index === 0 && <FormLabel>Discount</FormLabel>}
+                              <FormControl>
+                                <Input type="number" step="0.01" min="0" placeholder="0.00" {...field} data-testid={`input-discount-${index}`} />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      {/* Tax */}
+                      <div className="col-span-1">
+                        <FormField
+                          control={form.control}
+                          name={`lineItems.${index}.taxId`}
+                          render={({ field }) => (
+                            <FormItem>
+                              {index === 0 && <FormLabel>Tax</FormLabel>}
+                              <Select 
+                                onValueChange={(value) => field.onChange(value === "none" ? null : value)}
+                                value={field.value || "none"}
+                              >
+                                <FormControl>
+                                  <SelectTrigger data-testid={`select-tax-${index}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="none">None</SelectItem>
+                                  {taxes.filter(t => t.isActive).map((tax) => (
+                                    <SelectItem key={tax.id} value={tax.id}>
+                                      {tax.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      {/* Amount */}
+                      <div className="col-span-1">
+                        <FormField
+                          control={form.control}
+                          name={`lineItems.${index}.amount`}
+                          render={({ field }) => (
+                            <FormItem>
+                              {index === 0 && <FormLabel>Amount</FormLabel>}
+                              <FormControl>
+                                <Input readOnly {...field} className="bg-muted font-mono" data-testid={`text-amount-${index}`} />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      {/* Remove Button */}
+                      <div className="col-span-1 flex items-end justify-center">
+                        {fields.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => remove(index)}
+                            className="text-destructive"
+                            data-testid={`button-remove-${index}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         )}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <FormField
-                        control={form.control}
-                        name={`lineItems.${index}.quantity`}
-                        render={({ field }) => (
-                          <FormItem>
-                            {index === 0 && <FormLabel>Qty *</FormLabel>}
-                            <FormControl>
-                              <Input type="number" step="0.01" placeholder="1" {...field} data-testid={`input-quantity-${index}`} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <FormField
-                        control={form.control}
-                        name={`lineItems.${index}.unitPrice`}
-                        render={({ field }) => (
-                          <FormItem>
-                            {index === 0 && <FormLabel>Price *</FormLabel>}
-                            <FormControl>
-                              <Input type="number" step="0.01" placeholder="0.00" {...field} data-testid={`input-unit-price-${index}`} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <FormField
-                        control={form.control}
-                        name={`lineItems.${index}.amount`}
-                        render={({ field }) => (
-                          <FormItem>
-                            {index === 0 && <FormLabel>Amount</FormLabel>}
-                            <FormControl>
-                              <Input readOnly {...field} className="bg-muted" data-testid={`text-amount-${index}`} />
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <div className="col-span-1 flex items-end">
-                      {fields.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => remove(index)}
-                          className="text-destructive"
-                          data-testid={`button-remove-${index}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
+            {/* Totals Section */}
             <div className="space-y-2 border-t pt-4">
               <div className="flex justify-end gap-4">
-                <span className="text-sm">Subtotal:</span>
-                <span className="font-mono font-semibold" data-testid="text-subtotal">${form.watch('invoice.subtotal')}</span>
-              </div>
-              <div className="flex justify-end gap-4 items-center">
-                <FormField
-                  control={form.control}
-                  name="invoice.taxAmount"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center gap-2 space-y-0">
-                      <FormLabel className="text-sm">Tax:</FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="number" 
-                          step="0.01" 
-                          className="w-24 h-8" 
-                          {...field} 
-                          data-testid="input-tax-amount"
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
+                <span className="text-sm text-muted-foreground min-w-32 text-right">Subtotal:</span>
+                <span className="font-mono font-medium min-w-24 text-right" data-testid="text-subtotal">
+                  ${calculatedValues.subtotal}
+                </span>
               </div>
               <div className="flex justify-end gap-4">
-                <span className="text-lg font-semibold">Total:</span>
-                <span className="text-lg font-mono font-bold" data-testid="text-total">${form.watch('invoice.total')}</span>
+                <span className="text-sm text-muted-foreground min-w-32 text-right">Total Discount:</span>
+                <span className="font-mono font-medium min-w-24 text-right text-destructive" data-testid="text-total-discount">
+                  -${calculatedValues.totalDiscount}
+                </span>
+              </div>
+              <div className="flex justify-end gap-4">
+                <span className="text-sm text-muted-foreground min-w-32 text-right">Total Tax:</span>
+                <span className="font-mono font-medium min-w-24 text-right" data-testid="text-total-tax">
+                  ${calculatedValues.totalTax}
+                </span>
+              </div>
+              <div className="flex justify-end gap-4 pt-2 border-t">
+                <span className="text-lg font-semibold min-w-32 text-right">Total Amount:</span>
+                <span className="text-lg font-mono font-bold min-w-24 text-right" data-testid="text-total">
+                  ${calculatedValues.total}
+                </span>
               </div>
             </div>
 
+            {/* Notes Section */}
             <FormField
               control={form.control}
               name="invoice.notes"
@@ -584,20 +919,65 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                 <FormItem>
                   <FormLabel>Notes</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="Additional notes..." {...field} data-testid="input-notes" />
+                    <Textarea placeholder="Additional notes..." rows={3} {...field} data-testid="input-notes" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
+            {/* Action Buttons */}
+            <DialogFooter className="gap-2">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => onOpenChange(false)} 
+                data-testid="button-cancel"
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={saveMutation.isPending || lineItemsLoading} data-testid="button-save">
-                {saveMutation.isPending ? "Saving..." : lineItemsLoading ? "Loading..." : (invoice ? "Update" : "Create")}
-              </Button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>
+                      <Button 
+                        type="submit" 
+                        variant="outline"
+                        disabled={!isDataReady || saveMutation.isPending || lineItemsLoading} 
+                        data-testid="button-save-draft"
+                      >
+                        {saveMutation.isPending ? "Saving..." : "Save as Draft"}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!isDataReady && (
+                    <TooltipContent>
+                      <p>Complete company profile first</p>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>
+                      <Button 
+                        type="button"
+                        onClick={form.handleSubmit((values) => onSubmit(values, true))}
+                        disabled={!isDataReady || saveMutation.isPending || lineItemsLoading} 
+                        data-testid="button-save-send"
+                      >
+                        {saveMutation.isPending ? "Saving..." : "Save & Send"}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!isDataReady && (
+                    <TooltipContent>
+                      <p>Complete company profile first</p>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
             </DialogFooter>
           </form>
         </Form>

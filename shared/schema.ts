@@ -116,6 +116,8 @@ export const tenantCompanyProfiles = pgTable("tenant_company_profiles", {
 });
 
 export const insertTenantCompanyProfileSchema = createInsertSchema(tenantCompanyProfiles, {
+  legalName: z.string().min(1, "Legal name is required"),
+  taxRegistrationNumber: z.string().min(1, "Tax registration number is required"),
   address: addressSchema.optional(),
 }).omit({
   id: true,
@@ -124,7 +126,7 @@ export const insertTenantCompanyProfileSchema = createInsertSchema(tenantCompany
 });
 
 export const updateTenantCompanyProfileSchema = insertTenantCompanyProfileSchema
-  .omit({ tenantId: true })
+  .omit({ tenantId: true })  // CRITICAL: Must exclude tenantId to prevent tampering
   .partial();
 
 export type InsertTenantCompanyProfile = z.infer<typeof insertTenantCompanyProfileSchema>;

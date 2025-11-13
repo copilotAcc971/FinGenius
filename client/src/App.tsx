@@ -23,6 +23,7 @@ import Payments from "@/pages/payments";
 import Documents from "@/pages/documents";
 import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
+import CompanyProfile from "@/pages/company-profile";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -44,6 +45,7 @@ function Router() {
           <Route path="/payments" component={Payments} />
           <Route path="/documents" component={Documents} />
           <Route path="/reports" component={Reports} />
+          <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/settings" component={Settings} />
         </>
       )}
