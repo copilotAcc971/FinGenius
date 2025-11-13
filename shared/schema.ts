@@ -1540,7 +1540,7 @@ export const insertAssetSchema = createInsertSchema(assets, {
   purchasePrice: decimalString,
   salvageValue: decimalString,
   accumulatedDepreciation: decimalString,
-  disposalAmount: decimalString,
+  disposalAmount: decimalString.nullable().optional(),
 }).omit({
   id: true,
   assetNumber: true,
@@ -1550,7 +1550,7 @@ export const insertAssetSchema = createInsertSchema(assets, {
   updatedAt: true,
 }).extend({
   purchaseDate: z.coerce.date(),
-  disposalDate: z.coerce.date().optional(),
+  disposalDate: z.coerce.date().nullable().optional(),
 });
 
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
@@ -1764,3 +1764,54 @@ export const cashFlowReportSchema = z.object({
 });
 
 export type CashFlowReport = z.infer<typeof cashFlowReportSchema>;
+
+// AR/AP Aging Report Customer/Vendor Line
+export const agingReportLineSchema = z.object({
+  entityId: z.string(),
+  entityName: z.string(),
+  current: z.string(),
+  days_1_30: z.string(),
+  days_31_60: z.string(),
+  days_61_90: z.string(),
+  days_91_120: z.string(),
+  days_120_plus: z.string(),
+  total: z.string(),
+});
+
+export type AgingReportLine = z.infer<typeof agingReportLineSchema>;
+
+// AR Aging Report (Accounts Receivable)
+export const arAgingReportSchema = z.object({
+  tenantId: z.string(),
+  asOfDate: z.date(),
+  summary: z.object({
+    current: z.string(),
+    days_1_30: z.string(),
+    days_31_60: z.string(),
+    days_61_90: z.string(),
+    days_91_120: z.string(),
+    days_120_plus: z.string(),
+    total: z.string(),
+  }),
+  customers: z.array(agingReportLineSchema),
+});
+
+export type ARAgingReport = z.infer<typeof arAgingReportSchema>;
+
+// AP Aging Report (Accounts Payable)
+export const apAgingReportSchema = z.object({
+  tenantId: z.string(),
+  asOfDate: z.date(),
+  summary: z.object({
+    current: z.string(),
+    days_1_30: z.string(),
+    days_31_60: z.string(),
+    days_61_90: z.string(),
+    days_91_120: z.string(),
+    days_120_plus: z.string(),
+    total: z.string(),
+  }),
+  vendors: z.array(agingReportLineSchema),
+});
+
+export type APAgingReport = z.infer<typeof apAgingReportSchema>;

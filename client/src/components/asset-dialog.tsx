@@ -168,6 +168,8 @@ export function AssetDialog({ open, onOpenChange, asset }: AssetDialogProps) {
   });
 
   const onSubmit = (values: z.infer<typeof formSchema>) => {
+    console.log("✅ Form submitted! Values:", values);
+    console.log("Form validation errors:", form.formState.errors);
     saveMutation.mutate(values);
   };
 
