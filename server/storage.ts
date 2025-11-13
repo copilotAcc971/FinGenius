@@ -101,7 +101,17 @@ export interface IStorage {
   getInvoicesByTenant(tenantId: string, includeDeleted?: boolean): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
   getInvoiceById(id: string, tenantId: string): Promise<Invoice | null>;
-  getInvoiceLineItems(invoiceId: string): Promise<InvoiceLineItem[]>;
+  getInvoiceLineItems(invoiceId: string, tenantId: string): Promise<InvoiceLineItem[]>;
+  getInvoiceLineItemsWithTax(invoiceId: string, tenantId: string): Promise<Array<{
+    id: string;
+    description: string;
+    quantity: string;
+    rate: string;
+    amount: string;
+    discount: string | null;
+    taxName: string | null;
+    taxRate: string | null;
+  }>>;
   createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice>;
   updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>): Promise<Invoice>;
   updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice>;
@@ -528,11 +538,49 @@ export class DatabaseStorage implements IStorage {
     return invoice || null;
   }
 
-  async getInvoiceLineItems(invoiceId: string): Promise<InvoiceLineItem[]> {
-    return await db
+  async getInvoiceLineItems(invoiceId: string, tenantId: string): Promise<InvoiceLineItem[]> {
+    const result = await db
       .select()
       .from(invoiceLineItems)
-      .where(eq(invoiceLineItems.invoiceId, invoiceId));
+      .where(
+        and(
+          eq(invoiceLineItems.invoiceId, invoiceId),
+          eq(invoiceLineItems.tenantId, tenantId)
+        )
+      );
+    return result;
+  }
+
+  async getInvoiceLineItemsWithTax(invoiceId: string, tenantId: string): Promise<Array<{
+    id: string;
+    description: string;
+    quantity: string;
+    rate: string;
+    amount: string;
+    discount: string | null;
+    taxName: string | null;
+    taxRate: string | null;
+  }>> {
+    const result = await db
+      .select({
+        id: invoiceLineItems.id,
+        description: invoiceLineItems.description,
+        quantity: invoiceLineItems.quantity,
+        rate: invoiceLineItems.unitPrice,
+        amount: invoiceLineItems.amount,
+        discount: invoiceLineItems.discount,
+        taxName: taxes.name,
+        taxRate: taxes.rate,
+      })
+      .from(invoiceLineItems)
+      .leftJoin(taxes, eq(invoiceLineItems.taxId, taxes.id))
+      .where(
+        and(
+          eq(invoiceLineItems.invoiceId, invoiceId),
+          eq(invoiceLineItems.tenantId, tenantId)
+        )
+      );
+    return result;
   }
 
   async createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice> {
@@ -983,6 +1031,629 @@ export class DatabaseStorage implements IStorage {
   // Audit logging
   async logInvoiceAudit(log: InsertInvoiceAuditLog): Promise<void> {
     await db.insert(invoiceAuditLogs).values(log);
+  }
+}
+
+export class MemStorage implements IStorage {
+  private users: User[] = [];
+  private tenants: Tenant[] = [];
+  private tenantCompanyProfiles: TenantCompanyProfile[] = [];
+  private customers: Customer[] = [];
+  private vendors: Vendor[] = [];
+  private items: Item[] = [];
+  private taxes: Tax[] = [];
+  private invoices: Invoice[] = [];
+  private invoiceLineItems: InvoiceLineItem[] = [];
+  private bills: Bill[] = [];
+  private billLineItems: BillLineItem[] = [];
+  private expenses: Expense[] = [];
+  private payments: Payment[] = [];
+  private documents: Document[] = [];
+  private invoiceSequenceCounters: Map<string, number> = new Map();
+
+  // User operations
+  async getUser(id: string): Promise<User | undefined> {
+    return this.users.find(u => u.id === id);
+  }
+
+  async upsertUser(user: UpsertUser): Promise<User> {
+    const existingIndex = this.users.findIndex(u => u.id === user.id);
+    const now = new Date();
+    
+    if (existingIndex >= 0) {
+      const updated = { ...this.users[existingIndex], ...user, updatedAt: now };
+      this.users[existingIndex] = updated;
+      return updated;
+    } else {
+      const newUser: User = { ...user, createdAt: now, updatedAt: now } as User;
+      this.users.push(newUser);
+      return newUser;
+    }
+  }
+
+  // Tenant operations
+  async getTenant(id: string): Promise<Tenant | undefined> {
+    return this.tenants.find(t => t.id === id);
+  }
+
+  async getTenantsByUserId(userId: string): Promise<Tenant[]> {
+    return this.tenants.filter(t => t.ownerId === userId);
+  }
+
+  async createTenant(tenant: InsertTenant): Promise<Tenant> {
+    const now = new Date();
+    const id = `tenant-${Date.now()}-${Math.random()}`;
+    const newTenant: Tenant = { 
+      ...tenant, 
+      id, 
+      createdAt: now, 
+      updatedAt: now,
+      stripeAccountId: tenant.stripeAccountId ?? null
+    };
+    this.tenants.push(newTenant);
+    return newTenant;
+  }
+
+  async updateTenant(id: string, userId: string, tenant: Partial<InsertTenant>): Promise<Tenant> {
+    const existing = this.tenants.find(t => t.id === id && t.ownerId === userId);
+    if (!existing) throw new Error("Tenant not found");
+    
+    const updated = { ...existing, ...tenant, updatedAt: new Date() };
+    const index = this.tenants.findIndex(t => t.id === id);
+    this.tenants[index] = updated;
+    return updated;
+  }
+
+  async isTenantMember(tenantId: string, userId: string): Promise<boolean> {
+    const tenant = this.tenants.find(t => t.id === tenantId && t.ownerId === userId);
+    return !!tenant;
+  }
+
+  // Company Profile operations
+  async getCompanyProfile(tenantId: string): Promise<TenantCompanyProfile | null> {
+    return this.tenantCompanyProfiles.find(p => p.tenantId === tenantId) || null;
+  }
+
+  async createCompanyProfile(profile: InsertTenantCompanyProfile): Promise<TenantCompanyProfile> {
+    const now = new Date();
+    const id = `profile-${Date.now()}-${Math.random()}`;
+    const newProfile: TenantCompanyProfile = { 
+      ...profile, 
+      id, 
+      createdAt: now, 
+      updatedAt: now,
+      email: profile.email ?? null,
+      phone: profile.phone ?? null,
+      website: profile.website ?? null,
+      taxRegistrationNumber: profile.taxRegistrationNumber ?? null,
+      address: profile.address ?? null
+    };
+    this.tenantCompanyProfiles.push(newProfile);
+    return newProfile;
+  }
+
+  async updateCompanyProfile(tenantId: string, data: Partial<Omit<InsertTenantCompanyProfile, 'tenantId'>>): Promise<TenantCompanyProfile> {
+    const existing = this.tenantCompanyProfiles.find(p => p.tenantId === tenantId);
+    if (!existing) throw new Error("Company profile not found");
+    
+    const updated = { ...existing, ...data, updatedAt: new Date() };
+    const index = this.tenantCompanyProfiles.findIndex(p => p.tenantId === tenantId);
+    this.tenantCompanyProfiles[index] = updated;
+    return updated;
+  }
+
+  // Customer operations
+  async getCustomersByTenant(tenantId: string): Promise<Customer[]> {
+    return this.customers.filter(c => c.tenantId === tenantId);
+  }
+
+  async getCustomer(id: string): Promise<Customer | undefined> {
+    return this.customers.find(c => c.id === id);
+  }
+
+  async getCustomerById(id: string, tenantId: string): Promise<Customer | null> {
+    return this.customers.find(c => c.id === id && c.tenantId === tenantId) || null;
+  }
+
+  async createCustomer(customer: InsertCustomer): Promise<Customer> {
+    const now = new Date();
+    const id = `customer-${Date.now()}-${Math.random()}`;
+    const newCustomer: Customer = { 
+      id,
+      name: customer.name,
+      tenantId: customer.tenantId,
+      createdAt: now, 
+      updatedAt: now,
+      email: customer.email ?? null,
+      phone: customer.phone ?? null,
+      company: customer.company ?? null,
+      displayName: customer.displayName ?? null,
+      billingAddress: customer.billingAddress ?? null,
+      shippingAddress: customer.shippingAddress ?? null,
+      taxRegistrationNumber: customer.taxRegistrationNumber ?? null,
+      paymentTerms: customer.paymentTerms ?? null,
+      address: customer.address ?? null,
+      notes: customer.notes ?? null
+    };
+    this.customers.push(newCustomer);
+    return newCustomer;
+  }
+
+  async updateCustomer(id: string, tenantId: string, customer: Partial<InsertCustomer>): Promise<Customer> {
+    const existing = this.customers.find(c => c.id === id && c.tenantId === tenantId);
+    if (!existing) throw new Error("Customer not found");
+    
+    const updated = { ...existing, ...customer, updatedAt: new Date() };
+    const index = this.customers.findIndex(c => c.id === id);
+    this.customers[index] = updated;
+    return updated;
+  }
+
+  async deleteCustomer(id: string, tenantId: string): Promise<void> {
+    const index = this.customers.findIndex(c => c.id === id && c.tenantId === tenantId);
+    if (index === -1) throw new Error("Customer not found");
+    this.customers.splice(index, 1);
+  }
+
+  // Vendor operations
+  async getVendorsByTenant(tenantId: string): Promise<Vendor[]> {
+    return this.vendors.filter(v => v.tenantId === tenantId);
+  }
+
+  async getVendor(id: string): Promise<Vendor | undefined> {
+    return this.vendors.find(v => v.id === id);
+  }
+
+  async createVendor(vendor: InsertVendor): Promise<Vendor> {
+    const now = new Date();
+    const id = `vendor-${Date.now()}-${Math.random()}`;
+    const newVendor: Vendor = { 
+      id,
+      name: vendor.name,
+      tenantId: vendor.tenantId,
+      createdAt: now, 
+      updatedAt: now,
+      email: vendor.email ?? null,
+      stripeAccountId: vendor.stripeAccountId ?? null,
+      phone: vendor.phone ?? null,
+      company: vendor.company ?? null,
+      displayName: vendor.displayName ?? null,
+      billingAddress: vendor.billingAddress ?? null,
+      shippingAddress: vendor.shippingAddress ?? null,
+      taxRegistrationNumber: vendor.taxRegistrationNumber ?? null,
+      paymentTerms: vendor.paymentTerms ?? null,
+      address: vendor.address ?? null,
+      bankAccountLast4: vendor.bankAccountLast4 ?? null,
+      notes: vendor.notes ?? null
+    };
+    this.vendors.push(newVendor);
+    return newVendor;
+  }
+
+  async updateVendor(id: string, tenantId: string, vendor: Partial<InsertVendor>): Promise<Vendor> {
+    const existing = this.vendors.find(v => v.id === id && v.tenantId === tenantId);
+    if (!existing) throw new Error("Vendor not found");
+    
+    const updated = { ...existing, ...vendor, updatedAt: new Date() };
+    const index = this.vendors.findIndex(v => v.id === id);
+    this.vendors[index] = updated;
+    return updated;
+  }
+
+  async deleteVendor(id: string, tenantId: string): Promise<void> {
+    const index = this.vendors.findIndex(v => v.id === id && v.tenantId === tenantId);
+    if (index === -1) throw new Error("Vendor not found");
+    this.vendors.splice(index, 1);
+  }
+
+  // Item operations
+  async getItems(tenantId: string): Promise<Item[]> {
+    return this.items.filter(i => i.tenantId === tenantId);
+  }
+
+  async getItem(id: string): Promise<Item | undefined> {
+    return this.items.find(i => i.id === id);
+  }
+
+  async createItem(item: InsertItem & { tenantId: string }): Promise<Item> {
+    const now = new Date();
+    const id = `item-${Date.now()}-${Math.random()}`;
+    const newItem: Item = { 
+      ...item, 
+      id, 
+      createdAt: now, 
+      updatedAt: now,
+      description: item.description ?? null,
+      sku: item.sku ?? null,
+      unit: item.unit ?? null,
+      isActive: item.isActive ?? null,
+      accountId: item.accountId ?? null,
+      taxId: item.taxId ?? null
+    };
+    this.items.push(newItem);
+    return newItem;
+  }
+
+  async updateItem(id: string, tenantId: string, item: Partial<InsertItem>): Promise<Item> {
+    const existing = this.items.find(i => i.id === id && i.tenantId === tenantId);
+    if (!existing) throw new Error("Item not found");
+    
+    const updated = { ...existing, ...item, updatedAt: new Date() };
+    const index = this.items.findIndex(i => i.id === id);
+    this.items[index] = updated;
+    return updated;
+  }
+
+  async deleteItem(id: string, tenantId: string): Promise<void> {
+    const index = this.items.findIndex(i => i.id === id && i.tenantId === tenantId);
+    if (index === -1) throw new Error("Item not found");
+    this.items.splice(index, 1);
+  }
+
+  // Tax operations
+  async getTaxes(tenantId: string): Promise<Tax[]> {
+    return this.taxes.filter(t => t.tenantId === tenantId);
+  }
+
+  async getTax(id: string): Promise<Tax | undefined> {
+    return this.taxes.find(t => t.id === id);
+  }
+
+  async createTax(tax: InsertTax & { tenantId: string }): Promise<Tax> {
+    const now = new Date();
+    const id = `tax-${Date.now()}-${Math.random()}`;
+    const newTax: Tax = { 
+      id,
+      name: tax.name,
+      tenantId: tax.tenantId,
+      rate: tax.rate,
+      isActive: tax.isActive ?? true,
+      isDefault: tax.isDefault ?? false
+    };
+    this.taxes.push(newTax);
+    return newTax;
+  }
+
+  async updateTax(id: string, tenantId: string, tax: Partial<InsertTax>): Promise<Tax> {
+    const existing = this.taxes.find(t => t.id === id && t.tenantId === tenantId);
+    if (!existing) throw new Error("Tax not found");
+    
+    const updated = { ...existing, ...tax, updatedAt: new Date() };
+    const index = this.taxes.findIndex(t => t.id === id);
+    this.taxes[index] = updated;
+    return updated;
+  }
+
+  async deleteTax(id: string, tenantId: string): Promise<void> {
+    const index = this.taxes.findIndex(t => t.id === id && t.tenantId === tenantId);
+    if (index === -1) throw new Error("Tax not found");
+    this.taxes.splice(index, 1);
+  }
+
+  // Invoice operations
+  async getInvoicesByTenant(tenantId: string, includeDeleted: boolean = false): Promise<Invoice[]> {
+    return this.invoices.filter(i => 
+      i.tenantId === tenantId && (includeDeleted || !i.deletedAt)
+    );
+  }
+
+  async getInvoice(id: string): Promise<Invoice | undefined> {
+    return this.invoices.find(i => i.id === id);
+  }
+
+  async getInvoiceById(id: string, tenantId: string): Promise<Invoice | null> {
+    return this.invoices.find(i => i.id === id && i.tenantId === tenantId && !i.deletedAt) || null;
+  }
+
+  async getInvoiceLineItems(invoiceId: string, tenantId: string): Promise<InvoiceLineItem[]> {
+    return this.invoiceLineItems.filter(
+      item => item.invoiceId === invoiceId && item.tenantId === tenantId
+    );
+  }
+
+  async getInvoiceLineItemsWithTax(invoiceId: string, tenantId: string): Promise<Array<{
+    id: string;
+    description: string;
+    quantity: string;
+    rate: string;
+    amount: string;
+    discount: string | null;
+    taxName: string | null;
+    taxRate: string | null;
+  }>> {
+    const items = this.invoiceLineItems.filter(
+      item => item.invoiceId === invoiceId && item.tenantId === tenantId
+    );
+    
+    return items.map(item => {
+      const tax = item.taxId ? this.taxes.find(t => t.id === item.taxId) : null;
+      return {
+        id: item.id,
+        description: item.description,
+        quantity: item.quantity,
+        rate: item.unitPrice,
+        amount: item.amount,
+        discount: item.discount,
+        taxName: tax?.name || null,
+        taxRate: tax?.rate || null,
+      };
+    });
+  }
+
+  async createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice> {
+    const now = new Date();
+    const invoiceId = `invoice-${Date.now()}-${Math.random()}`;
+    const invoiceNumber = await this.getNextInvoiceNumber(payload.invoice.tenantId);
+    
+    const newInvoice: Invoice = {
+      id: invoiceId,
+      tenantId: payload.invoice.tenantId,
+      customerId: payload.invoice.customerId,
+      invoiceNumber: invoiceNumber ?? null,
+      invoiceDate: payload.invoice.invoiceDate,
+      dueDate: payload.invoice.dueDate,
+      status: payload.invoice.status,
+      poReference: payload.invoice.poReference ?? null,
+      invoiceSubject: payload.invoice.invoiceSubject ?? null,
+      issuerTaxId: payload.invoice.issuerTaxId ?? null,
+      customerTaxId: payload.invoice.customerTaxId ?? null,
+      subtotal: payload.invoice.subtotal,
+      taxAmount: payload.invoice.taxAmount,
+      total: payload.invoice.total,
+      notes: payload.invoice.notes ?? null,
+      emailStatus: null,
+      emailSentAt: null,
+      emailError: null,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+    
+    this.invoices.push(newInvoice);
+    
+    for (const item of payload.lineItems) {
+      const lineItemId = `lineitem-${Date.now()}-${Math.random()}`;
+      const newLineItem: InvoiceLineItem = {
+        id: lineItemId,
+        tenantId: payload.invoice.tenantId,
+        invoiceId,
+        itemId: item.itemId ?? null,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discount: item.discount ?? null,
+        taxId: item.taxId ?? null,
+        amount: item.amount,
+        accountId: item.accountId ?? null,
+        createdAt: now,
+      };
+      this.invoiceLineItems.push(newLineItem);
+    }
+    
+    return newInvoice;
+  }
+
+  async updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>): Promise<Invoice> {
+    const existing = this.invoices.find(i => i.id === id && i.tenantId === tenantId && !i.deletedAt);
+    if (!existing) throw new Error("Invoice not found");
+    
+    const updated = { ...existing, ...data, updatedAt: new Date() };
+    const index = this.invoices.findIndex(i => i.id === id);
+    this.invoices[index] = updated;
+    return updated;
+  }
+
+  async updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice> {
+    const existing = this.invoices.find(i => i.id === id && i.tenantId === tenantId && !i.deletedAt);
+    if (!existing) throw new Error("Invoice not found");
+    
+    // Update invoice
+    const updated = { ...existing, ...payload.invoice, updatedAt: new Date() };
+    const invoiceIndex = this.invoices.findIndex(i => i.id === id);
+    this.invoices[invoiceIndex] = updated;
+    
+    // Remove old line items
+    this.invoiceLineItems = this.invoiceLineItems.filter(
+      item => !(item.invoiceId === id && item.tenantId === tenantId)
+    );
+    
+    // Add new line items
+    const now = new Date();
+    for (const item of payload.lineItems) {
+      const lineItemId = `lineitem-${Date.now()}-${Math.random()}`;
+      const newLineItem: InvoiceLineItem = {
+        id: lineItemId,
+        tenantId,
+        invoiceId: id,
+        itemId: item.itemId ?? null,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discount: item.discount ?? null,
+        taxId: item.taxId ?? null,
+        amount: item.amount,
+        accountId: item.accountId ?? null,
+        createdAt: now,
+      };
+      this.invoiceLineItems.push(newLineItem);
+    }
+    
+    return updated;
+  }
+
+  async deleteInvoice(id: string, tenantId: string): Promise<boolean> {
+    const existing = this.invoices.find(i => i.id === id && i.tenantId === tenantId);
+    if (!existing) return false;
+    
+    const index = this.invoices.findIndex(i => i.id === id);
+    this.invoices[index] = { ...existing, deletedAt: new Date() };
+    return true;
+  }
+
+  async getNextInvoiceNumber(tenantId: string): Promise<string> {
+    const current = this.invoiceSequenceCounters.get(tenantId) || 0;
+    const next = current + 1;
+    this.invoiceSequenceCounters.set(tenantId, next);
+    return `INV-${String(next).padStart(4, '0')}`;
+  }
+
+  async logInvoiceAudit(log: InsertInvoiceAuditLog): Promise<void> {
+    // No-op for in-memory storage
+  }
+
+  // Bill operations
+  async getBillsByTenant(tenantId: string): Promise<Bill[]> {
+    return this.bills.filter(b => b.tenantId === tenantId);
+  }
+
+  async getBill(id: string): Promise<Bill | undefined> {
+    return this.bills.find(b => b.id === id);
+  }
+
+  async getBillLineItems(billId: string): Promise<BillLineItem[]> {
+    return this.billLineItems.filter(item => item.billId === billId);
+  }
+
+  async createBillWithItems(payload: BillPayload): Promise<Bill> {
+    const now = new Date();
+    const billId = `bill-${Date.now()}-${Math.random()}`;
+    
+    const newBill: Bill = {
+      ...payload.bill,
+      id: billId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    
+    this.bills.push(newBill);
+    
+    for (const item of payload.lineItems) {
+      const lineItemId = `billitem-${Date.now()}-${Math.random()}`;
+      const newLineItem: BillLineItem = {
+        ...item,
+        id: lineItemId,
+        billId,
+        tenantId: payload.bill.tenantId,
+        itemId: item.itemId || null,
+        taxId: item.taxId || null,
+        accountId: item.accountId || null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.billLineItems.push(newLineItem);
+    }
+    
+    return newBill;
+  }
+
+  async updateBillWithItems(id: string, tenantId: string, payload: BillPayload): Promise<Bill> {
+    const existing = this.bills.find(b => b.id === id && b.tenantId === tenantId);
+    if (!existing) throw new Error("Bill not found");
+    
+    const updated = { ...existing, ...payload.bill, updatedAt: new Date() };
+    const index = this.bills.findIndex(b => b.id === id);
+    this.bills[index] = updated;
+    
+    this.billLineItems = this.billLineItems.filter(item => item.billId !== id);
+    
+    const now = new Date();
+    for (const item of payload.lineItems) {
+      const lineItemId = `billitem-${Date.now()}-${Math.random()}`;
+      const newLineItem: BillLineItem = {
+        ...item,
+        id: lineItemId,
+        billId: id,
+        tenantId,
+        itemId: item.itemId || null,
+        taxId: item.taxId || null,
+        accountId: item.accountId || null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.billLineItems.push(newLineItem);
+    }
+    
+    return updated;
+  }
+
+  async deleteBill(id: string, tenantId: string): Promise<void> {
+    const index = this.bills.findIndex(b => b.id === id && b.tenantId === tenantId);
+    if (index === -1) throw new Error("Bill not found");
+    this.bills.splice(index, 1);
+    this.billLineItems = this.billLineItems.filter(item => item.billId !== id);
+  }
+
+  // Expense operations
+  async getExpensesByTenant(tenantId: string): Promise<Expense[]> {
+    return this.expenses.filter(e => e.tenantId === tenantId);
+  }
+
+  async getExpense(id: string): Promise<Expense | undefined> {
+    return this.expenses.find(e => e.id === id);
+  }
+
+  async createExpense(expense: InsertExpense): Promise<Expense> {
+    const now = new Date();
+    const id = `expense-${Date.now()}-${Math.random()}`;
+    const newExpense: Expense = { ...expense, id, createdAt: now, updatedAt: now };
+    this.expenses.push(newExpense);
+    return newExpense;
+  }
+
+  async updateExpense(id: string, tenantId: string, expense: Partial<InsertExpense>): Promise<Expense> {
+    const existing = this.expenses.find(e => e.id === id && e.tenantId === tenantId);
+    if (!existing) throw new Error("Expense not found");
+    
+    const updated = { ...existing, ...expense, updatedAt: new Date() };
+    const index = this.expenses.findIndex(e => e.id === id);
+    this.expenses[index] = updated;
+    return updated;
+  }
+
+  // Payment operations
+  async getPaymentsByTenant(tenantId: string): Promise<Payment[]> {
+    return this.payments.filter(p => p.tenantId === tenantId);
+  }
+
+  async createPayment(payment: InsertPayment): Promise<Payment> {
+    const now = new Date();
+    const id = `payment-${Date.now()}-${Math.random()}`;
+    const newPayment: Payment = { ...payment, id, createdAt: now, updatedAt: now };
+    this.payments.push(newPayment);
+    return newPayment;
+  }
+
+  async updatePayment(id: string, tenantId: string, payment: Partial<InsertPayment>): Promise<Payment> {
+    const existing = this.payments.find(p => p.id === id && p.tenantId === tenantId);
+    if (!existing) throw new Error("Payment not found");
+    
+    const updated = { ...existing, ...payment, updatedAt: new Date() };
+    const index = this.payments.findIndex(p => p.id === id);
+    this.payments[index] = updated;
+    return updated;
+  }
+
+  // Document operations
+  async getDocumentsByTenant(tenantId: string): Promise<Document[]> {
+    return this.documents.filter(d => d.tenantId === tenantId);
+  }
+
+  async createDocument(document: InsertDocument): Promise<Document> {
+    const now = new Date();
+    const id = `document-${Date.now()}-${Math.random()}`;
+    const newDocument: Document = { ...document, id, createdAt: now, updatedAt: now };
+    this.documents.push(newDocument);
+    return newDocument;
+  }
+
+  async updateDocument(id: string, tenantId: string, document: Partial<InsertDocument>): Promise<Document> {
+    const existing = this.documents.find(d => d.id === id && d.tenantId === tenantId);
+    if (!existing) throw new Error("Document not found");
+    
+    const updated = { ...existing, ...document, updatedAt: new Date() };
+    const index = this.documents.findIndex(d => d.id === id);
+    this.documents[index] = updated;
+    return updated;
   }
 }
 

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { sendInvoiceEmail } from "./email-service";
+import { generateInvoicePDF } from "./pdf-service";
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -529,7 +530,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied" });
       }
       
-      const lineItems = await storage.getInvoiceLineItems(id);
+      const lineItems = await storage.getInvoiceLineItems(id, req.tenantId);
       res.json(lineItems);
     } catch (error) {
       console.error("Error fetching invoice line items:", error);
@@ -734,6 +735,168 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ 
         error: error.message || 'Internal server error' 
       });
+    }
+  });
+
+  app.get("/api/invoices/:id/pdf", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const { id } = req.params;
+    const tenantId = req.tenantId; // From verifyTenantAccess middleware
+
+    try {
+      // SECURITY: Three-layer defense in depth for tenant isolation
+      // Layer 1: isAuthenticated + verifyTenantAccess middleware
+      // Layer 2: storage.getInvoiceById filters by tenantId
+      // Layer 3: Explicit ownership verification below
+
+      // Get invoice with tenant filter
+      const invoice = await storage.getInvoiceById(id, tenantId);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+
+      // Layer 3: Explicit tenant ownership verification
+      if (invoice.tenantId !== tenantId) {
+        console.error(`Security violation: User attempted to access invoice ${id} from different tenant`);
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Get customer
+      const customer = await storage.getCustomerById(invoice.customerId, tenantId);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+
+      // Get company profile
+      const companyProfile = await storage.getCompanyProfile(tenantId);
+      if (!companyProfile) {
+        return res.status(400).json({ error: "Company profile not configured" });
+      }
+
+      // Get line items with tax details using NEW method
+      const lineItems = await storage.getInvoiceLineItemsWithTax(id, tenantId);
+      
+      // Validate invoice has line items
+      if (!lineItems || lineItems.length === 0) {
+        return res.status(400).json({ 
+          error: "Cannot generate PDF for invoice without line items" 
+        });
+      }
+      
+      // Format company address
+      let companyAddress: string | undefined;
+      if (companyProfile.address) {
+        try {
+          const addr = typeof companyProfile.address === 'string' 
+            ? JSON.parse(companyProfile.address) 
+            : companyProfile.address;
+          companyAddress = [addr.street, addr.city, addr.state, addr.zip, addr.country]
+            .filter(Boolean)
+            .join(', ');
+        } catch {
+          companyAddress = companyProfile.address as string;
+        }
+      }
+
+      // Format customer address
+      let customerAddress: string | undefined;
+      if (customer.address) {
+        try {
+          const addr = typeof customer.address === 'string' 
+            ? JSON.parse(customer.address) 
+            : customer.address;
+          customerAddress = [addr.street, addr.city, addr.state, addr.zip, addr.country]
+            .filter(Boolean)
+            .join(', ');
+        } catch {
+          customerAddress = customer.address as string;
+        }
+      }
+      
+      // Convert all numeric fields from strings to numbers with validation
+      const subtotal = parseFloat(invoice.subtotal?.toString() || '0');
+      const taxAmount = parseFloat(invoice.taxAmount?.toString() || '0');
+      const total = parseFloat(invoice.total?.toString() || '0');
+
+      // Validate numeric conversions
+      if (isNaN(subtotal) || isNaN(taxAmount) || isNaN(total)) {
+        return res.status(500).json({ 
+          error: "Invalid invoice totals - unable to generate PDF" 
+        });
+      }
+
+      // Build PDF data with proper type conversion
+      const pdfData = {
+        invoice: {
+          id: invoice.id,
+          invoiceNumber: invoice.invoiceNumber || '',
+          invoiceDate: invoice.invoiceDate,
+          dueDate: invoice.dueDate,
+          invoiceSubject: invoice.invoiceSubject || undefined,
+          status: invoice.status,
+          subtotal: subtotal,        // number
+          totalTax: taxAmount,       // number
+          total: total,              // number
+          issuerTaxId: invoice.issuerTaxId || '',
+          customerTaxId: invoice.customerTaxId || undefined,
+        },
+        customer: {
+          name: customer.name,
+          email: customer.email || '',
+          address: customerAddress,
+          taxRegistrationNumber: customer.taxRegistrationNumber || undefined,
+        },
+        companyProfile: {
+          legalName: companyProfile.legalName,
+          taxRegistrationNumber: companyProfile.taxRegistrationNumber || '',
+          address: companyAddress,
+        },
+        lineItems: lineItems.map(item => {
+          // Convert line item fields to numbers with validation
+          const quantity = parseFloat(item.quantity?.toString() || '0');
+          const rate = parseFloat(item.rate?.toString() || '0');
+          const amount = parseFloat(item.amount?.toString() || '0');
+          
+          // Handle optional discount and taxRate (treat empty/null as undefined, not NaN)
+          const discountValue = item.discount != null ? parseFloat(item.discount.toString()) : NaN;
+          const discount = !isNaN(discountValue) ? discountValue : undefined;
+          
+          const taxRateValue = item.taxRate != null ? parseFloat(item.taxRate.toString()) : NaN;
+          const taxRate = !isNaN(taxRateValue) ? taxRateValue : undefined;
+
+          // Validate required conversions (quantity, rate, amount must be valid)
+          if (isNaN(quantity) || isNaN(rate) || isNaN(amount)) {
+            throw new Error(`Invalid line item data for item: ${item.description}`);
+          }
+
+          return {
+            description: item.description,
+            quantity: quantity,      // number
+            rate: rate,              // number
+            amount: amount,          // number
+            discount: discount,      // number | undefined
+            taxName: item.taxName || undefined,
+            taxRate: taxRate,        // number | undefined
+          };
+        }),
+      };
+
+      // Generate PDF
+      const pdfBuffer = await generateInvoicePDF(pdfData);
+
+      // Generate filename with fallback
+      const filename = invoice.invoiceNumber 
+        ? `invoice-${invoice.invoiceNumber}.pdf`
+        : `invoice-${invoice.id}.pdf`;
+
+      // Set headers for PDF download
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', pdfBuffer.length);
+
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error('Error generating PDF:', error);
+      res.status(500).json({ error: error.message || 'Failed to generate PDF' });
     }
   });
 

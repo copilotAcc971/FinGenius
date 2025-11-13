@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreHorizontal, Edit, Trash2, Mail } from "lucide-react";
+import { Plus, MoreHorizontal, Edit, Trash2, Mail, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -267,6 +267,20 @@ export default function Invoices() {
                         >
                           <Mail className="mr-2 h-4 w-4" />
                           Send Email
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            if (!currentTenant?.id) {
+                              toast({ title: "Error", description: "Tenant not loaded", variant: "destructive" });
+                              return;
+                            }
+                            window.open(`/api/invoices/${invoice.id}/pdf?tenantId=${currentTenant.id}`, '_blank');
+                          }}
+                          disabled={!currentTenant?.id}
+                          data-testid={`button-download-pdf-${invoice.id}`}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download PDF
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => deleteMutation.mutate(invoice.id)}

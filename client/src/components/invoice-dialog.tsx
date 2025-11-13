@@ -48,7 +48,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { useTenant } from "@/hooks/useTenant";
-import { Plus, Trash2, Loader2, AlertCircle } from "lucide-react";
+import { Plus, Trash2, Loader2, AlertCircle, Download } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Link } from "wouter";
 
@@ -1021,6 +1021,17 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
 
             {/* Action Buttons */}
             <DialogFooter className="gap-2">
+              {invoice && currentTenant && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => window.open(`/api/invoices/${invoice.id}/pdf?tenantId=${currentTenant.id}`, '_blank')}
+                  data-testid="button-download-pdf-dialog"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Download PDF
+                </Button>
+              )}
               <Button 
                 type="button" 
                 variant="outline" 
