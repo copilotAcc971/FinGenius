@@ -4376,97 +4376,75 @@ export class DatabaseStorage implements IStorage {
   async getARAgingReport(tenantId: string, groupBy: 'customer' | 'invoice' | 'project' = 'customer'): Promise<ARAgingReport> {
     const asOfDate = new Date();
 
-    // Get all non-deleted invoices for this tenant
-    const allInvoices = await db
-      .select({
-        invoice: invoices,
-        customer: customers,
-      })
-      .from(invoices)
-      .innerJoin(customers, eq(invoices.customerId, customers.id))
-      .where(and(
-        eq(invoices.tenantId, tenantId),
-        isNull(invoices.deletedAt),
-        ne(invoices.status, 'cancelled')
-      ));
-
-    // Calculate paid amounts (from customer payments)
-    const invoicePaidAmounts = new Map<string, number>();
-    const customerPaymentsList = await db
-      .select()
-      .from(customerPayments)
-      .where(and(
-        eq(customerPayments.tenantId, tenantId),
-        isNull(customerPayments.deletedAt)
-      ));
-    
-    for (const payment of customerPaymentsList) {
-      if (payment.invoiceId) {
-        const current = invoicePaidAmounts.get(payment.invoiceId) || 0;
-        invoicePaidAmounts.set(payment.invoiceId, current + parseFloat(payment.amount));
-      }
-    }
-
-    // Helper function to calculate bucket
-    const getBucket = (daysOverdue: number): string => {
-      if (daysOverdue <= 0) return 'current';
-      if (daysOverdue <= 30) return '1-30';
-      if (daysOverdue <= 60) return '31-60';
-      if (daysOverdue <= 90) return '61-90';
-      if (daysOverdue <= 120) return '91-120';
-      return '120+';
-    };
-
-    // Helper function to update bucket amounts
-    const updateBucketAmounts = (buckets: Record<string, number>, bucket: string, amount: number) => {
-      buckets[bucket] = (buckets[bucket] || 0) + amount;
-    };
-
-    // Initialize summary
-    const summary = {
-      current: '0',
-      days_1_30: '0',
-      days_31_60: '0',
-      days_61_90: '0',
-      days_91_120: '0',
-      days_120_plus: '0',
-      total: '0',
-    };
-
     if (groupBy === 'invoice') {
-      // Invoice-wise view
-      const invoiceLines: any[] = [];
-      
-      for (const { invoice, customer } of allInvoices) {
-        const totalAmount = parseFloat(invoice.total);
-        const paidAmount = invoicePaidAmounts.get(invoice.id) || 0;
-        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
-        
-        if (outstandingAmount > 0) {
-          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24));
-          const bucket = getBucket(daysOverdue);
-          
-          invoiceLines.push({
-            invoiceId: invoice.id,
-            invoiceNumber: invoice.invoiceNumber || '',
-            customerId: customer.id,
-            customerName: customer.name,
-            invoiceDate: new Date(invoice.invoiceDate),
-            dueDate: new Date(invoice.dueDate),
-            daysOverdue,
-            totalAmount: totalAmount.toFixed(2),
-            paidAmount: paidAmount.toFixed(2),
-            outstandingAmount: outstandingAmount.toFixed(2),
-            bucket,
-            projectName: invoice.projectName,
-          });
+      // Invoice-wise view using SQL aggregation
+      const result = await db.execute(sql`
+        SELECT 
+          i.id as invoice_id,
+          i.invoice_number,
+          i.customer_id,
+          c.name as customer_name,
+          i.invoice_date,
+          i.due_date,
+          CURRENT_DATE - i.due_date::date as days_overdue,
+          i.total::numeric as total_amount,
+          COALESCE(SUM(cp.amount::numeric), 0)::numeric as paid_amount,
+          (i.total::numeric - COALESCE(SUM(cp.amount::numeric), 0))::numeric as outstanding_amount,
+          i.project_name
+        FROM invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id AND c.tenant_id = ${tenantId}
+        LEFT JOIN customer_payments cp ON i.id = cp.invoice_id AND cp.tenant_id = ${tenantId} AND cp.deleted_at IS NULL
+        WHERE i.tenant_id = ${tenantId}
+          AND i.deleted_at IS NULL
+          AND i.status NOT IN ('paid', 'void', 'cancelled')
+        GROUP BY i.id, i.invoice_number, i.customer_id, c.name, i.invoice_date, i.due_date, i.total, i.project_name
+        HAVING (i.total::numeric - COALESCE(SUM(cp.amount::numeric), 0))::numeric > 0
+        ORDER BY i.due_date
+      `);
 
-          // Update summary
-          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
-          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
-          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
-        }
-      }
+      const invoiceLines = result.rows.map((row: any) => {
+        const daysOverdue = parseInt(row.days_overdue) || 0;
+        const getBucket = (days: number): string => {
+          if (days <= 0) return 'current';
+          if (days <= 30) return '1-30';
+          if (days <= 60) return '31-60';
+          if (days <= 90) return '61-90';
+          if (days <= 120) return '91-120';
+          return '120+';
+        };
+
+        return {
+          invoiceId: row.invoice_id,
+          invoiceNumber: row.invoice_number || '',
+          customerId: row.customer_id,
+          customerName: row.customer_name,
+          invoiceDate: new Date(row.invoice_date),
+          dueDate: new Date(row.due_date),
+          daysOverdue,
+          totalAmount: parseFloat(row.total_amount).toFixed(2),
+          paidAmount: parseFloat(row.paid_amount).toFixed(2),
+          outstandingAmount: parseFloat(row.outstanding_amount).toFixed(2),
+          bucket: getBucket(daysOverdue),
+          projectName: row.project_name,
+        };
+      });
+
+      const summary = {
+        current: '0',
+        days_1_30: '0',
+        days_31_60: '0',
+        days_61_90: '0',
+        days_91_120: '0',
+        days_120_plus: '0',
+        total: '0',
+      };
+
+      invoiceLines.forEach(line => {
+        const amount = parseFloat(line.outstandingAmount);
+        const bucketKey = line.bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
+        summary[bucketKey] = (parseFloat(summary[bucketKey]) + amount).toFixed(2);
+        summary.total = (parseFloat(summary.total) + amount).toFixed(2);
+      });
 
       return {
         tenantId,
@@ -4476,52 +4454,60 @@ export class DatabaseStorage implements IStorage {
         invoices: invoiceLines,
       };
     } else if (groupBy === 'project') {
-      // Project-wise view
-      const projectBuckets = new Map<string, Record<string, number>>();
-      
-      for (const { invoice } of allInvoices) {
-        const totalAmount = parseFloat(invoice.total);
-        const paidAmount = invoicePaidAmounts.get(invoice.id) || 0;
-        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
-        
-        if (outstandingAmount > 0) {
-          const projectName = invoice.projectName || 'Unassigned';
-          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24));
-          const bucket = getBucket(daysOverdue);
-          
-          if (!projectBuckets.has(projectName)) {
-            projectBuckets.set(projectName, {
-              current: 0,
-              days_1_30: 0,
-              days_31_60: 0,
-              days_61_90: 0,
-              days_91_120: 0,
-              days_120_plus: 0,
-              total: 0,
-            });
-          }
-          
-          const buckets = projectBuckets.get(projectName)!;
-          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
-          buckets[bucketKey] += outstandingAmount;
-          buckets.total += outstandingAmount;
+      // Project-wise view using SQL aggregation with COALESCE for project grouping
+      const result = await db.execute(sql`
+        SELECT 
+          COALESCE(i.project_name, 'Unassigned') as project_name,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date <= 0 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as current,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date BETWEEN 1 AND 30 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_1_30,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date BETWEEN 31 AND 60 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_31_60,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date BETWEEN 61 AND 90 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_61_90,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date BETWEEN 91 AND 120 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_91_120,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date > 120 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_120_plus,
+          SUM((i.total::numeric - COALESCE(paid.amount, 0))::numeric)::numeric as total
+        FROM invoices i
+        LEFT JOIN (
+          SELECT invoice_id, SUM(amount::numeric)::numeric as amount
+          FROM customer_payments
+          WHERE tenant_id = ${tenantId} AND deleted_at IS NULL
+          GROUP BY invoice_id
+        ) paid ON i.id = paid.invoice_id
+        WHERE i.tenant_id = ${tenantId}
+          AND i.deleted_at IS NULL
+          AND i.status NOT IN ('paid', 'void', 'cancelled')
+        GROUP BY COALESCE(i.project_name, 'Unassigned')
+        HAVING SUM((i.total::numeric - COALESCE(paid.amount, 0))::numeric)::numeric > 0
+        ORDER BY project_name
+      `);
 
-          // Update summary
-          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
-          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
-        }
-      }
-
-      const projectLines = Array.from(projectBuckets.entries()).map(([projectName, buckets]) => ({
-        projectName,
-        current: buckets.current.toFixed(2),
-        days_1_30: buckets.days_1_30.toFixed(2),
-        days_31_60: buckets.days_31_60.toFixed(2),
-        days_61_90: buckets.days_61_90.toFixed(2),
-        days_91_120: buckets.days_91_120.toFixed(2),
-        days_120_plus: buckets.days_120_plus.toFixed(2),
-        total: buckets.total.toFixed(2),
+      const projectLines = result.rows.map((row: any) => ({
+        projectName: row.project_name,
+        current: parseFloat(row.current || 0).toFixed(2),
+        days_1_30: parseFloat(row.days_1_30 || 0).toFixed(2),
+        days_31_60: parseFloat(row.days_31_60 || 0).toFixed(2),
+        days_61_90: parseFloat(row.days_61_90 || 0).toFixed(2),
+        days_91_120: parseFloat(row.days_91_120 || 0).toFixed(2),
+        days_120_plus: parseFloat(row.days_120_plus || 0).toFixed(2),
+        total: parseFloat(row.total || 0).toFixed(2),
       }));
+
+      const summary = projectLines.reduce((acc, line) => ({
+        current: (parseFloat(acc.current) + parseFloat(line.current)).toFixed(2),
+        days_1_30: (parseFloat(acc.days_1_30) + parseFloat(line.days_1_30)).toFixed(2),
+        days_31_60: (parseFloat(acc.days_31_60) + parseFloat(line.days_31_60)).toFixed(2),
+        days_61_90: (parseFloat(acc.days_61_90) + parseFloat(line.days_61_90)).toFixed(2),
+        days_91_120: (parseFloat(acc.days_91_120) + parseFloat(line.days_91_120)).toFixed(2),
+        days_120_plus: (parseFloat(acc.days_120_plus) + parseFloat(line.days_120_plus)).toFixed(2),
+        total: (parseFloat(acc.total) + parseFloat(line.total)).toFixed(2),
+      }), {
+        current: '0',
+        days_1_30: '0',
+        days_31_60: '0',
+        days_61_90: '0',
+        days_91_120: '0',
+        days_120_plus: '0',
+        total: '0',
+      });
 
       return {
         tenantId,
@@ -4531,55 +4517,63 @@ export class DatabaseStorage implements IStorage {
         projects: projectLines,
       };
     } else {
-      // Customer-wise view (default)
-      const customerBuckets = new Map<string, { name: string; buckets: Record<string, number> }>();
-      
-      for (const { invoice, customer } of allInvoices) {
-        const totalAmount = parseFloat(invoice.total);
-        const paidAmount = invoicePaidAmounts.get(invoice.id) || 0;
-        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
-        
-        if (outstandingAmount > 0) {
-          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24));
-          const bucket = getBucket(daysOverdue);
-          
-          if (!customerBuckets.has(customer.id)) {
-            customerBuckets.set(customer.id, {
-              name: customer.name,
-              buckets: {
-                current: 0,
-                days_1_30: 0,
-                days_31_60: 0,
-                days_61_90: 0,
-                days_91_120: 0,
-                days_120_plus: 0,
-                total: 0,
-              },
-            });
-          }
-          
-          const customerData = customerBuckets.get(customer.id)!;
-          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
-          customerData.buckets[bucketKey] += outstandingAmount;
-          customerData.buckets.total += outstandingAmount;
+      // Customer-wise view using SQL aggregation with tenant isolation
+      const result = await db.execute(sql`
+        SELECT 
+          i.customer_id as entity_id,
+          c.name as entity_name,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date <= 0 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as current,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date BETWEEN 1 AND 30 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_1_30,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date BETWEEN 31 AND 60 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_31_60,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date BETWEEN 61 AND 90 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_61_90,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date BETWEEN 91 AND 120 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_91_120,
+          SUM(CASE WHEN CURRENT_DATE - i.due_date::date > 120 THEN (i.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_120_plus,
+          SUM((i.total::numeric - COALESCE(paid.amount, 0))::numeric)::numeric as total
+        FROM invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id AND c.tenant_id = ${tenantId}
+        LEFT JOIN (
+          SELECT invoice_id, SUM(amount::numeric)::numeric as amount
+          FROM customer_payments
+          WHERE tenant_id = ${tenantId} AND deleted_at IS NULL
+          GROUP BY invoice_id
+        ) paid ON i.id = paid.invoice_id
+        WHERE i.tenant_id = ${tenantId}
+          AND i.deleted_at IS NULL
+          AND i.status NOT IN ('paid', 'void', 'cancelled')
+        GROUP BY i.customer_id, c.name
+        HAVING SUM((i.total::numeric - COALESCE(paid.amount, 0))::numeric)::numeric > 0
+        ORDER BY c.name
+      `);
 
-          // Update summary
-          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
-          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
-        }
-      }
-
-      const customerLines = Array.from(customerBuckets.entries()).map(([entityId, data]) => ({
-        entityId,
-        entityName: data.name,
-        current: data.buckets.current.toFixed(2),
-        days_1_30: data.buckets.days_1_30.toFixed(2),
-        days_31_60: data.buckets.days_31_60.toFixed(2),
-        days_61_90: data.buckets.days_61_90.toFixed(2),
-        days_91_120: data.buckets.days_91_120.toFixed(2),
-        days_120_plus: data.buckets.days_120_plus.toFixed(2),
-        total: data.buckets.total.toFixed(2),
+      const customerLines = result.rows.map((row: any) => ({
+        entityId: row.entity_id,
+        entityName: row.entity_name,
+        current: parseFloat(row.current || 0).toFixed(2),
+        days_1_30: parseFloat(row.days_1_30 || 0).toFixed(2),
+        days_31_60: parseFloat(row.days_31_60 || 0).toFixed(2),
+        days_61_90: parseFloat(row.days_61_90 || 0).toFixed(2),
+        days_91_120: parseFloat(row.days_91_120 || 0).toFixed(2),
+        days_120_plus: parseFloat(row.days_120_plus || 0).toFixed(2),
+        total: parseFloat(row.total || 0).toFixed(2),
       }));
+
+      const summary = customerLines.reduce((acc, line) => ({
+        current: (parseFloat(acc.current) + parseFloat(line.current)).toFixed(2),
+        days_1_30: (parseFloat(acc.days_1_30) + parseFloat(line.days_1_30)).toFixed(2),
+        days_31_60: (parseFloat(acc.days_31_60) + parseFloat(line.days_31_60)).toFixed(2),
+        days_61_90: (parseFloat(acc.days_61_90) + parseFloat(line.days_61_90)).toFixed(2),
+        days_91_120: (parseFloat(acc.days_91_120) + parseFloat(line.days_91_120)).toFixed(2),
+        days_120_plus: (parseFloat(acc.days_120_plus) + parseFloat(line.days_120_plus)).toFixed(2),
+        total: (parseFloat(acc.total) + parseFloat(line.total)).toFixed(2),
+      }), {
+        current: '0',
+        days_1_30: '0',
+        days_31_60: '0',
+        days_61_90: '0',
+        days_91_120: '0',
+        days_120_plus: '0',
+        total: '0',
+      });
 
       return {
         tenantId,
@@ -4595,91 +4589,74 @@ export class DatabaseStorage implements IStorage {
   async getAPAgingReport(tenantId: string, groupBy: 'vendor' | 'invoice' | 'project' = 'vendor'): Promise<APAgingReport> {
     const asOfDate = new Date();
 
-    // Get all bills for this tenant
-    const allBills = await db
-      .select({
-        bill: bills,
-        vendor: vendors,
-      })
-      .from(bills)
-      .innerJoin(vendors, eq(bills.vendorId, vendors.id))
-      .where(and(
-        eq(bills.tenantId, tenantId),
-        ne(bills.status, 'cancelled')
-      ));
-
-    // Calculate paid amounts (from payments)
-    const billPaidAmounts = new Map<string, number>();
-    const paymentsList = await db
-      .select()
-      .from(payments)
-      .where(and(
-        eq(payments.tenantId, tenantId),
-        ne(payments.status, 'cancelled')
-      ));
-    
-    for (const payment of paymentsList) {
-      if (payment.billId) {
-        const current = billPaidAmounts.get(payment.billId) || 0;
-        billPaidAmounts.set(payment.billId, current + parseFloat(payment.amount));
-      }
-    }
-
-    // Helper function to calculate bucket
-    const getBucket = (daysOverdue: number): string => {
-      if (daysOverdue <= 0) return 'current';
-      if (daysOverdue <= 30) return '1-30';
-      if (daysOverdue <= 60) return '31-60';
-      if (daysOverdue <= 90) return '61-90';
-      if (daysOverdue <= 120) return '91-120';
-      return '120+';
-    };
-
-    // Initialize summary
-    const summary = {
-      current: '0',
-      days_1_30: '0',
-      days_31_60: '0',
-      days_61_90: '0',
-      days_91_120: '0',
-      days_120_plus: '0',
-      total: '0',
-    };
-
     if (groupBy === 'invoice') {
-      // Invoice-wise view (bills)
-      const invoiceLines: any[] = [];
-      
-      for (const { bill, vendor } of allBills) {
-        const totalAmount = parseFloat(bill.total);
-        const paidAmount = billPaidAmounts.get(bill.id) || 0;
-        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
-        
-        if (outstandingAmount > 0) {
-          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(bill.dueDate).getTime()) / (1000 * 60 * 60 * 24));
-          const bucket = getBucket(daysOverdue);
-          
-          invoiceLines.push({
-            invoiceId: bill.id,
-            invoiceNumber: bill.billNumber,
-            vendorId: vendor.id,
-            vendorName: vendor.name,
-            invoiceDate: new Date(bill.billDate),
-            dueDate: new Date(bill.dueDate),
-            daysOverdue,
-            totalAmount: totalAmount.toFixed(2),
-            paidAmount: paidAmount.toFixed(2),
-            outstandingAmount: outstandingAmount.toFixed(2),
-            bucket,
-            projectName: bill.projectName,
-          });
+      // Invoice-wise view (bills) using SQL aggregation
+      const result = await db.execute(sql`
+        SELECT 
+          b.id as invoice_id,
+          b.bill_number as invoice_number,
+          b.vendor_id,
+          v.name as vendor_name,
+          b.bill_date as invoice_date,
+          b.due_date,
+          CURRENT_DATE - b.due_date::date as days_overdue,
+          b.total::numeric as total_amount,
+          COALESCE(SUM(p.amount::numeric), 0)::numeric as paid_amount,
+          (b.total::numeric - COALESCE(SUM(p.amount::numeric), 0))::numeric as outstanding_amount,
+          b.project_name
+        FROM bills b
+        LEFT JOIN vendors v ON b.vendor_id = v.id AND v.tenant_id = ${tenantId}
+        LEFT JOIN payments p ON b.id = p.bill_id AND p.tenant_id = ${tenantId} AND p.status != 'cancelled'
+        WHERE b.tenant_id = ${tenantId}
+          AND b.status NOT IN ('paid', 'void', 'cancelled')
+        GROUP BY b.id, b.bill_number, b.vendor_id, v.name, b.bill_date, b.due_date, b.total, b.project_name
+        HAVING (b.total::numeric - COALESCE(SUM(p.amount::numeric), 0))::numeric > 0
+        ORDER BY b.due_date
+      `);
 
-          // Update summary
-          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
-          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
-          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
-        }
-      }
+      const invoiceLines = result.rows.map((row: any) => {
+        const daysOverdue = parseInt(row.days_overdue) || 0;
+        const getBucket = (days: number): string => {
+          if (days <= 0) return 'current';
+          if (days <= 30) return '1-30';
+          if (days <= 60) return '31-60';
+          if (days <= 90) return '61-90';
+          if (days <= 120) return '91-120';
+          return '120+';
+        };
+
+        return {
+          invoiceId: row.invoice_id,
+          invoiceNumber: row.invoice_number,
+          vendorId: row.vendor_id,
+          vendorName: row.vendor_name,
+          invoiceDate: new Date(row.invoice_date),
+          dueDate: new Date(row.due_date),
+          daysOverdue,
+          totalAmount: parseFloat(row.total_amount).toFixed(2),
+          paidAmount: parseFloat(row.paid_amount).toFixed(2),
+          outstandingAmount: parseFloat(row.outstanding_amount).toFixed(2),
+          bucket: getBucket(daysOverdue),
+          projectName: row.project_name,
+        };
+      });
+
+      const summary = {
+        current: '0',
+        days_1_30: '0',
+        days_31_60: '0',
+        days_61_90: '0',
+        days_91_120: '0',
+        days_120_plus: '0',
+        total: '0',
+      };
+
+      invoiceLines.forEach(line => {
+        const amount = parseFloat(line.outstandingAmount);
+        const bucketKey = line.bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
+        summary[bucketKey] = (parseFloat(summary[bucketKey]) + amount).toFixed(2);
+        summary.total = (parseFloat(summary.total) + amount).toFixed(2);
+      });
 
       return {
         tenantId,
@@ -4689,52 +4666,59 @@ export class DatabaseStorage implements IStorage {
         invoices: invoiceLines,
       };
     } else if (groupBy === 'project') {
-      // Project-wise view
-      const projectBuckets = new Map<string, Record<string, number>>();
-      
-      for (const { bill } of allBills) {
-        const totalAmount = parseFloat(bill.total);
-        const paidAmount = billPaidAmounts.get(bill.id) || 0;
-        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
-        
-        if (outstandingAmount > 0) {
-          const projectName = bill.projectName || 'Unassigned';
-          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(bill.dueDate).getTime()) / (1000 * 60 * 60 * 24));
-          const bucket = getBucket(daysOverdue);
-          
-          if (!projectBuckets.has(projectName)) {
-            projectBuckets.set(projectName, {
-              current: 0,
-              days_1_30: 0,
-              days_31_60: 0,
-              days_61_90: 0,
-              days_91_120: 0,
-              days_120_plus: 0,
-              total: 0,
-            });
-          }
-          
-          const buckets = projectBuckets.get(projectName)!;
-          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
-          buckets[bucketKey] += outstandingAmount;
-          buckets.total += outstandingAmount;
+      // Project-wise view using SQL aggregation with COALESCE for project grouping
+      const result = await db.execute(sql`
+        SELECT 
+          COALESCE(b.project_name, 'Unassigned') as project_name,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date <= 0 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as current,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date BETWEEN 1 AND 30 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_1_30,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date BETWEEN 31 AND 60 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_31_60,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date BETWEEN 61 AND 90 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_61_90,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date BETWEEN 91 AND 120 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_91_120,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date > 120 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_120_plus,
+          SUM((b.total::numeric - COALESCE(paid.amount, 0))::numeric)::numeric as total
+        FROM bills b
+        LEFT JOIN (
+          SELECT bill_id, SUM(amount::numeric)::numeric as amount
+          FROM payments
+          WHERE tenant_id = ${tenantId} AND status != 'cancelled'
+          GROUP BY bill_id
+        ) paid ON b.id = paid.bill_id
+        WHERE b.tenant_id = ${tenantId}
+          AND b.status NOT IN ('paid', 'void', 'cancelled')
+        GROUP BY COALESCE(b.project_name, 'Unassigned')
+        HAVING SUM((b.total::numeric - COALESCE(paid.amount, 0))::numeric)::numeric > 0
+        ORDER BY project_name
+      `);
 
-          // Update summary
-          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
-          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
-        }
-      }
-
-      const projectLines = Array.from(projectBuckets.entries()).map(([projectName, buckets]) => ({
-        projectName,
-        current: buckets.current.toFixed(2),
-        days_1_30: buckets.days_1_30.toFixed(2),
-        days_31_60: buckets.days_31_60.toFixed(2),
-        days_61_90: buckets.days_61_90.toFixed(2),
-        days_91_120: buckets.days_91_120.toFixed(2),
-        days_120_plus: buckets.days_120_plus.toFixed(2),
-        total: buckets.total.toFixed(2),
+      const projectLines = result.rows.map((row: any) => ({
+        projectName: row.project_name,
+        current: parseFloat(row.current || 0).toFixed(2),
+        days_1_30: parseFloat(row.days_1_30 || 0).toFixed(2),
+        days_31_60: parseFloat(row.days_31_60 || 0).toFixed(2),
+        days_61_90: parseFloat(row.days_61_90 || 0).toFixed(2),
+        days_91_120: parseFloat(row.days_91_120 || 0).toFixed(2),
+        days_120_plus: parseFloat(row.days_120_plus || 0).toFixed(2),
+        total: parseFloat(row.total || 0).toFixed(2),
       }));
+
+      const summary = projectLines.reduce((acc, line) => ({
+        current: (parseFloat(acc.current) + parseFloat(line.current)).toFixed(2),
+        days_1_30: (parseFloat(acc.days_1_30) + parseFloat(line.days_1_30)).toFixed(2),
+        days_31_60: (parseFloat(acc.days_31_60) + parseFloat(line.days_31_60)).toFixed(2),
+        days_61_90: (parseFloat(acc.days_61_90) + parseFloat(line.days_61_90)).toFixed(2),
+        days_91_120: (parseFloat(acc.days_91_120) + parseFloat(line.days_91_120)).toFixed(2),
+        days_120_plus: (parseFloat(acc.days_120_plus) + parseFloat(line.days_120_plus)).toFixed(2),
+        total: (parseFloat(acc.total) + parseFloat(line.total)).toFixed(2),
+      }), {
+        current: '0',
+        days_1_30: '0',
+        days_31_60: '0',
+        days_61_90: '0',
+        days_91_120: '0',
+        days_120_plus: '0',
+        total: '0',
+      });
 
       return {
         tenantId,
@@ -4744,55 +4728,62 @@ export class DatabaseStorage implements IStorage {
         projects: projectLines,
       };
     } else {
-      // Vendor-wise view (default)
-      const vendorBuckets = new Map<string, { name: string; buckets: Record<string, number> }>();
-      
-      for (const { bill, vendor } of allBills) {
-        const totalAmount = parseFloat(bill.total);
-        const paidAmount = billPaidAmounts.get(bill.id) || 0;
-        const outstandingAmount = Math.max(0, totalAmount - paidAmount);
-        
-        if (outstandingAmount > 0) {
-          const daysOverdue = Math.floor((asOfDate.getTime() - new Date(bill.dueDate).getTime()) / (1000 * 60 * 60 * 24));
-          const bucket = getBucket(daysOverdue);
-          
-          if (!vendorBuckets.has(vendor.id)) {
-            vendorBuckets.set(vendor.id, {
-              name: vendor.name,
-              buckets: {
-                current: 0,
-                days_1_30: 0,
-                days_31_60: 0,
-                days_61_90: 0,
-                days_91_120: 0,
-                days_120_plus: 0,
-                total: 0,
-              },
-            });
-          }
-          
-          const vendorData = vendorBuckets.get(vendor.id)!;
-          const bucketKey = bucket.replace(/-/g, '_').replace(/\+/g, '_plus');
-          vendorData.buckets[bucketKey] += outstandingAmount;
-          vendorData.buckets.total += outstandingAmount;
+      // Vendor-wise view using SQL aggregation with tenant isolation
+      const result = await db.execute(sql`
+        SELECT 
+          b.vendor_id as entity_id,
+          v.name as entity_name,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date <= 0 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as current,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date BETWEEN 1 AND 30 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_1_30,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date BETWEEN 31 AND 60 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_31_60,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date BETWEEN 61 AND 90 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_61_90,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date BETWEEN 91 AND 120 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_91_120,
+          SUM(CASE WHEN CURRENT_DATE - b.due_date::date > 120 THEN (b.total::numeric - COALESCE(paid.amount, 0))::numeric ELSE 0 END)::numeric as days_120_plus,
+          SUM((b.total::numeric - COALESCE(paid.amount, 0))::numeric)::numeric as total
+        FROM bills b
+        LEFT JOIN vendors v ON b.vendor_id = v.id AND v.tenant_id = ${tenantId}
+        LEFT JOIN (
+          SELECT bill_id, SUM(amount::numeric)::numeric as amount
+          FROM payments
+          WHERE tenant_id = ${tenantId} AND status != 'cancelled'
+          GROUP BY bill_id
+        ) paid ON b.id = paid.bill_id
+        WHERE b.tenant_id = ${tenantId}
+          AND b.status NOT IN ('paid', 'void', 'cancelled')
+        GROUP BY b.vendor_id, v.name
+        HAVING SUM((b.total::numeric - COALESCE(paid.amount, 0))::numeric)::numeric > 0
+        ORDER BY v.name
+      `);
 
-          // Update summary
-          summary[bucketKey] = (parseFloat(summary[bucketKey]) + outstandingAmount).toFixed(2);
-          summary.total = (parseFloat(summary.total) + outstandingAmount).toFixed(2);
-        }
-      }
-
-      const vendorLines = Array.from(vendorBuckets.entries()).map(([entityId, data]) => ({
-        entityId,
-        entityName: data.name,
-        current: data.buckets.current.toFixed(2),
-        days_1_30: data.buckets.days_1_30.toFixed(2),
-        days_31_60: data.buckets.days_31_60.toFixed(2),
-        days_61_90: data.buckets.days_61_90.toFixed(2),
-        days_91_120: data.buckets.days_91_120.toFixed(2),
-        days_120_plus: data.buckets.days_120_plus.toFixed(2),
-        total: data.buckets.total.toFixed(2),
+      const vendorLines = result.rows.map((row: any) => ({
+        entityId: row.entity_id,
+        entityName: row.entity_name,
+        current: parseFloat(row.current || 0).toFixed(2),
+        days_1_30: parseFloat(row.days_1_30 || 0).toFixed(2),
+        days_31_60: parseFloat(row.days_31_60 || 0).toFixed(2),
+        days_61_90: parseFloat(row.days_61_90 || 0).toFixed(2),
+        days_91_120: parseFloat(row.days_91_120 || 0).toFixed(2),
+        days_120_plus: parseFloat(row.days_120_plus || 0).toFixed(2),
+        total: parseFloat(row.total || 0).toFixed(2),
       }));
+
+      const summary = vendorLines.reduce((acc, line) => ({
+        current: (parseFloat(acc.current) + parseFloat(line.current)).toFixed(2),
+        days_1_30: (parseFloat(acc.days_1_30) + parseFloat(line.days_1_30)).toFixed(2),
+        days_31_60: (parseFloat(acc.days_31_60) + parseFloat(line.days_31_60)).toFixed(2),
+        days_61_90: (parseFloat(acc.days_61_90) + parseFloat(line.days_61_90)).toFixed(2),
+        days_91_120: (parseFloat(acc.days_91_120) + parseFloat(line.days_91_120)).toFixed(2),
+        days_120_plus: (parseFloat(acc.days_120_plus) + parseFloat(line.days_120_plus)).toFixed(2),
+        total: (parseFloat(acc.total) + parseFloat(line.total)).toFixed(2),
+      }), {
+        current: '0',
+        days_1_30: '0',
+        days_31_60: '0',
+        days_61_90: '0',
+        days_91_120: '0',
+        days_120_plus: '0',
+        total: '0',
+      });
 
       return {
         tenantId,
