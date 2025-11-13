@@ -645,14 +645,178 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Gracefully handle missing company profile
       const companyName = companyProfile?.legalName || 'Company';
       
-      // Build email with proper null guard for message
+      // STEP 1: Validate invoice data BEFORE attempting email send
+      // This prevents misleading success responses when data is fundamentally invalid
+      
+      // Validate dates
+      if (!invoice.invoiceDate || !invoice.dueDate) {
+        return res.status(400).json({ 
+          error: "Cannot send invoice - missing invoice or due date" 
+        });
+      }
+
+      const invoiceDate = new Date(invoice.invoiceDate);
+      const dueDate = new Date(invoice.dueDate);
+
+      if (isNaN(invoiceDate.getTime()) || isNaN(dueDate.getTime())) {
+        return res.status(400).json({ 
+          error: "Cannot send invoice - invalid invoice or due date" 
+        });
+      }
+
+      // Validate totals
+      if (invoice.subtotal == null || invoice.subtotal === '' ||
+          invoice.taxAmount == null || invoice.taxAmount === '' ||
+          invoice.total == null || invoice.total === '') {
+        return res.status(400).json({ 
+          error: "Cannot send invoice - missing invoice totals" 
+        });
+      }
+
+      const subtotal = parseFloat(invoice.subtotal.toString());
+      const taxAmount = parseFloat(invoice.taxAmount.toString());
+      const total = parseFloat(invoice.total.toString());
+
+      if (isNaN(subtotal) || isNaN(taxAmount) || isNaN(total)) {
+        return res.status(400).json({ 
+          error: "Cannot send invoice - invalid invoice totals" 
+        });
+      }
+      
+      // Generate PDF attachment
+      let pdfBuffer: Buffer | null = null;
+      let pdfAttached = false;
+      let pdfError: string | null = null;
+      
+      try {
+        // Get line items with tax details
+        const lineItems = await storage.getInvoiceLineItemsWithTax(id, tenantId);
+        
+        // STEP 2: Removed line items check - attempt PDF generation even with zero items
+        // This makes email endpoint consistent with download endpoint behavior
+        
+        // Use fallback values for missing company profile data
+        const companyLegalName = companyProfile?.legalName || 'Company Name Not Set';
+        const companyTaxId = companyProfile?.taxRegistrationNumber || 'Tax ID Not Set';
+        
+        // Format company address
+        let companyAddress: string | undefined;
+        if (companyProfile?.address) {
+          try {
+            const addr = typeof companyProfile.address === 'string' 
+              ? JSON.parse(companyProfile.address) 
+              : companyProfile.address;
+            companyAddress = [addr.street, addr.city, addr.state, addr.zip, addr.country]
+              .filter(Boolean)
+              .join(', ');
+          } catch {
+            companyAddress = companyProfile.address as string;
+          }
+        }
+
+        // Format customer address
+        let customerAddress: string | undefined;
+        if (customer.address) {
+          try {
+            const addr = typeof customer.address === 'string' 
+              ? JSON.parse(customer.address) 
+              : customer.address;
+            customerAddress = [addr.street, addr.city, addr.state, addr.zip, addr.country]
+              .filter(Boolean)
+              .join(', ');
+          } catch {
+            customerAddress = customer.address as string;
+          }
+        }
+        
+        // Build PDF data
+        const pdfData = {
+          invoice: {
+            id: invoice.id,
+            invoiceNumber: invoice.invoiceNumber || '',
+            invoiceDate: invoiceDate,
+            dueDate: dueDate,
+            invoiceSubject: invoice.invoiceSubject || undefined,
+            status: invoice.status,
+            subtotal: subtotal,
+            totalTax: taxAmount,
+            total: total,
+            issuerTaxId: invoice.issuerTaxId || '',
+            customerTaxId: invoice.customerTaxId || undefined,
+          },
+          customer: {
+            name: customer.name,
+            email: customer.email || '',
+            address: customerAddress,
+            taxRegistrationNumber: customer.taxRegistrationNumber || undefined,
+          },
+          companyProfile: {
+            legalName: companyLegalName,
+            taxRegistrationNumber: companyTaxId,
+            address: companyAddress,
+          },
+          lineItems: (lineItems || []).map(item => {
+            const quantity = parseFloat(item.quantity?.toString() || '0');
+            const rate = parseFloat(item.rate?.toString() || '0');
+            const amount = parseFloat(item.amount?.toString() || '0');
+            
+            const discountValue = item.discount != null ? parseFloat(item.discount.toString()) : NaN;
+            const discount = !isNaN(discountValue) ? discountValue : undefined;
+            
+            const taxRateValue = item.taxRate != null ? parseFloat(item.taxRate.toString()) : NaN;
+            const taxRate = !isNaN(taxRateValue) ? taxRateValue : undefined;
+
+            if (isNaN(quantity) || isNaN(rate) || isNaN(amount)) {
+              throw new Error(`Invalid line item data for item: ${item.description}`);
+            }
+
+            return {
+              description: item.description,
+              quantity: quantity,
+              rate: rate,
+              amount: amount,
+              discount: discount,
+              taxName: item.taxName || undefined,
+              taxRate: taxRate,
+            };
+          }),
+        };
+
+        // Generate PDF
+        pdfBuffer = await generateInvoicePDF(pdfData);
+        pdfAttached = true;
+        console.log(`[Invoice ${invoice.invoiceNumber}] PDF generated successfully`, {
+          tenantId,
+          invoiceId: invoice.id,
+          lineItemCount: lineItems?.length || 0
+        });
+      } catch (pdfGenerationError: any) {
+        // STEP 4: Improved structured logging
+        pdfError = pdfGenerationError.message || 'PDF generation failed';
+        console.error(`[Invoice ${invoice.invoiceNumber}] PDF generation failed:`, {
+          tenantId,
+          invoiceId: invoice.id,
+          error: pdfError,
+          stack: pdfGenerationError.stack
+        });
+        // Continue without PDF attachment - email will still be sent
+      }
+      
+      // Build email body with PDF status note
+      const pdfNote = pdfAttached 
+        ? '<p><em>A PDF copy of this invoice is attached to this email.</em></p>'
+        : pdfError
+        ? `<p><em>Note: PDF attachment could not be generated (${pdfError}). Please download the invoice from your account.</em></p>`
+        : '<p><em>Note: Please download the invoice PDF from your account.</em></p>';
+      
       const subject = `Invoice ${invoice.invoiceNumber} from ${companyName}`;
-      const body = `
+      let body = `
         <html>
           <body>
             <h2>Invoice ${invoice.invoiceNumber}</h2>
             <p>Dear ${customer.name},</p>
             ${customMessage ? `<p>${customMessage}</p>` : '<p>Please find your invoice details below.</p>'}
+            ${pdfNote}
             <p><strong>Invoice Number:</strong> ${invoice.invoiceNumber}</p>
             <p><strong>Invoice Date:</strong> ${new Date(invoice.invoiceDate).toLocaleDateString()}</p>
             <p><strong>Due Date:</strong> ${new Date(invoice.dueDate).toLocaleDateString()}</p>
@@ -672,7 +836,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           to: customer.email,
           subject,
           body,
-          invoiceNumber: invoice.invoiceNumber || ''
+          invoiceNumber: invoice.invoiceNumber || '',
+          pdfAttachment: pdfBuffer ? {
+            filename: `invoice-${invoice.invoiceNumber || invoice.id}.pdf`,
+            content: pdfBuffer
+          } : undefined
         });
         emailSent = true; // Mark as sent
       } catch (emailError: any) {
@@ -708,10 +876,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
           
           const updatedInvoice = await storage.getInvoiceById(id, tenantId);
+          // STEP 3: Always include pdfAttached and pdfError in response
           return res.json({ 
             success: true, 
-            message: 'Invoice sent successfully',
-            invoice: updatedInvoice
+            message: pdfAttached 
+              ? 'Invoice sent successfully with PDF attachment'
+              : 'Invoice sent successfully without PDF attachment',
+            invoice: updatedInvoice,
+            pdfAttached: pdfAttached,
+            pdfError: pdfError || undefined
           });
         } catch (updateError: any) {
           // SPECIAL CASE: Email sent but DB update failed
@@ -812,22 +985,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Validate dates - reject null/empty/whitespace values before conversion
-      const invoiceDateStr = typeof invoice.invoiceDate === 'string' 
-        ? invoice.invoiceDate.trim() 
-        : invoice.invoiceDate;
-      const dueDateStr = typeof invoice.dueDate === 'string' 
-        ? invoice.dueDate.trim() 
-        : invoice.dueDate;
+      // Validate dates - reject null/empty values before conversion
+      const invoiceDateValue = invoice.invoiceDate;
+      const dueDateValue = invoice.dueDate;
 
-      if (!invoiceDateStr || !dueDateStr) {
+      if (!invoiceDateValue || !dueDateValue) {
         return res.status(400).json({ 
           error: "Missing invoice or due date - unable to generate PDF" 
         });
       }
 
-      const invoiceDate = new Date(invoiceDateStr);
-      const dueDate = new Date(dueDateStr);
+      const invoiceDate = new Date(invoiceDateValue);
+      const dueDate = new Date(dueDateValue);
       
       if (isNaN(invoiceDate.getTime()) || isNaN(dueDate.getTime())) {
         return res.status(400).json({ 
@@ -861,8 +1030,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoice: {
           id: invoice.id,
           invoiceNumber: invoice.invoiceNumber || '',
-          invoiceDate: invoiceDate.toISOString().split('T')[0],
-          dueDate: dueDate.toISOString().split('T')[0],
+          invoiceDate: invoiceDate,
+          dueDate: dueDate,
           invoiceSubject: invoice.invoiceSubject || undefined,
           status: invoice.status,
           subtotal: subtotal,        // number

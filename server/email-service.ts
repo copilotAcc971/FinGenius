@@ -51,12 +51,16 @@ export interface SendInvoiceEmailParams {
   subject: string;
   body: string;
   invoiceNumber: string;
+  pdfAttachment?: {
+    filename: string;
+    content: Buffer;
+  };
 }
 
 export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<void> {
   const client = await getUncachableOutlookClient();
   
-  const message = {
+  const message: any = {
     subject: params.subject,
     body: {
       contentType: 'HTML',
@@ -70,6 +74,18 @@ export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<
       }
     ]
   };
+
+  // Add PDF attachment if provided
+  if (params.pdfAttachment) {
+    message.attachments = [
+      {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: params.pdfAttachment.filename,
+        contentType: 'application/pdf',
+        contentBytes: params.pdfAttachment.content.toString('base64')
+      }
+    ];
+  }
 
   await client.api('/me/sendMail').post({
     message,
