@@ -645,6 +645,398 @@ export const insertDocumentSchema = createInsertSchema(documents).omit({
 export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type Document = typeof documents.$inferSelect;
 
+// Quotes (Sales Quotations)
+export const quotes = pgTable("quotes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  quoteNumber: varchar("quote_number", { length: 100 }),
+  
+  quoteSubject: varchar("quote_subject", { length: 500 }),
+  issuerTaxId: varchar("issuer_tax_id", { length: 100 }),
+  customerTaxId: varchar("customer_tax_id", { length: 100 }),
+  
+  quoteDate: timestamp("quote_date").notNull(),
+  expiryDate: timestamp("expiry_date").notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, sent, accepted, rejected, expired, converted
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  notes: text("notes"),
+  
+  // Conversion tracking
+  convertedToInvoiceId: varchar("converted_to_invoice_id").references(() => invoices.id),
+  convertedAt: timestamp("converted_at"),
+  
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_quote_number_tenant").on(table.tenantId, table.quoteNumber),
+]);
+
+export const insertQuoteSchema = createInsertSchema(quotes, {
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+}).omit({
+  id: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
+  convertedToInvoiceId: true,
+  convertedAt: true,
+}).extend({
+  quoteNumber: z.string().max(100).optional(),
+});
+
+export type InsertQuote = z.infer<typeof insertQuoteSchema>;
+export type Quote = typeof quotes.$inferSelect;
+
+// Quote Line Items
+export const quoteLineItems = pgTable("quote_line_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  quoteId: varchar("quote_id").notNull().references(() => quotes.id),
+  itemId: varchar("item_id").references(() => items.id),
+  description: text("description").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  taxId: varchar("tax_id").references(() => taxes.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertQuoteLineItemSchema = createInsertSchema(quoteLineItems, {
+  quantity: decimalString,
+  unitPrice: decimalString,
+  discount: decimalString,
+  amount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertQuoteLineItem = z.infer<typeof insertQuoteLineItemSchema>;
+export type QuoteLineItem = typeof quoteLineItems.$inferSelect;
+
+// Sales Orders
+export const salesOrders = pgTable("sales_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  orderNumber: varchar("order_number", { length: 100 }),
+  
+  orderDate: timestamp("order_date").notNull(),
+  shipmentDate: timestamp("shipment_date"),
+  deliveryDate: timestamp("delivery_date"),
+  
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, confirmed, packed, shipped, delivered, invoiced, cancelled
+  fulfillmentStatus: varchar("fulfillment_status", { length: 50 }).default("unfulfilled"), // unfulfilled, partially_fulfilled, fulfilled
+  
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  notes: text("notes"),
+  
+  // Conversion tracking
+  convertedToInvoiceId: varchar("converted_to_invoice_id").references(() => invoices.id),
+  convertedAt: timestamp("converted_at"),
+  
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_order_number_tenant").on(table.tenantId, table.orderNumber),
+]);
+
+export const insertSalesOrderSchema = createInsertSchema(salesOrders, {
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+}).omit({
+  id: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
+  convertedToInvoiceId: true,
+  convertedAt: true,
+}).extend({
+  orderNumber: z.string().max(100).optional(),
+});
+
+export type InsertSalesOrder = z.infer<typeof insertSalesOrderSchema>;
+export type SalesOrder = typeof salesOrders.$inferSelect;
+
+// Sales Order Line Items
+export const salesOrderLineItems = pgTable("sales_order_line_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  salesOrderId: varchar("sales_order_id").notNull().references(() => salesOrders.id),
+  itemId: varchar("item_id").references(() => items.id),
+  description: text("description").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  quantityFulfilled: decimal("quantity_fulfilled", { precision: 10, scale: 2 }).default("0"),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  taxId: varchar("tax_id").references(() => taxes.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertSalesOrderLineItemSchema = createInsertSchema(salesOrderLineItems, {
+  quantity: decimalString,
+  quantityFulfilled: decimalString,
+  unitPrice: decimalString,
+  discount: decimalString,
+  amount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSalesOrderLineItem = z.infer<typeof insertSalesOrderLineItemSchema>;
+export type SalesOrderLineItem = typeof salesOrderLineItems.$inferSelect;
+
+// Credit Notes
+export const creditNotes = pgTable("credit_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  invoiceId: varchar("invoice_id").references(() => invoices.id), // Optional link to invoice
+  creditNoteNumber: varchar("credit_note_number", { length: 100 }),
+  
+  creditNoteDate: timestamp("credit_note_date").notNull(),
+  reason: text("reason"),
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, issued, applied, cancelled
+  
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  balanceRemaining: decimal("balance_remaining", { precision: 12, scale: 2 }).notNull(),
+  
+  notes: text("notes"),
+  
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_credit_note_number_tenant").on(table.tenantId, table.creditNoteNumber),
+]);
+
+export const insertCreditNoteSchema = createInsertSchema(creditNotes, {
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+  balanceRemaining: decimalString,
+}).omit({
+  id: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  creditNoteNumber: z.string().max(100).optional(),
+});
+
+export type InsertCreditNote = z.infer<typeof insertCreditNoteSchema>;
+export type CreditNote = typeof creditNotes.$inferSelect;
+
+// Credit Note Line Items
+export const creditNoteLineItems = pgTable("credit_note_line_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  creditNoteId: varchar("credit_note_id").notNull().references(() => creditNotes.id),
+  itemId: varchar("item_id").references(() => items.id),
+  description: text("description").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  taxId: varchar("tax_id").references(() => taxes.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCreditNoteLineItemSchema = createInsertSchema(creditNoteLineItems, {
+  quantity: decimalString,
+  unitPrice: decimalString,
+  discount: decimalString,
+  amount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCreditNoteLineItem = z.infer<typeof insertCreditNoteLineItemSchema>;
+export type CreditNoteLineItem = typeof creditNoteLineItems.$inferSelect;
+
+// Customer Payments (Accounts Receivable - payments FROM customers)
+// Note: Renamed from 'payments' to avoid conflict with existing vendor payments table
+export const customerPayments = pgTable("customer_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  invoiceId: varchar("invoice_id").references(() => invoices.id),
+  paymentNumber: varchar("payment_number", { length: 100 }),
+  
+  paymentDate: timestamp("payment_date").notNull(),
+  paymentMethod: varchar("payment_method", { length: 50 }).notNull(), // cash, check, bank_transfer, credit_card, etc.
+  referenceNumber: varchar("reference_number", { length: 100 }),
+  
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  notes: text("notes"),
+  
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_payment_number_tenant").on(table.tenantId, table.paymentNumber),
+]);
+
+export const insertCustomerPaymentSchema = createInsertSchema(customerPayments, {
+  amount: decimalString,
+}).omit({
+  id: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  paymentNumber: z.string().max(100).optional(),
+});
+
+export type InsertCustomerPayment = z.infer<typeof insertCustomerPaymentSchema>;
+export type CustomerPayment = typeof customerPayments.$inferSelect;
+
+// Recurring Invoices
+export const recurringInvoices = pgTable("recurring_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  profileName: varchar("profile_name", { length: 255 }).notNull(),
+  
+  frequency: varchar("frequency", { length: 50 }).notNull(), // daily, weekly, monthly, quarterly, yearly
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date"),
+  nextInvoiceDate: timestamp("next_invoice_date").notNull(),
+  
+  status: varchar("status", { length: 50 }).notNull().default("active"), // active, paused, stopped
+  
+  // Invoice template data
+  invoiceSubject: varchar("invoice_subject", { length: 500 }),
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  notes: text("notes"),
+  
+  lastInvoiceId: varchar("last_invoice_id").references(() => invoices.id),
+  lastInvoiceDate: timestamp("last_invoice_date"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertRecurringInvoiceSchema = createInsertSchema(recurringInvoices, {
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastInvoiceId: true,
+  lastInvoiceDate: true,
+});
+
+export type InsertRecurringInvoice = z.infer<typeof insertRecurringInvoiceSchema>;
+export type RecurringInvoice = typeof recurringInvoices.$inferSelect;
+
+// Recurring Invoice Line Items
+export const recurringInvoiceLineItems = pgTable("recurring_invoice_line_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  recurringInvoiceId: varchar("recurring_invoice_id").notNull().references(() => recurringInvoices.id),
+  itemId: varchar("item_id").references(() => items.id),
+  description: text("description").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  taxId: varchar("tax_id").references(() => taxes.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertRecurringInvoiceLineItemSchema = createInsertSchema(recurringInvoiceLineItems, {
+  quantity: decimalString,
+  unitPrice: decimalString,
+  discount: decimalString,
+  amount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertRecurringInvoiceLineItem = z.infer<typeof insertRecurringInvoiceLineItemSchema>;
+export type RecurringInvoiceLineItem = typeof recurringInvoiceLineItems.$inferSelect;
+
+// Retainer Invoices (Advance Payment Invoices)
+export const retainerInvoices = pgTable("retainer_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  retainerNumber: varchar("retainer_number", { length: 100 }),
+  
+  retainerDate: timestamp("retainer_date").notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, sent, paid, partially_used, fully_used, cancelled
+  
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  balanceRemaining: decimal("balance_remaining", { precision: 12, scale: 2 }).notNull(),
+  
+  notes: text("notes"),
+  
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_retainer_number_tenant").on(table.tenantId, table.retainerNumber),
+]);
+
+export const insertRetainerInvoiceSchema = createInsertSchema(retainerInvoices, {
+  amount: decimalString,
+  balanceRemaining: decimalString,
+}).omit({
+  id: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  retainerNumber: z.string().max(100).optional(),
+});
+
+export type InsertRetainerInvoice = z.infer<typeof insertRetainerInvoiceSchema>;
+export type RetainerInvoice = typeof retainerInvoices.$inferSelect;
+
+// Retainer Drawdowns (usage of retainer balance)
+export const retainerDrawdowns = pgTable("retainer_drawdowns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  retainerInvoiceId: varchar("retainer_invoice_id").notNull().references(() => retainerInvoices.id),
+  invoiceId: varchar("invoice_id").notNull().references(() => invoices.id),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  drawdownDate: timestamp("drawdown_date").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertRetainerDrawdownSchema = createInsertSchema(retainerDrawdowns, {
+  amount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertRetainerDrawdown = z.infer<typeof insertRetainerDrawdownSchema>;
+export type RetainerDrawdown = typeof retainerDrawdowns.$inferSelect;
+
 // Relations
 export const tenantsRelations = relations(tenants, ({ one, many }) => ({
   owner: one(users, {
