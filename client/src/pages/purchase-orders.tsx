@@ -66,7 +66,7 @@ export default function PurchaseOrders() {
       await apiRequest(`/api/purchase-orders/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/purchase-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/purchase-orders", { tenantId: currentTenant?.id }] });
       toast({
         title: "Purchase Order deleted",
         description: "Purchase Order has been removed successfully.",

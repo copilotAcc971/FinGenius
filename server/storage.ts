@@ -3698,13 +3698,16 @@ export class DatabaseStorage implements IStorage {
       // SECURITY: Strip tenantId from payload, FORCE server tenantId
       const { tenantId: _, ...safeAssetData } = assetData;
 
-      // Create asset with auto-generated number
+      // Create asset with auto-generated number and server-side defaults
       const [asset] = await tx
         .insert(assets)
         .values({
           ...safeAssetData,
-          tenantId: assetData.tenantId, // FORCE server tenantId
-          assetNumber,
+          tenantId: assetData.tenantId, // Inject from parameter
+          assetNumber, // Auto-generated
+          depreciationMethod: assetData.depreciationMethod || "straight_line", // Default if missing
+          accumulatedDepreciation: assetData.accumulatedDepreciation || "0", // Default to "0"
+          disposalAmount: assetData.disposalAmount || null, // Default to null
         })
         .returning();
 

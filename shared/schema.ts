@@ -1313,6 +1313,8 @@ export const insertJournalEntrySchema = createInsertSchema(journalEntries, {
   createdAt: true,
   updatedAt: true,
   journalEntryNumber: true, // Auto-generated
+}).extend({
+  entryDate: z.coerce.date(),
 });
 
 export type InsertJournalEntry = z.infer<typeof insertJournalEntrySchema>;
@@ -1541,9 +1543,14 @@ export const insertAssetSchema = createInsertSchema(assets, {
   disposalAmount: decimalString,
 }).omit({
   id: true,
+  assetNumber: true,
+  tenantId: true, // Injected server-side
+  accumulatedDepreciation: true, // Will be defaulted server-side
   createdAt: true,
   updatedAt: true,
-  assetNumber: true, // Auto-generated
+}).extend({
+  purchaseDate: z.coerce.date(),
+  disposalDate: z.coerce.date().optional(),
 });
 
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
@@ -1567,6 +1574,8 @@ export const insertAssetDepreciationScheduleSchema = createInsertSchema(assetDep
 }).omit({
   id: true,
   createdAt: true,
+}).extend({
+  periodDate: z.coerce.date(),
 });
 
 export type InsertAssetDepreciationSchedule = z.infer<typeof insertAssetDepreciationScheduleSchema>;
@@ -1596,6 +1605,9 @@ export const insertBankReconciliationSchema = createInsertSchema(bankReconciliat
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  reconciliationDate: z.coerce.date(),
+  statementDate: z.coerce.date(),
 });
 
 export type InsertBankReconciliation = z.infer<typeof insertBankReconciliationSchema>;
@@ -1620,6 +1632,8 @@ export const insertBankReconciliationItemSchema = createInsertSchema(bankReconci
   id: true,
   tenantId: true,
   createdAt: true,
+}).extend({
+  transactionDate: z.coerce.date(),
 });
 
 export type InsertBankReconciliationItem = z.infer<typeof insertBankReconciliationItemSchema>;

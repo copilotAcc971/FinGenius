@@ -82,10 +82,20 @@ export function AssetDialog({ open, onOpenChange, asset }: AssetDialogProps) {
 
   useEffect(() => {
     if (asset) {
+      // Validate purchaseDate to ensure it's a valid Date object
+      const purchaseDate = asset.purchaseDate instanceof Date && !isNaN(asset.purchaseDate.getTime())
+        ? asset.purchaseDate
+        : new Date();
+
+      // Validate disposalDate to ensure it's a valid Date object or null
+      const disposalDate = asset.disposalDate instanceof Date && !isNaN(asset.disposalDate.getTime())
+        ? asset.disposalDate
+        : null;
+
       form.reset({
         name: asset.name,
         category: asset.category || "",
-        purchaseDate: asset.purchaseDate,
+        purchaseDate,
         purchasePrice: asset.purchasePrice,
         salvageValue: asset.salvageValue || "0",
         depreciationMethod: asset.depreciationMethod as "straight_line" | "declining_balance" | "units_of_production",
@@ -93,7 +103,7 @@ export function AssetDialog({ open, onOpenChange, asset }: AssetDialogProps) {
         status: asset.status as "active" | "disposed" | "sold",
         description: asset.description || "",
         notes: asset.notes || "",
-        disposalDate: asset.disposalDate || null,
+        disposalDate,
         disposalAmount: asset.disposalAmount || null,
         assetAccountId: asset.assetAccountId || null,
         depreciationAccountId: asset.depreciationAccountId || null,
@@ -221,7 +231,7 @@ export function AssetDialog({ open, onOpenChange, asset }: AssetDialogProps) {
                           <Input
                             type="date"
                             {...field}
-                            value={field.value instanceof Date ? field.value.toISOString().split('T')[0] : ''}
+                            value={field.value instanceof Date && !isNaN(field.value.getTime()) ? field.value.toISOString().split('T')[0] : ''}
                             onChange={(e) => field.onChange(new Date(e.target.value))}
                             data-testid="input-purchase-date"
                           />
@@ -446,7 +456,7 @@ export function AssetDialog({ open, onOpenChange, asset }: AssetDialogProps) {
                             <Input
                               type="date"
                               {...field}
-                              value={field.value instanceof Date ? field.value.toISOString().split('T')[0] : (field.value || '')}
+                              value={field.value instanceof Date && !isNaN(field.value.getTime()) ? field.value.toISOString().split('T')[0] : (field.value || '')}
                               onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : null)}
                               data-testid="input-disposal-date"
                             />

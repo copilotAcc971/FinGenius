@@ -238,7 +238,7 @@ export function BankReconciliationDialog({ open, onOpenChange, reconciliation }:
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/bank-reconciliations", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bank-reconciliations", { tenantId: currentTenant?.id }] });
       toast({
         title: reconciliation ? "Reconciliation updated" : "Reconciliation created",
         description: reconciliation 

@@ -261,7 +261,7 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/purchase-orders", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/purchase-orders", { tenantId: currentTenant?.id }] });
       toast({
         title: purchaseOrder ? "Purchase Order updated" : "Purchase Order created",
         description: purchaseOrder 
