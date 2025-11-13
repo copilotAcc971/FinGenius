@@ -16,6 +16,7 @@ import {
   Wallet,
   BookOpen,
   TrendingUp,
+  Clock,
 } from "lucide-react";
 import {
   Sidebar,
@@ -61,6 +62,8 @@ const accountingItems = [
   { title: "Fixed Assets", url: "/assets", icon: Package },
   { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
   { title: "Financial Reports", url: "/financial-reports", icon: TrendingUp },
+  { title: "AR Aging Report", url: "/ar-aging", icon: Clock },
+  { title: "AP Aging Report", url: "/ap-aging", icon: Clock },
 ];
 
 const otherItems = [

@@ -37,6 +37,8 @@ import Assets from "@/pages/assets";
 import PurchaseOrders from "@/pages/purchase-orders";
 import BankReconciliations from "@/pages/bank-reconciliations";
 import FinancialReports from "@/pages/financial-reports";
+import ARAgingReport from "@/pages/ar-aging";
+import APAgingReport from "@/pages/ap-aging";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -70,6 +72,8 @@ function Router() {
           <Route path="/documents" component={Documents} />
           <Route path="/reports" component={Reports} />
           <Route path="/financial-reports" component={FinancialReports} />
+          <Route path="/ar-aging" component={ARAgingReport} />
+          <Route path="/ap-aging" component={APAgingReport} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/settings" component={Settings} />
         </>
