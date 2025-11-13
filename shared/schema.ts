@@ -137,7 +137,19 @@ export const insertCustomerSchema = createInsertSchema(customers, {
 
 export const updateCustomerSchema = insertCustomerSchema.omit({ tenantId: true }).partial();
 
+// Client-side form schema (no tenantId, harmonized with update schema)
+export const customerFormSchema = insertCustomerSchema
+  .omit({ tenantId: true })
+  .extend({
+    // Explicitly make all fields optional to match PATCH behavior
+    // while still validating structure when present
+    billingAddress: addressSchema.optional(),
+    shippingAddress: addressSchema.optional(),
+    contactPersons: z.array(contactPersonSchema).optional(),
+  });
+
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
+export type CustomerFormValues = z.infer<typeof customerFormSchema>;
 export type Customer = typeof customers.$inferSelect;
 
 // Vendors
