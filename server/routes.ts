@@ -7,6 +7,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
+import googleDriveRoutes from "./google-drive-routes";
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -91,6 +92,9 @@ async function verifyTenantAccess(req: any, res: any, next: any) {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
+
+  // Google Drive routes (no auth required for now)
+  app.use(googleDriveRoutes);
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
