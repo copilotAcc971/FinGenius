@@ -601,12 +601,13 @@ export class DatabaseStorage implements IStorage {
 
   async getNextAccountNumber(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence
+      // Get or create sequence with row lock to prevent race conditions
       let [sequence] = await tx
         .select()
         .from(accountSequences)
         .where(eq(accountSequences.tenantId, tenantId))
-        .limit(1);
+        .limit(1)
+        .forUpdate();
       
       if (!sequence) {
         // Create initial sequence
@@ -1445,7 +1446,7 @@ export class DatabaseStorage implements IStorage {
           total: total.toFixed(2),
           updatedAt: new Date() 
         })
-        .where(eq(purchaseOrders.id, id))
+        .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.tenantId, tenantId)))
         .returning();
       
       if (!updatedPO) {
@@ -1484,17 +1485,18 @@ export class DatabaseStorage implements IStorage {
     await db
       .update(purchaseOrders)
       .set({ deletedAt: new Date() })
-      .where(eq(purchaseOrders.id, id));
+      .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.tenantId, tenantId)));
   }
 
   async getNextPurchaseOrderNumber(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence for this tenant
+      // Get or create sequence for this tenant with row lock to prevent race conditions
       let [sequence] = await tx
         .select()
         .from(purchaseOrderSequences)
         .where(eq(purchaseOrderSequences.tenantId, tenantId))
-        .limit(1);
+        .limit(1)
+        .forUpdate();
 
       if (!sequence) {
         // Create new sequence starting at 1
@@ -3557,7 +3559,7 @@ export class DatabaseStorage implements IStorage {
           tenantId: existingEntry.tenantId, // FORCE existing tenantId
           updatedAt: new Date(),
         })
-        .where(eq(journalEntries.id, id))
+        .where(and(eq(journalEntries.id, id), eq(journalEntries.tenantId, tenantId)))
         .returning();
 
       if (!updatedEntry) {
@@ -3613,18 +3615,19 @@ export class DatabaseStorage implements IStorage {
       // Delete entry
       await tx
         .delete(journalEntries)
-        .where(eq(journalEntries.id, id));
+        .where(and(eq(journalEntries.id, id), eq(journalEntries.tenantId, tenantId)));
     });
   }
 
   async getNextJournalEntryNumber(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence record
+      // Get or create sequence record with row lock to prevent race conditions
       let [sequence] = await tx
         .select()
         .from(journalEntrySequences)
         .where(eq(journalEntrySequences.tenantId, tenantId))
-        .limit(1);
+        .limit(1)
+        .forUpdate();
 
       if (!sequence) {
         // Create initial sequence
@@ -3748,18 +3751,19 @@ export class DatabaseStorage implements IStorage {
       // Delete asset
       await tx
         .delete(assets)
-        .where(eq(assets.id, id));
+        .where(and(eq(assets.id, id), eq(assets.tenantId, tenantId)));
     });
   }
 
   async getNextAssetNumber(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence record
+      // Get or create sequence record with row lock to prevent race conditions
       let [sequence] = await tx
         .select()
         .from(assetSequences)
         .where(eq(assetSequences.tenantId, tenantId))
-        .limit(1);
+        .limit(1)
+        .forUpdate();
 
       if (!sequence) {
         // Create initial sequence
@@ -3925,7 +3929,7 @@ export class DatabaseStorage implements IStorage {
           difference, // SERVER-CALCULATED
           updatedAt: new Date(),
         })
-        .where(eq(bankReconciliations.id, id))
+        .where(and(eq(bankReconciliations.id, id), eq(bankReconciliations.tenantId, tenantId)))
         .returning();
 
       if (!updatedReconciliation) {
@@ -3966,7 +3970,7 @@ export class DatabaseStorage implements IStorage {
       // Delete reconciliation
       await tx
         .delete(bankReconciliations)
-        .where(eq(bankReconciliations.id, id));
+        .where(and(eq(bankReconciliations.id, id), eq(bankReconciliations.tenantId, tenantId)));
     });
   }
 

@@ -14,6 +14,8 @@ import {
   Upload,
   RefreshCw,
   Wallet,
+  BookOpen,
+  TrendingUp,
 } from "lucide-react";
 import {
   Sidebar,
@@ -42,14 +44,23 @@ const salesItems = [
 ];
 
 const purchasesItems = [
+  { title: "Purchase Orders", url: "/purchase-orders", icon: ShoppingCart },
   { title: "Bills", url: "/bills", icon: Receipt },
   { title: "Vendors", url: "/vendors", icon: Building2 },
-  { title: "Expenses", url: "/expenses", icon: ShoppingCart },
+  { title: "Expenses", url: "/expenses", icon: FileText },
 ];
 
 const paymentsItems = [
   { title: "Vendor Payments", url: "/payments", icon: CreditCard },
   { title: "Customer Payments", url: "/customer-payments", icon: DollarSign },
+];
+
+const accountingItems = [
+  { title: "Chart of Accounts", url: "/accounts", icon: BookOpen },
+  { title: "Journal Entries", url: "/journal-entries", icon: FileText },
+  { title: "Fixed Assets", url: "/assets", icon: Package },
+  { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
+  { title: "Financial Reports", url: "/financial-reports", icon: TrendingUp },
 ];
 
 const otherItems = [
@@ -130,6 +141,24 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {paymentsItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={location === item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
+                    <Link href={item.url}>
+                      <item.icon className="h-5 w-5" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Accounting</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {accountingItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={location === item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
                     <Link href={item.url}>

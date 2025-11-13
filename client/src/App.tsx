@@ -17,6 +17,7 @@ import Customers from "@/pages/customers";
 import Vendors from "@/pages/vendors";
 import Items from "@/pages/items";
 import Taxes from "@/pages/taxes";
+import Accounts from "@/pages/accounts";
 import Invoices from "@/pages/invoices";
 import Quotes from "@/pages/quotes";
 import SalesOrders from "@/pages/sales-orders";
@@ -31,6 +32,11 @@ import Documents from "@/pages/documents";
 import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
 import CompanyProfile from "@/pages/company-profile";
+import JournalEntries from "@/pages/journal-entries";
+import Assets from "@/pages/assets";
+import PurchaseOrders from "@/pages/purchase-orders";
+import BankReconciliations from "@/pages/bank-reconciliations";
+import FinancialReports from "@/pages/financial-reports";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -46,6 +52,10 @@ function Router() {
           <Route path="/vendors" component={Vendors} />
           <Route path="/items" component={Items} />
           <Route path="/taxes" component={Taxes} />
+          <Route path="/accounts" component={Accounts} />
+          <Route path="/journal-entries" component={JournalEntries} />
+          <Route path="/assets" component={Assets} />
+          <Route path="/bank-reconciliations" component={BankReconciliations} />
           <Route path="/invoices" component={Invoices} />
           <Route path="/quotes" component={Quotes} />
           <Route path="/sales-orders" component={SalesOrders} />
@@ -53,11 +63,13 @@ function Router() {
           <Route path="/recurring-invoices" component={RecurringInvoices} />
           <Route path="/retainer-invoices" component={RetainerInvoices} />
           <Route path="/bills" component={Bills} />
+          <Route path="/purchase-orders" component={PurchaseOrders} />
           <Route path="/expenses" component={Expenses} />
           <Route path="/payments" component={Payments} />
           <Route path="/customer-payments" component={CustomerPayments} />
           <Route path="/documents" component={Documents} />
           <Route path="/reports" component={Reports} />
+          <Route path="/financial-reports" component={FinancialReports} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/settings" component={Settings} />
         </>
