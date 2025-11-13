@@ -48,7 +48,7 @@ function Router() {
   );
 }
 
-function App() {
+function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
 
   const sidebarStyle = {
@@ -58,43 +58,47 @@ function App() {
 
   if (isLoading || !isAuthenticated) {
     return (
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </QueryClientProvider>
+      <>
+        <Toaster />
+        <Router />
+      </>
     );
   }
 
   return (
+    <>
+      <SidebarProvider style={sidebarStyle as React.CSSProperties}>
+        <div className="flex h-screen w-full">
+          <AppSidebar />
+          <div className="flex flex-col flex-1 overflow-hidden">
+            <header className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background">
+              <div className="flex items-center gap-4">
+                <SidebarTrigger data-testid="button-sidebar-toggle" />
+                <WorkspaceSwitcher />
+              </div>
+              <div className="flex items-center gap-4">
+                <UserMenu />
+              </div>
+            </header>
+            <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
+              <div className="mx-auto max-w-7xl">
+                <Router />
+              </div>
+            </main>
+          </div>
+        </div>
+      </SidebarProvider>
+      <Toaster />
+    </>
+  );
+}
+
+export default function App() {
+  return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <SidebarProvider style={sidebarStyle as React.CSSProperties}>
-          <div className="flex h-screen w-full">
-            <AppSidebar />
-            <div className="flex flex-col flex-1 overflow-hidden">
-              <header className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background">
-                <div className="flex items-center gap-4">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
-                  <WorkspaceSwitcher />
-                </div>
-                <div className="flex items-center gap-4">
-                  <UserMenu />
-                </div>
-              </header>
-              <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
-                <div className="mx-auto max-w-7xl">
-                  <Router />
-                </div>
-              </main>
-            </div>
-          </div>
-        </SidebarProvider>
-        <Toaster />
+        <AppContent />
       </TooltipProvider>
     </QueryClientProvider>
   );
 }
-
-export default App;

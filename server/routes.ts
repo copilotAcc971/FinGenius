@@ -98,8 +98,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/tenants/:id', isAuthenticated, async (req: any, res) => {
     try {
       const { id } = req.params;
-      const tenant = await storage.updateTenant(id, req.body);
-      res.json(tenant);
+      const userId = req.user.claims.sub;
+      
+      // Storage layer will verify ownership
+      const updated = await storage.updateTenant(id, userId, req.body);
+      res.json(updated);
     } catch (error: any) {
       console.error("Error updating tenant:", error);
       res.status(400).json({ message: error.message || "Failed to update tenant" });
@@ -132,8 +135,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/customers/:id', isAuthenticated, async (req: any, res) => {
     try {
       const { id } = req.params;
-      const customer = await storage.updateCustomer(id, req.body);
-      res.json(customer);
+      const userId = req.user.claims.sub;
+      
+      // Fetch the customer to get its tenantId
+      const customer = await storage.getCustomer(id);
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+      
+      // Verify user owns the tenant this customer belongs to
+      const tenant = await storage.getTenant(customer.tenantId);
+      if (!tenant || tenant.ownerId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      // Now perform the update
+      const updated = await storage.updateCustomer(id, customer.tenantId, req.body);
+      res.json(updated);
     } catch (error: any) {
       console.error("Error updating customer:", error);
       res.status(400).json({ message: error.message || "Failed to update customer" });
@@ -143,7 +161,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/customers/:id', isAuthenticated, async (req: any, res) => {
     try {
       const { id } = req.params;
-      await storage.deleteCustomer(id);
+      const userId = req.user.claims.sub;
+      
+      // Fetch the customer to get its tenantId
+      const customer = await storage.getCustomer(id);
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+      
+      // Verify user owns the tenant this customer belongs to
+      const tenant = await storage.getTenant(customer.tenantId);
+      if (!tenant || tenant.ownerId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      // Now perform the delete
+      await storage.deleteCustomer(id, customer.tenantId);
       res.json({ message: "Customer deleted successfully" });
     } catch (error: any) {
       console.error("Error deleting customer:", error);
@@ -176,8 +209,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/vendors/:id', isAuthenticated, async (req: any, res) => {
     try {
       const { id } = req.params;
-      const vendor = await storage.updateVendor(id, req.body);
-      res.json(vendor);
+      const userId = req.user.claims.sub;
+      
+      // Fetch the vendor to get its tenantId
+      const vendor = await storage.getVendor(id);
+      if (!vendor) {
+        return res.status(404).json({ message: "Vendor not found" });
+      }
+      
+      // Verify user owns the tenant this vendor belongs to
+      const tenant = await storage.getTenant(vendor.tenantId);
+      if (!tenant || tenant.ownerId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      // Now perform the update
+      const updated = await storage.updateVendor(id, vendor.tenantId, req.body);
+      res.json(updated);
     } catch (error: any) {
       console.error("Error updating vendor:", error);
       res.status(400).json({ message: error.message || "Failed to update vendor" });
@@ -187,7 +235,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/vendors/:id', isAuthenticated, async (req: any, res) => {
     try {
       const { id } = req.params;
-      await storage.deleteVendor(id);
+      const userId = req.user.claims.sub;
+      
+      // Fetch the vendor to get its tenantId
+      const vendor = await storage.getVendor(id);
+      if (!vendor) {
+        return res.status(404).json({ message: "Vendor not found" });
+      }
+      
+      // Verify user owns the tenant this vendor belongs to
+      const tenant = await storage.getTenant(vendor.tenantId);
+      if (!tenant || tenant.ownerId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      // Now perform the delete
+      await storage.deleteVendor(id, vendor.tenantId);
       res.json({ message: "Vendor deleted successfully" });
     } catch (error: any) {
       console.error("Error deleting vendor:", error);
