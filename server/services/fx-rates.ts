@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios';
 import { storage } from '../storage';
 import type { InsertExchangeRate } from '@shared/schema';
 import * as xml2js from 'xml2js';
+import { extractCBUAERates } from './advanced-ocr';
 
 const TIMEOUT_MS = 10000;
 const MAX_RETRIES = 3;
@@ -109,14 +110,15 @@ function validateRate(rate: number, previousRate?: number): { valid: boolean; re
  * Set environment variable CBUAE_API_SOURCE to:
  * - 'github' (default): Use GitHub mirror
  * - 'fluentax': Use Fluentax commercial API (requires FLUENTAX_API_KEY)
+ * - 'ocr': Use embedded Advanced OCR processor for direct website extraction
+ * - 'both': Fetch from both GitHub and OCR for comparison/redundancy
  * - 'manual': Skip automated fetching, rely on manual rate entry
  * 
- * Note: Direct website scraping is NOT recommended due to fragility and potential
- * terms of service violations. OCR-based extraction is NOT suitable for automated
- * daily financial data updates.
+ * Note: OCR extraction directly scrapes the CBUAE website and may be fragile.
+ * Recommended for development/testing. Use 'github' or 'fluentax' for production.
  */
 // Environment Configuration for UAE Central Bank FX Rates:
-// CBUAE_API_SOURCE: 'github' (default) | 'fluentax' | 'manual'
+// CBUAE_API_SOURCE: 'github' (default) | 'fluentax' | 'ocr' | 'both' | 'manual'
 // FLUENTAX_API_KEY: Required if CBUAE_API_SOURCE=fluentax
 async function fetchUAECentralBankRates(): Promise<FetchResult> {
   const source = process.env.CBUAE_API_SOURCE || 'github';
@@ -126,6 +128,28 @@ async function fetchUAECentralBankRates(): Promise<FetchResult> {
       return fetchUAEFromGitHub();
     case 'fluentax':
       return fetchUAEFromFluentax();
+    case 'ocr':
+      return fetchUAEFromOCR();
+    case 'both': {
+      // Fetch from both GitHub and OCR for comparison/redundancy
+      const [githubResult, ocrResult] = await Promise.all([
+        fetchUAEFromGitHub(),
+        fetchUAEFromOCR()
+      ]);
+      
+      // Combine rates from both sources
+      const combinedRates = [...githubResult.rates, ...ocrResult.rates];
+      const allSuccess = githubResult.success && ocrResult.success;
+      
+      console.log(`Fetched from both sources - GitHub: ${githubResult.rates.length} rates, OCR: ${ocrResult.rates.length} rates`);
+      
+      return {
+        source: 'uae_central_bank_both',
+        rates: combinedRates,
+        success: allSuccess,
+        error: allSuccess ? undefined : `GitHub: ${githubResult.error || 'ok'}, OCR: ${ocrResult.error || 'ok'}`
+      };
+    }
     case 'manual':
       console.log('CBUAE rates: manual mode enabled, skipping automated fetch');
       return { source: 'uae_central_bank', rates: [], success: true };
@@ -249,6 +273,65 @@ async function fetchUAEFromFluentax(): Promise<FetchResult> {
   const errorMsg = 'Fluentax integration not yet implemented - contact support to enable this feature';
   console.warn(errorMsg);
   return { source: 'uae_central_bank_fluentax', rates: [], success: false, error: errorMsg };
+}
+
+/**
+ * Fetch UAE Central Bank rates using embedded Advanced OCR processor
+ * Uses the Advanced OCR processor downloaded from Google Drive and embedded in the application
+ * This provides direct extraction from the CBUAE website as an alternative to the GitHub mirror
+ */
+async function fetchUAEFromOCR(): Promise<FetchResult> {
+  try {
+    console.log('Extracting CBUAE rates using embedded Advanced OCR processor...');
+    
+    // Use the embedded OCR processor to extract rates
+    const ocrRates = await extractCBUAERates();
+    
+    if (!ocrRates || ocrRates.length === 0) {
+      throw new Error('No rates extracted by OCR processor');
+    }
+
+    const rates: ExchangeRateData[] = [];
+    const effectiveDate = new Date();
+    effectiveDate.setHours(18, 0, 0, 0); // CBUAE updates at 6 PM UAE time
+
+    // Convert OCR rates to ExchangeRateData format
+    for (const { currency, rate } of ocrRates) {
+      const rateValue = parseFloat(rate);
+      
+      if (isNaN(rateValue) || rateValue <= 0) {
+        console.warn(`Invalid rate from OCR for ${currency}: ${rate}`);
+        continue;
+      }
+
+      // AED to other currency
+      rates.push({
+        fromCurrency: 'AED',
+        toCurrency: currency,
+        rate: rateValue.toString(),
+        effectiveDate,
+      });
+
+      // Inverse rate (other currency to AED)
+      rates.push({
+        fromCurrency: currency,
+        toCurrency: 'AED',
+        rate: (1 / rateValue).toFixed(10),
+        effectiveDate,
+      });
+    }
+
+    if (rates.length === 0) {
+      throw new Error('No valid rates after OCR processing');
+    }
+
+    console.log(`Successfully extracted ${rates.length} UAE Central Bank exchange rates via OCR processor`);
+    return { source: 'uae_central_bank_ocr', rates, success: true };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error('Error extracting UAE Central Bank rates via OCR:', errorMsg);
+    return { source: 'uae_central_bank_ocr', rates: [], success: false, error: errorMsg };
+  }
 }
 
 /**
