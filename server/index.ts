@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { startFXRatesUpdateJob } from "./jobs/fx-rates-update";
 
 const app = express();
 
@@ -77,5 +78,8 @@ app.use((req, res, next) => {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
+    
+    // Initialize FX rates scheduled job
+    startFXRatesUpdateJob();
   });
 })();

@@ -52,3 +52,13 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
     - **Bank Connections UI:** Full connection management (connect, view, refresh, disconnect)
     - **Security:** Multi-tenant isolation, signed state parameters, entity validation
     - **Future Capabilities:** Ready for autonomous reconciliation, AP/AR command center, cash flow forecasting, KYC/KYB verification
+- **UAE Central Bank FX Rates (Critical Limitation):**
+    - **Official API Status:** CBUAE does NOT provide a public API
+    - **Current Implementation:** GitHub mirror (https://github.com/paulbares/centralbank-ae-fx-rates)
+        - Daily scraping of official CBUAE website
+        - Structured JSON format
+        - Most reliable free public source
+        - Fallback to aggregator on failure
+    - **Production Recommendation:** Upgrade to Fluentax commercial API (https://www.fluentax.com/products/exchange-rates-api/banks/AECB) for SLA guarantees
+    - **Configuration:** Set CBUAE_API_SOURCE environment variable ('github', 'fluentax', 'manual')
+    - **Note:** OCR-based extraction rejected as unsuitable for automated financial data updates

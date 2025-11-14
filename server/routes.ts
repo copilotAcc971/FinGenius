@@ -17,6 +17,13 @@ import { randomBytes } from 'crypto';
 import { RBACService, getAllPermissions } from './rbac/service';
 import { loadAuthContext, requirePermission, requireAnyPermission, requireRole } from './middleware/rbac';
 import { initializeRBAC, seedPermissions, seedRolesForTenant } from './scripts/seed-rbac';
+import { 
+  fetchExchangeRates, 
+  createManualExchangeRate, 
+  getLatestRate,
+  updateExchangeRatesForTenant
+} from './services/fx-rates';
+import { triggerManualFXRatesUpdate } from './jobs/fx-rates-update';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -3514,6 +3521,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('[Open Banking] Get capabilities error:', error);
       res.status(500).json({ 
         message: "Failed to get provider capabilities",
+        error: error.message 
+      });
+    }
+  });
+
+  // ===== EXCHANGE RATE ROUTES =====
+
+  // GET /api/exchange-rates - List all exchange rates for tenant
+  app.get('/api/exchange-rates', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const rates = await storage.getExchangeRates(req.tenantId);
+      res.json(rates);
+    } catch (error) {
+      console.error("Error fetching exchange rates:", error);
+      res.status(500).json({ message: "Failed to fetch exchange rates" });
+    }
+  });
+
+  // GET /api/exchange-rates/latest/:from/:to - Get latest exchange rate
+  app.get('/api/exchange-rates/latest/:from/:to', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const { from, to } = req.params;
+      const rate = await getLatestRate(req.tenantId, from, to);
+      
+      if (rate === null) {
+        return res.status(404).json({ 
+          message: `No exchange rate found for ${from} to ${to}` 
+        });
+      }
+      
+      res.json({ 
+        fromCurrency: from, 
+        toCurrency: to, 
+        rate: rate.toString() 
+      });
+    } catch (error) {
+      console.error("Error fetching latest exchange rate:", error);
+      res.status(500).json({ message: "Failed to fetch exchange rate" });
+    }
+  });
+
+  // POST /api/exchange-rates/fetch - Manually trigger rate fetch for tenant
+  app.post('/api/exchange-rates/fetch', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const { source } = req.body;
+      const validSources = ['uae_central_bank', 'ecb', 'fed', 'boe', 'all'];
+      const selectedSource = source && validSources.includes(source) ? source : 'all';
+      
+      console.log(`Manually fetching exchange rates for tenant ${req.tenantId} from ${selectedSource}...`);
+      
+      // Fetch from specific source or all sources using official APIs
+      const results = await fetchExchangeRates(req.tenantId, selectedSource as any);
+      
+      // Check results
+      const successful = results.filter(r => r.success);
+      const failed = results.filter(r => !r.success);
+      
+      res.json({ 
+        success: successful.length > 0, 
+        message: `Exchange rates updated: ${successful.length} source(s) successful, ${failed.length} failed`,
+        results: results.map(r => ({
+          source: r.source,
+          success: r.success,
+          rateCount: r.rates.length,
+          error: r.error
+        }))
+      });
+    } catch (error: any) {
+      console.error("Error fetching exchange rates:", error);
+      res.status(500).json({ 
+        message: "Failed to fetch exchange rates",
+        error: error.message 
+      });
+    }
+  });
+
+  // POST /api/exchange-rates/manual - Manually add/update an exchange rate
+  app.post('/api/exchange-rates/manual', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { fromCurrency, toCurrency, rate, effectiveDate } = req.body;
+      
+      if (!fromCurrency || !toCurrency || !rate) {
+        return res.status(400).json({ 
+          message: "fromCurrency, toCurrency, and rate are required" 
+        });
+      }
+
+      const effectiveDateParsed = effectiveDate ? new Date(effectiveDate) : new Date();
+      
+      await createManualExchangeRate(
+        req.tenantId,
+        fromCurrency,
+        toCurrency,
+        rate.toString(),
+        effectiveDateParsed,
+        userId
+      );
+      
+      res.json({ 
+        success: true, 
+        message: `Manual exchange rate created: ${fromCurrency} to ${toCurrency}` 
+      });
+    } catch (error: any) {
+      console.error("Error creating manual exchange rate:", error);
+      res.status(400).json({ 
+        message: error.message || "Failed to create manual exchange rate" 
+      });
+    }
+  });
+
+  // POST /api/exchange-rates/fetch-all - Trigger manual fetch for all tenants (admin only)
+  app.post('/api/exchange-rates/fetch-all', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      
+      // Only allow if user is an owner of at least one tenant
+      const userTenants = await storage.getTenantsByUserId(userId);
+      const isOwner = userTenants.some((t: any) => t.ownerId === userId);
+      
+      if (!isOwner) {
+        return res.status(403).json({ 
+          message: "Only tenant owners can trigger global exchange rate fetch" 
+        });
+      }
+      
+      console.log('Manually triggering global FX rates update for all tenants...');
+      
+      const result = await triggerManualFXRatesUpdate();
+      
+      res.json({
+        success: result.success,
+        tenantsUpdated: result.tenantsUpdated,
+        errors: result.errors,
+        message: `Updated exchange rates for ${result.tenantsUpdated} tenants`
+      });
+    } catch (error: any) {
+      console.error("Error triggering global exchange rate fetch:", error);
+      res.status(500).json({ 
+        message: "Failed to trigger global exchange rate fetch",
         error: error.message 
       });
     }

@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { storage } from '../storage';
 import type { InsertExchangeRate } from '@shared/schema';
+import * as xml2js from 'xml2js';
 
 const TIMEOUT_MS = 10000;
 const MAX_RETRIES = 3;
@@ -64,40 +65,144 @@ function validateRate(rate: number, previousRate?: number): { valid: boolean; re
 }
 
 /**
- * Fetch exchange rates from UAE Central Bank
- * Note: UAE Central Bank does not have a public API as of 2024.
- * Using currencyapi.com as a reliable alternative for UAE rates.
+ * UAE CENTRAL BANK (CBUAE) FX RATES INTEGRATION
+ * 
+ * CRITICAL LIMITATION: The Central Bank of UAE does NOT provide an official public API.
+ * 
+ * Official Data Source: https://www.centralbank.ae/en/forex-eibor/exchange-rates/
+ * - Update Frequency: Daily at 6 PM UAE time (Monday-Friday)
+ * - Coverage: 70+ currencies vs AED (USD, EUR, GBP, SAR, QAR, KWD, BHD, OMR, JPY, CHF, CAD, AUD, etc.)
+ * - Data Provider: Thomson Reuters rates converted to AED by CBUAE
+ * - Format: HTML table only (no API, no structured data endpoint)
+ * 
+ * CURRENT IMPLEMENTATION:
+ * Uses community-maintained GitHub mirror (https://github.com/paulbares/centralbank-ae-fx-rates)
+ * - Daily scraping of official CBUAE website
+ * - Provides structured JSON format
+ * - Most reliable free public source available
+ * - Has fallback to aggregator if mirror fails
+ * 
+ * PRODUCTION RECOMMENDATIONS:
+ * For production environments requiring contractual SLAs and guaranteed uptime, consider:
+ * 
+ * 1. **Fluentax Exchange Rates API** (Recommended for Production)
+ *    - URL: https://www.fluentax.com/products/exchange-rates-api/banks/AECB
+ *    - Official CBUAE data via paid commercial API
+ *    - Daily updates at 18:05 Asia/Dubai timezone
+ *    - Supported service with SLA guarantees
+ *    - Configuration: Set CBUAE_API_SOURCE=fluentax and FLUENTAX_API_KEY
+ * 
+ * 2. **Thomson Reuters/Refinitiv** (Enterprise)
+ *    - Direct access to the source data provider used by CBUAE
+ *    - Real-time rates with enterprise-grade reliability
+ *    - Requires enterprise license agreement
+ * 
+ * 3. **Direct CBUAE Licensing**
+ *    - Contact CBUAE directly for official data licensing agreement
+ *    - May provide sanctioned API access for licensed partners
+ * 
+ * 4. **UAE Government Data Portal** (Bayanat.ae)
+ *    - Official UAE open data portal: https://bayanat.ae
+ *    - May provide structured access to CBUAE data
+ * 
+ * CONFIGURATION:
+ * Set environment variable CBUAE_API_SOURCE to:
+ * - 'github' (default): Use GitHub mirror
+ * - 'fluentax': Use Fluentax commercial API (requires FLUENTAX_API_KEY)
+ * - 'manual': Skip automated fetching, rely on manual rate entry
+ * 
+ * Note: Direct website scraping is NOT recommended due to fragility and potential
+ * terms of service violations. OCR-based extraction is NOT suitable for automated
+ * daily financial data updates.
  */
+// Environment Configuration for UAE Central Bank FX Rates:
+// CBUAE_API_SOURCE: 'github' (default) | 'fluentax' | 'manual'
+// FLUENTAX_API_KEY: Required if CBUAE_API_SOURCE=fluentax
 async function fetchUAECentralBankRates(): Promise<FetchResult> {
-  try {
-    console.log('Fetching UAE rates from CurrencyAPI...');
-    
-    // CurrencyAPI.com provides reliable Middle East rates
-    // In production, you would use: https://api.currencyapi.com/v3/latest
-    // For now, we'll use exchangerate-api.com which is free and reliable
-    const response = await retryWithBackoff(async () => {
-      return await axios.get('https://api.exchangerate-api.com/v4/latest/AED', {
-        timeout: TIMEOUT_MS,
-      });
-    });
+  const source = process.env.CBUAE_API_SOURCE || 'github';
+  
+  switch (source) {
+    case 'github':
+      return fetchUAEFromGitHub();
+    case 'fluentax':
+      return fetchUAEFromFluentax();
+    case 'manual':
+      console.log('CBUAE rates: manual mode enabled, skipping automated fetch');
+      return { source: 'uae_central_bank', rates: [], success: true };
+    default:
+      console.warn(`Unknown CBUAE_API_SOURCE: ${source}, using GitHub mirror`);
+      return fetchUAEFromGitHub();
+  }
+}
 
-    if (!response.data || !response.data.rates) {
-      throw new Error('Invalid response from exchange rate API');
+/**
+ * Fetch UAE Central Bank rates from GitHub mirror
+ * Uses community-maintained repository that mirrors official CBUAE daily rates
+ * Source: https://github.com/paulbares/centralbank-ae-fx-rates
+ */
+async function fetchUAEFromGitHub(): Promise<FetchResult> {
+  try {
+    console.log('Fetching UAE Central Bank rates from GitHub mirror...');
+    
+    // Use current date to fetch today's rates
+    const now = new Date();
+    const year = now.getFullYear();
+    const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    // Try today's rates first
+    const url = `https://raw.githubusercontent.com/paulbares/centralbank-ae-fx-rates/main/rates/${year}/${dateStr}.json`;
+    
+    let response;
+    try {
+      response = await retryWithBackoff(async () => {
+        return await axios.get(url, {
+          timeout: TIMEOUT_MS,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; accounting-app/1.0)'
+          }
+        });
+      });
+    } catch (error) {
+      // If today's rates not available yet, try yesterday
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const yesterdayYear = yesterday.getFullYear();
+      const fallbackUrl = `https://raw.githubusercontent.com/paulbares/centralbank-ae-fx-rates/main/rates/${yesterdayYear}/${yesterdayStr}.json`;
+      
+      console.log('Today\'s rates not available, trying yesterday...');
+      response = await retryWithBackoff(async () => {
+        return await axios.get(fallbackUrl, {
+          timeout: TIMEOUT_MS,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; accounting-app/1.0)'
+          }
+        });
+      });
     }
 
+    if (!response.data) {
+      throw new Error('Invalid response from UAE Central Bank GitHub mirror');
+    }
+
+    // Response is a JSON object with currency codes as keys and rates as values
+    // Example: { "USD": 3.6725, "EUR": 3.9123, ... }
+    const ratesData = response.data;
     const rates: ExchangeRateData[] = [];
     const effectiveDate = new Date();
 
     // Convert AED-based rates to bidirectional pairs
-    const baseCurrencies = ['USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'];
+    const targetCurrencies = ['USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR', 'JPY', 'CHF', 'CAD', 'AUD'];
     
-    for (const currency of baseCurrencies) {
-      if (response.data.rates[currency]) {
+    for (const currency of targetCurrencies) {
+      if (ratesData[currency]) {
+        const rateValue = parseFloat(ratesData[currency]);
+        
         // AED to other currency
         rates.push({
           fromCurrency: 'AED',
           toCurrency: currency,
-          rate: response.data.rates[currency].toString(),
+          rate: rateValue.toString(),
           effectiveDate,
         });
 
@@ -105,155 +210,275 @@ async function fetchUAECentralBankRates(): Promise<FetchResult> {
         rates.push({
           fromCurrency: currency,
           toCurrency: 'AED',
-          rate: (1 / response.data.rates[currency]).toString(),
+          rate: (1 / rateValue).toFixed(10),
           effectiveDate,
         });
       }
     }
 
-    console.log(`Successfully fetched ${rates.length} UAE exchange rates`);
+    console.log(`Successfully fetched ${rates.length} UAE Central Bank exchange rates from GitHub mirror`);
     return { source: 'uae_central_bank', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
-    console.error('Error fetching UAE Central Bank rates:', errorMsg);
+    console.error('Error fetching UAE Central Bank rates from GitHub mirror:', errorMsg);
     return { source: 'uae_central_bank', rates: [], success: false, error: errorMsg };
   }
 }
 
 /**
- * Fetch exchange rates from European Central Bank (ECB)
+ * Fetch UAE Central Bank rates from Fluentax commercial API
+ * Placeholder for future implementation when customer subscribes
+ * API Documentation: https://www.fluentax.com/products/exchange-rates-api/banks/AECB
+ */
+async function fetchUAEFromFluentax(): Promise<FetchResult> {
+  const apiKey = process.env.FLUENTAX_API_KEY;
+  
+  if (!apiKey) {
+    const errorMsg = 'FLUENTAX_API_KEY environment variable not configured';
+    console.error(errorMsg);
+    return { source: 'uae_central_bank_fluentax', rates: [], success: false, error: errorMsg };
+  }
+  
+  // TODO: Implement Fluentax API integration when customer subscribes
+  // Expected implementation:
+  // 1. Make authenticated request to Fluentax API endpoint
+  // 2. Parse response data (check API docs for exact format)
+  // 3. Convert to ExchangeRateData[] format
+  // 4. Return FetchResult with rates
+  
+  const errorMsg = 'Fluentax integration not yet implemented - contact support to enable this feature';
+  console.warn(errorMsg);
+  return { source: 'uae_central_bank_fluentax', rates: [], success: false, error: errorMsg };
+}
+
+/**
+ * Fetch exchange rates from European Central Bank (ECB) - OFFICIAL XML API
+ * Uses: https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml
  */
 async function fetchECBRates(): Promise<FetchResult> {
   try {
-    console.log('Fetching ECB rates...');
+    console.log('Fetching ECB rates from official XML endpoint...');
     
     const response = await retryWithBackoff(async () => {
-      return await axios.get('https://api.exchangerate-api.com/v4/latest/EUR', {
+      return await axios.get('https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml', {
         timeout: TIMEOUT_MS,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; accounting-app/1.0)'
+        }
       });
     });
 
-    if (!response.data || !response.data.rates) {
-      throw new Error('Invalid response from ECB API');
+    if (!response.data) {
+      throw new Error('Invalid response from ECB XML API');
     }
+
+    // Parse XML using xml2js
+    const parser = new xml2js.Parser();
+    const result = await parser.parseStringPromise(response.data);
+
+    // ECB XML structure:
+    // <gesmes:Envelope>
+    //   <Cube>
+    //     <Cube time="2024-01-15">
+    //       <Cube currency="USD" rate="1.0123"/>
+    //       ...
+    //     </Cube>
+    //   </Cube>
+    // </gesmes:Envelope>
+
+    const cubes = result['gesmes:Envelope'].Cube[0].Cube[0].Cube;
+    const effectiveDateStr = result['gesmes:Envelope'].Cube[0].Cube[0].$.time;
+    const effectiveDate = new Date(effectiveDateStr);
 
     const rates: ExchangeRateData[] = [];
-    const effectiveDate = new Date();
 
-    // Major currencies against EUR
-    const currencies = ['USD', 'GBP', 'CHF', 'JPY', 'CAD', 'AUD', 'CNY', 'INR', 'AED'];
+    // ECB rates are EUR to other currencies
+    for (const cube of cubes) {
+      const currency = cube.$.currency;
+      const rate = cube.$.rate;
 
-    for (const currency of currencies) {
-      if (response.data.rates[currency]) {
-        // EUR to other currency
-        rates.push({
-          fromCurrency: 'EUR',
-          toCurrency: currency,
-          rate: response.data.rates[currency].toString(),
-          effectiveDate,
-        });
+      // EUR to other currency
+      rates.push({
+        fromCurrency: 'EUR',
+        toCurrency: currency,
+        rate: rate,
+        effectiveDate,
+      });
 
-        // Inverse rate
-        rates.push({
-          fromCurrency: currency,
-          toCurrency: 'EUR',
-          rate: (1 / response.data.rates[currency]).toString(),
-          effectiveDate,
-        });
-      }
+      // Inverse rate (other currency to EUR)
+      rates.push({
+        fromCurrency: currency,
+        toCurrency: 'EUR',
+        rate: (1 / parseFloat(rate)).toFixed(10),
+        effectiveDate,
+      });
     }
 
-    console.log(`Successfully fetched ${rates.length} ECB exchange rates`);
+    console.log(`Successfully fetched ${rates.length} ECB exchange rates from official source`);
     return { source: 'ecb', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
-    console.error('Error fetching ECB rates:', errorMsg);
+    console.error('Error fetching official ECB rates:', errorMsg);
     return { source: 'ecb', rates: [], success: false, error: errorMsg };
   }
 }
 
 /**
- * Fetch exchange rates from US Federal Reserve (FRED API)
+ * Fetch exchange rates from US Federal Reserve - OFFICIAL SOURCE
+ * Uses FRED (Federal Reserve Economic Data) CSV download
+ * Note: FRED API requires API key. Using direct CSV download as alternative.
  */
 async function fetchFedRates(): Promise<FetchResult> {
   try {
-    console.log('Fetching Federal Reserve rates...');
+    console.log('Fetching Federal Reserve rates from official FRED source...');
     
-    const response = await retryWithBackoff(async () => {
-      return await axios.get('https://api.exchangerate-api.com/v4/latest/USD', {
-        timeout: TIMEOUT_MS,
-      });
-    });
-
-    if (!response.data || !response.data.rates) {
-      throw new Error('Invalid response from Fed API');
-    }
-
     const rates: ExchangeRateData[] = [];
     const effectiveDate = new Date();
+    
+    // FRED series IDs for major currency pairs
+    // These are official H.10 Foreign Exchange Rates
+    const seriesIds = [
+      { id: 'DEXUSEU', from: 'USD', to: 'EUR' },     // US Dollars to Euro
+      { id: 'DEXUSUK', from: 'USD', to: 'GBP' },     // US Dollars to British Pound
+      { id: 'DEXJPUS', from: 'JPY', to: 'USD' },     // Japanese Yen to US Dollar
+      { id: 'DEXCAUS', from: 'CAD', to: 'USD' },     // Canadian Dollar to US Dollar
+      { id: 'DEXSZUS', from: 'CHF', to: 'USD' },     // Swiss Franc to US Dollar
+      { id: 'DEXUSAL', from: 'USD', to: 'AUD' },     // US Dollar to Australian Dollar
+    ];
 
-    // Major currencies against USD
-    const currencies = ['EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'INR', 'AED', 'SAR'];
-
-    for (const currency of currencies) {
-      if (response.data.rates[currency]) {
-        // USD to other currency
-        rates.push({
-          fromCurrency: 'USD',
-          toCurrency: currency,
-          rate: response.data.rates[currency].toString(),
-          effectiveDate,
+    // Fetch each series
+    for (const series of seriesIds) {
+      try {
+        const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${series.id}`;
+        const response = await axios.get(url, {
+          timeout: TIMEOUT_MS,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; accounting-app/1.0)'
+          }
         });
 
-        // Inverse rate
-        rates.push({
-          fromCurrency: currency,
-          toCurrency: 'USD',
-          rate: (1 / response.data.rates[currency]).toString(),
-          effectiveDate,
-        });
+        // Parse CSV (last line has the most recent rate)
+        const lines = response.data.trim().split('\n');
+        if (lines.length < 2) continue;
+        
+        const lastLine = lines[lines.length - 1];
+        const [dateStr, rateStr] = lastLine.split(',');
+        
+        if (rateStr && rateStr !== '.') {
+          const rate = parseFloat(rateStr);
+          
+          // Store rate as defined by FRED
+          rates.push({
+            fromCurrency: series.from,
+            toCurrency: series.to,
+            rate: rate.toString(),
+            effectiveDate: new Date(dateStr),
+          });
+
+          // Store inverse rate
+          rates.push({
+            fromCurrency: series.to,
+            toCurrency: series.from,
+            rate: (1 / rate).toFixed(10),
+            effectiveDate: new Date(dateStr),
+          });
+        }
+      } catch (seriesError) {
+        console.warn(`Failed to fetch FRED series ${series.id}:`, seriesError);
+        // Continue with other series
       }
     }
 
-    console.log(`Successfully fetched ${rates.length} Fed exchange rates`);
+    if (rates.length === 0) {
+      throw new Error('No Federal Reserve rates could be fetched');
+    }
+
+    console.log(`Successfully fetched ${rates.length} Federal Reserve exchange rates from official source`);
     return { source: 'fed', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
-    console.error('Error fetching Fed rates:', errorMsg);
+    console.error('Error fetching official Federal Reserve rates:', errorMsg);
     return { source: 'fed', rates: [], success: false, error: errorMsg };
   }
 }
 
 /**
- * Fetch exchange rates from Bank of England
+ * Fetch exchange rates from Bank of England - OFFICIAL API
+ * Uses BoE Statistical Database CSV API
  */
 async function fetchBOERates(): Promise<FetchResult> {
   try {
-    console.log('Fetching Bank of England rates...');
+    console.log('Fetching Bank of England rates from official API...');
     
+    const rates: ExchangeRateData[] = [];
+    
+    // BoE series codes for spot exchange rates
+    const seriesCodes = [
+      { code: 'XUDLUSS', currency: 'USD' },  // US Dollar spot
+      { code: 'XUDLERS', currency: 'EUR' },  // Euro spot
+      { code: 'XUDLJYS', currency: 'JPY' },  // Japanese Yen spot
+    ];
+
+    // Get current date range (last 7 days to ensure we get recent data)
+    const now = new Date();
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+
+    const params = {
+      SeriesCodes: seriesCodes.map(s => s.code).join(','),
+      CSVF: 'TT',
+      UsingCodes: 'Y',
+      VPD: 'Y',
+      DAT: 'RNG',
+      FD: weekAgo.getDate().toString(),
+      FM: weekAgo.toLocaleString('en-US', { month: 'short' }),
+      FY: weekAgo.getFullYear().toString(),
+      TD: now.getDate().toString(),
+      TM: now.toLocaleString('en-US', { month: 'short' }),
+      TY: now.getFullYear().toString(),
+    };
+
+    const url = 'https://www.bankofengland.co.uk/boeapps/database/fromshowcolumns.asp';
     const response = await retryWithBackoff(async () => {
-      return await axios.get('https://api.exchangerate-api.com/v4/latest/GBP', {
+      return await axios.get(url, {
+        params,
         timeout: TIMEOUT_MS,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; accounting-app/1.0)'
+        }
       });
     });
 
-    if (!response.data || !response.data.rates) {
-      throw new Error('Invalid response from BOE API');
+    if (!response.data) {
+      throw new Error('Invalid response from Bank of England API');
     }
 
-    const rates: ExchangeRateData[] = [];
-    const effectiveDate = new Date();
+    // Parse CSV response
+    const lines = response.data.trim().split('\n');
+    if (lines.length < 2) {
+      throw new Error('No data in Bank of England response');
+    }
 
-    // Major currencies against GBP
-    const currencies = ['USD', 'EUR', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'INR', 'AED'];
+    // Get the last line (most recent data)
+    const lastLine = lines[lines.length - 1];
+    const values = lastLine.split(',');
 
-    for (const currency of currencies) {
-      if (response.data.rates[currency]) {
-        // GBP to other currency
+    // First column is date, rest are rates for each series
+    const effectiveDate = new Date(values[0]);
+
+    // Process each series
+    for (let i = 0; i < seriesCodes.length; i++) {
+      const rateStr = values[i + 1];
+      if (rateStr && rateStr !== '' && !isNaN(parseFloat(rateStr))) {
+        const rate = parseFloat(rateStr);
+        const currency = seriesCodes[i].currency;
+
+        // BoE rates are in foreign currency per GBP
+        // USD per GBP = 1.25 means 1 GBP = 1.25 USD
         rates.push({
           fromCurrency: 'GBP',
           toCurrency: currency,
-          rate: response.data.rates[currency].toString(),
+          rate: rate.toString(),
           effectiveDate,
         });
 
@@ -261,18 +486,77 @@ async function fetchBOERates(): Promise<FetchResult> {
         rates.push({
           fromCurrency: currency,
           toCurrency: 'GBP',
+          rate: (1 / rate).toFixed(10),
+          effectiveDate,
+        });
+      }
+    }
+
+    if (rates.length === 0) {
+      throw new Error('No valid rates found in Bank of England response');
+    }
+
+    console.log(`Successfully fetched ${rates.length} Bank of England exchange rates from official source`);
+    return { source: 'boe', rates, success: true };
+  } catch (error) {
+    const errorMsg = error instanceof AxiosError ? error.message : String(error);
+    console.error('Error fetching official Bank of England rates:', errorMsg);
+    return { source: 'boe', rates: [], success: false, error: errorMsg };
+  }
+}
+
+/**
+ * Fallback aggregator using exchangerate-api.com
+ * Only used when official Central Bank APIs fail
+ */
+async function fetchFromAggregator(baseCurrency: string, sourceName: string): Promise<FetchResult> {
+  try {
+    console.log(`Fetching rates from fallback aggregator (${baseCurrency})...`);
+    
+    const response = await retryWithBackoff(async () => {
+      return await axios.get(`https://api.exchangerate-api.com/v4/latest/${baseCurrency}`, {
+        timeout: TIMEOUT_MS,
+      });
+    });
+
+    if (!response.data || !response.data.rates) {
+      throw new Error('Invalid response from fallback aggregator');
+    }
+
+    const rates: ExchangeRateData[] = [];
+    const effectiveDate = new Date();
+
+    // Convert base currency rates to bidirectional pairs
+    const targetCurrencies = ['USD', 'EUR', 'GBP', 'AED', 'SAR', 'JPY', 'CHF', 'CAD', 'AUD', 'INR', 'CNY'];
+    
+    for (const currency of targetCurrencies) {
+      if (currency === baseCurrency) continue;
+      
+      if (response.data.rates[currency]) {
+        // Base to other currency
+        rates.push({
+          fromCurrency: baseCurrency,
+          toCurrency: currency,
+          rate: response.data.rates[currency].toString(),
+          effectiveDate,
+        });
+
+        // Inverse rate
+        rates.push({
+          fromCurrency: currency,
+          toCurrency: baseCurrency,
           rate: (1 / response.data.rates[currency]).toString(),
           effectiveDate,
         });
       }
     }
 
-    console.log(`Successfully fetched ${rates.length} BOE exchange rates`);
-    return { source: 'boe', rates, success: true };
+    console.log(`Successfully fetched ${rates.length} rates from fallback aggregator`);
+    return { source: sourceName, rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
-    console.error('Error fetching BOE rates:', errorMsg);
-    return { source: 'boe', rates: [], success: false, error: errorMsg };
+    console.error('Error fetching from fallback aggregator:', errorMsg);
+    return { source: sourceName, rates: [], success: false, error: errorMsg };
   }
 }
 
@@ -396,7 +680,7 @@ export async function getHistoricalRate(
 }
 
 /**
- * Fetch exchange rates from a specific source
+ * Fetch exchange rates from a specific source with fallback
  */
 export async function fetchExchangeRates(
   tenantId: string,
@@ -404,20 +688,60 @@ export async function fetchExchangeRates(
 ): Promise<FetchResult[]> {
   const results: FetchResult[] = [];
 
+  // Define mapping of sources to their base currencies for fallback
+  const sourceFallbackMap = {
+    uae_central_bank: 'AED',
+    ecb: 'EUR',
+    fed: 'USD',
+    boe: 'GBP',
+  };
+
+  // Fetch UAE Central Bank rates
   if (source === 'all' || source === 'uae_central_bank') {
-    results.push(await fetchUAECentralBankRates());
+    const result = await fetchUAECentralBankRates();
+    if (!result.success) {
+      console.warn('Official UAE Central Bank fetch failed, trying fallback aggregator...');
+      const fallback = await fetchFromAggregator('AED', 'uae_central_bank_fallback');
+      results.push(fallback);
+    } else {
+      results.push(result);
+    }
   }
 
+  // Fetch ECB rates
   if (source === 'all' || source === 'ecb') {
-    results.push(await fetchECBRates());
+    const result = await fetchECBRates();
+    if (!result.success) {
+      console.warn('Official ECB fetch failed, trying fallback aggregator...');
+      const fallback = await fetchFromAggregator('EUR', 'ecb_fallback');
+      results.push(fallback);
+    } else {
+      results.push(result);
+    }
   }
 
+  // Fetch Fed rates
   if (source === 'all' || source === 'fed') {
-    results.push(await fetchFedRates());
+    const result = await fetchFedRates();
+    if (!result.success) {
+      console.warn('Official Federal Reserve fetch failed, trying fallback aggregator...');
+      const fallback = await fetchFromAggregator('USD', 'fed_fallback');
+      results.push(fallback);
+    } else {
+      results.push(result);
+    }
   }
 
+  // Fetch BoE rates
   if (source === 'all' || source === 'boe') {
-    results.push(await fetchBOERates());
+    const result = await fetchBOERates();
+    if (!result.success) {
+      console.warn('Official Bank of England fetch failed, trying fallback aggregator...');
+      const fallback = await fetchFromAggregator('GBP', 'boe_fallback');
+      results.push(fallback);
+    } else {
+      results.push(result);
+    }
   }
 
   // Store successful rates
