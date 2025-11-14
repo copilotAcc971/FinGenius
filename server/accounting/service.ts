@@ -16,6 +16,8 @@
 
 import { z } from 'zod';
 import { db } from '../db';
+import { accounts } from '@shared/schema';
+import { eq, and, inArray } from 'drizzle-orm';
 import type { IStorage } from '../storage';
 import type { Account } from '@shared/schema';
 import {
@@ -25,6 +27,30 @@ import {
   logError,
   retryOperation,
 } from './errors';
+
+// ====================================
+// TYPE DEFINITIONS
+// ====================================
+
+/**
+ * Extract the transaction type from Drizzle's db.transaction callback
+ * 
+ * This type represents the transactional client that is passed to the callback
+ * function in db.transaction(). It is NOT the same as `typeof db` - it's a
+ * specialized transaction client that ensures all operations are atomic.
+ * 
+ * Usage:
+ * ```typescript
+ * async function myTransactionalOperation(tx: DBTransaction) {
+ *   await tx.insert(table).values({...});
+ * }
+ * 
+ * await withTransaction(async (tx) => {
+ *   await myTransactionalOperation(tx); // Type-safe!
+ * });
+ * ```
+ */
+export type DBTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 // ====================================
 // ZOD VALIDATORS
@@ -101,6 +127,31 @@ export const createJournalEntrySchema = z.object({
 });
 
 export type CreateJournalEntry = z.infer<typeof createJournalEntrySchema>;
+
+/**
+ * System Account Map for efficient account lookup
+ * 
+ * Contains all required system accounts mapped by semantic name
+ * for easy access during journal entry creation.
+ * 
+ * Account codes from system-accounts.ts:
+ * - 1000: Cash
+ * - 1200: Accounts Receivable
+ * - 1300: Inventory
+ * - 2000: Accounts Payable
+ * - 2100: Tax Payable
+ * - 4000: Sales Revenue
+ * - 5000: Cost of Goods Sold
+ */
+export type SystemAccountMap = {
+  cash: Account;
+  accountsReceivable: Account;
+  inventory: Account;
+  accountsPayable: Account;
+  taxPayable: Account;
+  revenue: Account;
+  cogs: Account;
+};
 
 // ====================================
 // POSTING HELPERS
@@ -390,6 +441,127 @@ export async function fetchAccountByCode(
   return account;
 }
 
+/**
+ * Resolves all required system accounts for a tenant in a single query
+ * 
+ * **Efficiency:** Loads all system accounts in one database query using WHERE IN
+ * clause instead of 7 separate queries, significantly reducing database round-trips.
+ * 
+ * **Transaction Safety:** Uses the provided transaction context (tx) to ensure
+ * atomic operations within a transaction.
+ * 
+ * **Validation:** Throws ValidationError if ANY required system account is missing,
+ * with a descriptive message indicating which account is missing and suggesting
+ * to run the system account seeder.
+ * 
+ * **Usage Pattern:** Call this once at the start of a transaction to load all
+ * accounts, then use the returned map throughout the transaction. This is more
+ * efficient than fetching accounts individually.
+ * 
+ * @param tenantId - Tenant ID for multi-tenant isolation
+ * @param tx - Transaction client from db.transaction() callback
+ * @returns SystemAccountMap with all 7 required system accounts
+ * @throws {ValidationError} If any required system account is missing or inactive
+ * 
+ * @example
+ * ```typescript
+ * // Efficient account resolution in transaction
+ * await withTransaction(async (tx) => {
+ *   const sysAccounts = await resolveSystemAccounts(tenantId, tx);
+ *   
+ *   // Now use accounts throughout transaction
+ *   const invoiceEntry = {
+ *     lines: [
+ *       { accountId: sysAccounts.accountsReceivable.id, debitAmount: "100.00" },
+ *       { accountId: sysAccounts.revenue.id, creditAmount: "100.00" }
+ *     ]
+ *   };
+ * });
+ * 
+ * // Missing account scenario
+ * await resolveSystemAccounts('tenant-without-setup', tx);
+ * // Throws: "System account 1000 (Cash) not found for tenant ..."
+ * ```
+ */
+export async function resolveSystemAccounts(
+  tenantId: string,
+  tx: DBTransaction
+): Promise<SystemAccountMap> {
+  // System account codes from system-accounts.ts
+  const SYSTEM_ACCOUNT_CODES = {
+    cash: '1000',
+    accountsReceivable: '1200',
+    inventory: '1300',
+    accountsPayable: '2000',
+    taxPayable: '2100',
+    revenue: '4000',
+    cogs: '5000',
+  };
+
+  // Extract all codes for efficient WHERE IN query
+  const allCodes = Object.values(SYSTEM_ACCOUNT_CODES);
+
+  // Fetch all required accounts in a single query
+  const fetchedAccounts = await tx
+    .select()
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.tenantId, tenantId),
+        inArray(accounts.code, allCodes)
+      )
+    );
+
+  // Build a map of code -> account for O(1) lookup
+  const accountsByCode = new Map<string, Account>();
+  for (const account of fetchedAccounts) {
+    accountsByCode.set(account.code, account);
+  }
+
+  // Validate all required accounts exist and are active
+  const accountMap: Partial<SystemAccountMap> = {};
+  const accountNames = {
+    '1000': 'Cash',
+    '1200': 'Accounts Receivable',
+    '1300': 'Inventory',
+    '2000': 'Accounts Payable',
+    '2100': 'Tax Payable',
+    '4000': 'Revenue',
+    '5000': 'Cost of Goods Sold',
+  };
+
+  for (const [key, code] of Object.entries(SYSTEM_ACCOUNT_CODES)) {
+    const account = accountsByCode.get(code);
+    const accountName = accountNames[code as keyof typeof accountNames];
+
+    if (!account) {
+      const error = new ValidationError(
+        `System account ${code} (${accountName}) not found for tenant ${tenantId}. ` +
+        `Please run system account seeder before creating journal entries.`,
+        { tenantId, accountCode: code, accountName }
+      );
+      logError(error, { tenantId, accountCode: code });
+      throw error;
+    }
+
+    if (!account.isActive) {
+      const error = new ValidationError(
+        `System account ${code} (${accountName}) is inactive for tenant ${tenantId}. ` +
+        `Please activate this account before creating journal entries.`,
+        { tenantId, accountId: account.id, accountCode: code, accountName }
+      );
+      logError(error, { tenantId, accountCode: code });
+      throw error;
+    }
+
+    // Type assertion is safe because we validate all keys exist
+    (accountMap as any)[key] = account;
+  }
+
+  // All accounts validated and present
+  return accountMap as SystemAccountMap;
+}
+
 // ====================================
 // TRANSACTION HELPER
 // ====================================
@@ -413,7 +585,7 @@ export async function fetchAccountByCode(
  * **Error Handling:** Transaction automatically rolls back on any error.
  * The error is re-thrown for handling by the caller.
  * 
- * @param operation - Async function that receives the transactional client
+ * @param operation - Async function that receives the transactional client (DBTransaction)
  * @returns Result of the operation
  * @throws Re-throws any error from the operation after rollback
  * 
@@ -453,7 +625,7 @@ export async function fetchAccountByCode(
  * ```
  */
 export async function withTransaction<T>(
-  operation: (tx: typeof db) => Promise<T>
+  operation: (tx: DBTransaction) => Promise<T>
 ): Promise<T> {
   // Use database transaction to ensure atomicity
   return db.transaction(async (tx) => {
@@ -1410,6 +1582,255 @@ if (import.meta.vitest) {
         await db.delete(journalEntryLegs).where(eq(journalEntryLegs.journalEntryId, entry.id));
         await db.delete(journalEntries).where(eq(journalEntries.id, entry.id));
         await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+    });
+  });
+
+  // ====================================
+  // RESOLVE SYSTEM ACCOUNTS TESTS
+  // ====================================
+
+  describe('resolveSystemAccounts', () => {
+    const { seedSystemAccounts } = await import('./system-accounts');
+
+    describe('All accounts resolved successfully', () => {
+      it('should resolve all 7 system accounts in a single query', async () => {
+        const testTenantId = `test-resolve-all-${Date.now()}`;
+        const testUserId = `test-user-resolve-all-${Date.now()}`;
+
+        // Setup tenant
+        await db.insert(users).values({
+          id: testUserId,
+          email: `resolve-all-${Date.now()}@example.com`,
+          firstName: 'Resolve',
+          lastName: 'All',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Resolve All Test Tenant',
+          ownerId: testUserId,
+        });
+
+        // Seed system accounts for this tenant
+        await seedSystemAccounts(testTenantId);
+
+        // Test: Resolve accounts within transaction
+        await withTransaction(async (tx) => {
+          const sysAccounts = await resolveSystemAccounts(testTenantId, tx);
+
+          // Verify all 7 accounts are present
+          expect(sysAccounts.cash).toBeDefined();
+          expect(sysAccounts.accountsReceivable).toBeDefined();
+          expect(sysAccounts.inventory).toBeDefined();
+          expect(sysAccounts.accountsPayable).toBeDefined();
+          expect(sysAccounts.taxPayable).toBeDefined();
+          expect(sysAccounts.revenue).toBeDefined();
+          expect(sysAccounts.cogs).toBeDefined();
+
+          // Verify correct account codes
+          expect(sysAccounts.cash.code).toBe('1000');
+          expect(sysAccounts.cash.name).toBe('Cash');
+
+          expect(sysAccounts.accountsReceivable.code).toBe('1200');
+          expect(sysAccounts.accountsReceivable.name).toBe('Accounts Receivable');
+
+          expect(sysAccounts.inventory.code).toBe('1300');
+          expect(sysAccounts.inventory.name).toBe('Inventory');
+
+          expect(sysAccounts.accountsPayable.code).toBe('2000');
+          expect(sysAccounts.accountsPayable.name).toBe('Accounts Payable');
+
+          expect(sysAccounts.taxPayable.code).toBe('2100');
+          expect(sysAccounts.taxPayable.name).toBe('Tax Payable');
+
+          expect(sysAccounts.revenue.code).toBe('4000');
+          expect(sysAccounts.revenue.name).toBe('Sales Revenue');
+
+          expect(sysAccounts.cogs.code).toBe('5000');
+          expect(sysAccounts.cogs.name).toBe('Cost of Goods Sold');
+
+          // Verify all accounts belong to correct tenant
+          expect(sysAccounts.cash.tenantId).toBe(testTenantId);
+          expect(sysAccounts.accountsReceivable.tenantId).toBe(testTenantId);
+          expect(sysAccounts.inventory.tenantId).toBe(testTenantId);
+          expect(sysAccounts.accountsPayable.tenantId).toBe(testTenantId);
+          expect(sysAccounts.taxPayable.tenantId).toBe(testTenantId);
+          expect(sysAccounts.revenue.tenantId).toBe(testTenantId);
+          expect(sysAccounts.cogs.tenantId).toBe(testTenantId);
+
+          // Verify all accounts are active
+          expect(sysAccounts.cash.isActive).toBe(true);
+          expect(sysAccounts.accountsReceivable.isActive).toBe(true);
+          expect(sysAccounts.inventory.isActive).toBe(true);
+          expect(sysAccounts.accountsPayable.isActive).toBe(true);
+          expect(sysAccounts.taxPayable.isActive).toBe(true);
+          expect(sysAccounts.revenue.isActive).toBe(true);
+          expect(sysAccounts.cogs.isActive).toBe(true);
+        });
+
+        // Cleanup
+        await db.delete(accounts).where(eq(accounts.tenantId, testTenantId));
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+    });
+
+    describe('Missing account throws ValidationError', () => {
+      it('should throw ValidationError with descriptive message if Cash account is missing', async () => {
+        const testTenantId = `test-missing-cash-${Date.now()}`;
+        const testUserId = `test-user-missing-cash-${Date.now()}`;
+
+        // Setup tenant
+        await db.insert(users).values({
+          id: testUserId,
+          email: `missing-cash-${Date.now()}@example.com`,
+          firstName: 'Missing',
+          lastName: 'Cash',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Missing Cash Test Tenant',
+          ownerId: testUserId,
+        });
+
+        // Seed system accounts
+        await seedSystemAccounts(testTenantId);
+
+        // Delete Cash account (1000)
+        await db.delete(accounts).where(
+          and(
+            eq(accounts.tenantId, testTenantId),
+            eq(accounts.code, '1000')
+          )
+        );
+
+        // Test: Should throw ValidationError
+        await withTransaction(async (tx) => {
+          try {
+            await resolveSystemAccounts(testTenantId, tx);
+            expect.fail('Should have thrown ValidationError');
+          } catch (error) {
+            expect(error).toBeInstanceOf(ValidationError);
+            expect((error as ValidationError).message).toContain('System account 1000 (Cash) not found');
+            expect((error as ValidationError).message).toContain(testTenantId);
+            expect((error as ValidationError).message).toContain('Please run system account seeder');
+          }
+        });
+
+        // Cleanup
+        await db.delete(accounts).where(eq(accounts.tenantId, testTenantId));
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+
+      it('should throw ValidationError if account is inactive', async () => {
+        const testTenantId = `test-inactive-account-${Date.now()}`;
+        const testUserId = `test-user-inactive-${Date.now()}`;
+
+        // Setup tenant
+        await db.insert(users).values({
+          id: testUserId,
+          email: `inactive-account-${Date.now()}@example.com`,
+          firstName: 'Inactive',
+          lastName: 'Account',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Inactive Account Test Tenant',
+          ownerId: testUserId,
+        });
+
+        // Seed system accounts
+        await seedSystemAccounts(testTenantId);
+
+        // Deactivate Cash account (1000)
+        await db.update(accounts)
+          .set({ isActive: false })
+          .where(
+            and(
+              eq(accounts.tenantId, testTenantId),
+              eq(accounts.code, '1000')
+            )
+          );
+
+        // Test: Should throw ValidationError
+        await withTransaction(async (tx) => {
+          try {
+            await resolveSystemAccounts(testTenantId, tx);
+            expect.fail('Should have thrown ValidationError');
+          } catch (error) {
+            expect(error).toBeInstanceOf(ValidationError);
+            expect((error as ValidationError).message).toContain('System account 1000 (Cash) is inactive');
+            expect((error as ValidationError).message).toContain(testTenantId);
+            expect((error as ValidationError).message).toContain('Please activate this account');
+          }
+        });
+
+        // Cleanup
+        await db.delete(accounts).where(eq(accounts.tenantId, testTenantId));
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+    });
+
+    describe('Tenant isolation', () => {
+      it('should throw ValidationError when resolving accounts for tenant without system accounts', async () => {
+        const tenantAId = `test-tenant-a-${Date.now()}`;
+        const tenantBId = `test-tenant-b-${Date.now()}`;
+        const testUserId = `test-user-isolation-${Date.now()}`;
+
+        // Setup user and tenants
+        await db.insert(users).values({
+          id: testUserId,
+          email: `isolation-${Date.now()}@example.com`,
+          firstName: 'Isolation',
+          lastName: 'Test',
+        });
+
+        await db.insert(tenants).values([
+          {
+            id: tenantAId,
+            name: 'Tenant A',
+            ownerId: testUserId,
+          },
+          {
+            id: tenantBId,
+            name: 'Tenant B',
+            ownerId: testUserId,
+          },
+        ]);
+
+        // Seed system accounts for Tenant A only
+        await seedSystemAccounts(tenantAId);
+
+        // Test: Resolve accounts for Tenant A (should succeed)
+        await withTransaction(async (tx) => {
+          const sysAccountsA = await resolveSystemAccounts(tenantAId, tx);
+          expect(sysAccountsA.cash).toBeDefined();
+          expect(sysAccountsA.cash.tenantId).toBe(tenantAId);
+        });
+
+        // Test: Try to resolve accounts for Tenant B (should fail)
+        await withTransaction(async (tx) => {
+          try {
+            await resolveSystemAccounts(tenantBId, tx);
+            expect.fail('Should have thrown ValidationError for tenant B');
+          } catch (error) {
+            expect(error).toBeInstanceOf(ValidationError);
+            expect((error as ValidationError).message).toContain(tenantBId);
+            expect((error as ValidationError).message).toContain('not found');
+            expect((error as ValidationError).message).toContain('Please run system account seeder');
+          }
+        });
+
+        // Cleanup
+        await db.delete(accounts).where(eq(accounts.tenantId, tenantAId));
+        await db.delete(tenants).where(eq(tenants.id, tenantAId));
+        await db.delete(tenants).where(eq(tenants.id, tenantBId));
         await db.delete(users).where(eq(users.id, testUserId));
       });
     });
