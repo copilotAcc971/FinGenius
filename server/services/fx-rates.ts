@@ -2,7 +2,7 @@ import axios, { AxiosError } from 'axios';
 import { storage } from '../storage';
 import type { InsertExchangeRate } from '@shared/schema';
 import * as xml2js from 'xml2js';
-import { extractCBUAERates } from './advanced-ocr';
+import { PythonOCRService } from './python-ocr-wrapper';
 
 const TIMEOUT_MS = 10000;
 const MAX_RETRIES = 3;
@@ -276,19 +276,32 @@ async function fetchUAEFromFluentax(): Promise<FetchResult> {
 }
 
 /**
- * Fetch UAE Central Bank rates using embedded Advanced OCR processor
- * Uses the Advanced OCR processor downloaded from Google Drive and embedded in the application
+ * Fetch UAE Central Bank rates using Python Advanced OCR processor
+ * Uses the Python OCR processor downloaded from Google Drive
  * This provides direct extraction from the CBUAE website as an alternative to the GitHub mirror
  */
 async function fetchUAEFromOCR(): Promise<FetchResult> {
   try {
-    console.log('Extracting CBUAE rates using embedded Advanced OCR processor...');
+    console.log('Extracting CBUAE rates using Python Advanced OCR...');
     
-    // Use the embedded OCR processor to extract rates
-    const ocrRates = await extractCBUAERates();
+    const ocrService = new PythonOCRService();
+    
+    // Check if Python and OCR script are available
+    const pythonAvailable = await ocrService.checkPythonAvailable();
+    if (!pythonAvailable) {
+      throw new Error('Python3 not available - install Python to use OCR');
+    }
+    
+    const scriptExists = await ocrService.checkOCRScriptExists();
+    if (!scriptExists) {
+      throw new Error('OCR script not found - run download-ocr.ts to download from Google Drive');
+    }
+    
+    // Execute Python OCR
+    const ocrRates = await ocrService.extractCBUAERates();
     
     if (!ocrRates || ocrRates.length === 0) {
-      throw new Error('No rates extracted by OCR processor');
+      throw new Error('No rates extracted by Python OCR processor');
     }
 
     const rates: ExchangeRateData[] = [];
@@ -296,6 +309,7 @@ async function fetchUAEFromOCR(): Promise<FetchResult> {
     effectiveDate.setHours(18, 0, 0, 0); // CBUAE updates at 6 PM UAE time
 
     // Convert OCR rates to ExchangeRateData format
+    // Python outputs "1 {currency} = X AED" (e.g., "1 USD = 3.6725 AED")
     for (const { currency, rate } of ocrRates) {
       const rateValue = parseFloat(rate);
       
@@ -304,32 +318,38 @@ async function fetchUAEFromOCR(): Promise<FetchResult> {
         continue;
       }
 
-      // AED to other currency
-      rates.push({
-        fromCurrency: 'AED',
-        toCurrency: currency,
-        rate: rateValue.toString(),
-        effectiveDate,
-      });
-
-      // Inverse rate (other currency to AED)
+      // CORRECT LOGIC:
+      // Python gives us: 1 USD = 3.6725 AED (foreign→AED)
+      // So:
+      // - USD→AED = 3.6725 (use rate as-is)
+      // - AED→USD = 1/3.6725 = 0.272 (use reciprocal)
+      
+      // Foreign → AED (use rate as-is from Python)
       rates.push({
         fromCurrency: currency,
         toCurrency: 'AED',
+        rate: rate,
+        effectiveDate,
+      });
+
+      // AED → Foreign (use reciprocal)
+      rates.push({
+        fromCurrency: 'AED',
+        toCurrency: currency,
         rate: (1 / rateValue).toFixed(10),
         effectiveDate,
       });
     }
 
     if (rates.length === 0) {
-      throw new Error('No valid rates after OCR processing');
+      throw new Error('No valid rates after Python OCR processing');
     }
 
-    console.log(`Successfully extracted ${rates.length} UAE Central Bank exchange rates via OCR processor`);
+    console.log(`✓ Python OCR extracted ${rates.length} UAE Central Bank exchange rates`);
     return { source: 'uae_central_bank_ocr', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('Error extracting UAE Central Bank rates via OCR:', errorMsg);
+    console.error('Error extracting UAE Central Bank rates via Python OCR:', errorMsg);
     return { source: 'uae_central_bank_ocr', rates: [], success: false, error: errorMsg };
   }
 }
