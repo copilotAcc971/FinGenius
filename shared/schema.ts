@@ -15,6 +15,21 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// ====================================
+// CENTRALIZED STATUS ENUMS
+// Shared across all modules to prevent drift
+// ====================================
+
+export const JOURNAL_ENTRY_STATUS = ['draft', 'posted'] as const;
+export const BILL_STATUS = ['unpaid', 'scheduled', 'paid', 'overdue', 'cancelled'] as const;
+export const AI_EXTRACTION_STATUS = ['pending_review', 'reviewed', 'corrected'] as const;
+export const PAYMENT_APPROVAL_STATUS = ['draft', 'pending_approval', 'approved', 'rejected', 'cancelled'] as const;
+export const PAYMENT_AUTHORIZATION_STATUS = ['not_required', 'pending_authorization', 'authorized', 'rejected'] as const;
+export const PAYMENT_EXECUTION_STATUS = ['pending', 'queued', 'processing', 'completed', 'failed'] as const;
+export const DEBIT_NOTE_STATUS = ['draft', 'issued', 'applied', 'cancelled'] as const;
+export const APPROVAL_REQUEST_STATUS = ['pending', 'approved', 'rejected', 'cancelled'] as const;
+export const FRAUD_CHECK_STATUS = ['not_checked', 'passed', 'flagged', 'blocked'] as const;
+
 // Session storage table for Replit Auth
 export const sessions = pgTable(
   "sessions",
@@ -646,6 +661,16 @@ export const bills = pgTable("bills", {
   billDate: timestamp("bill_date").notNull(),
   dueDate: timestamp("due_date").notNull(),
   status: varchar("status", { length: 50 }).notNull().default("unpaid"), // unpaid, scheduled, paid, overdue, cancelled
+  
+  // AI extraction review (human-in-the-loop verification)
+  aiExtractionStatus: varchar("ai_extraction_status", { length: 50 }).default("pending_review"), // 'pending_review', 'reviewed', 'corrected', null (if not AI-extracted)
+  aiConfidenceScore: integer("ai_confidence_score"), // 0-100, overall confidence of AI extraction
+  aiSuggestedAccounts: jsonb("ai_suggested_accounts"), // JSON array of suggested account mappings with confidence scores
+  reviewedBy: varchar("reviewed_by").references(() => users.id), // User who reviewed AI extraction
+  reviewedAt: timestamp("reviewed_at"), // When AI extraction was reviewed
+  reviewNotes: text("review_notes"), // Notes from human reviewer
+  aiCorrectionsMade: boolean("ai_corrections_made").default(false), // true if user corrected AI suggestions
+  
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
@@ -653,7 +678,12 @@ export const bills = pgTable("bills", {
   documentUrl: varchar("document_url", { length: 500 }), // uploaded document
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  index("bills_ai_extraction_status_idx").on(table.aiExtractionStatus),
+  index("bills_reviewed_by_idx").on(table.reviewedBy),
+  sql`CONSTRAINT check_ai_extraction_status CHECK (ai_extraction_status IS NULL OR ai_extraction_status IN ('pending_review', 'reviewed', 'corrected'))`,
+  sql`CONSTRAINT check_ai_confidence_score CHECK (ai_confidence_score IS NULL OR (ai_confidence_score >= 0 AND ai_confidence_score <= 100))`,
+]);
 
 export const insertBillSchema = createInsertSchema(bills, {
   subtotal: decimalString,
@@ -757,9 +787,40 @@ export const payments = pgTable("payments", {
   stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 255 }),
   failureReason: text("failure_reason"),
   notes: text("notes"),
+  
+  // Approval workflow tracking
+  approvalStatus: varchar("approval_status", { length: 50 }).default("draft"), // draft, pending_approval, approved, rejected, cancelled
+  approvalWorkflowId: varchar("approval_workflow_id").references(() => approvalWorkflows.id),
+  approvalChain: jsonb("approval_chain"), // Array of {userId, timestamp, decision, comments}
+  approvedBy: jsonb("approved_by"), // Array of user IDs who approved
+  approvedAt: jsonb("approved_at"), // Array of approval timestamps
+  rejectionReason: text("rejection_reason"),
+  
+  // Authorization tracking (dual control for high-value payments)
+  authorizationStatus: varchar("authorization_status", { length: 50 }).default("not_required"), // not_required, pending_authorization, authorized, rejected
+  authorizedBy: varchar("authorized_by").references(() => users.id),
+  authorizedAt: timestamp("authorized_at"),
+  
+  // Execution tracking
+  executedBy: varchar("executed_by").references(() => users.id),
+  executedAt: timestamp("executed_at"),
+  
+  // Fraud detection
+  fraudCheckStatus: varchar("fraud_check_status", { length: 50 }).default("not_checked"), // not_checked, passed, flagged, blocked
+  fraudFlags: jsonb("fraud_flags"), // JSON array of fraud indicators
+  
+  // Batch payment support
+  paymentBatchId: varchar("payment_batch_id").references(() => paymentBatches.id),
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  index("payments_approval_status_idx").on(table.tenantId, table.approvalStatus),
+  index("payments_batch_idx").on(table.paymentBatchId),
+  sql`CONSTRAINT check_approval_status CHECK (approval_status IN ('draft', 'pending_approval', 'approved', 'rejected', 'cancelled'))`,
+  sql`CONSTRAINT check_authorization_status CHECK (authorization_status IN ('not_required', 'pending_authorization', 'authorized', 'rejected'))`,
+  sql`CONSTRAINT check_fraud_check_status CHECK (fraud_check_status IN ('not_checked', 'passed', 'flagged', 'blocked'))`,
+]);
 
 export const insertPaymentSchema = createInsertSchema(payments, {
   amount: decimalString,
@@ -1392,12 +1453,27 @@ export const journalEntries = pgTable("journal_entries", {
   description: text("description"),
   notes: text("notes"),
   status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, posted
+  
+  // Source document tracking for automatic journal entries
+  sourceDocumentType: varchar("source_document_type", { length: 50 }), // 'invoice', 'bill', 'payment', 'credit_note', 'debit_note', 'expense', 'fixed_asset'
+  sourceDocumentId: varchar("source_document_id"), // ID of source document
+  isAutoGenerated: boolean("is_auto_generated").default(false), // true if automatically created by system
+  modificationLocked: boolean("modification_locked").default(false), // true if entry cannot be edited (auto-generated entries are locked)
+  reversedEntryId: varchar("reversed_entry_id").references((): any => journalEntries.id), // If this entry reverses another entry
+  reversalReason: text("reversal_reason"), // Reason for reversal (required for reversals)
+  
   createdBy: varchar("created_by").references(() => users.id),
+  lastModifiedBy: varchar("last_modified_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   unique("unique_journal_entry_number_tenant").on(table.tenantId, table.journalEntryNumber),
+  index("journal_entries_source_document_idx").on(table.sourceDocumentType, table.sourceDocumentId),
+  index("journal_entries_tenant_date_idx").on(table.tenantId, table.entryDate),
+  index("journal_entries_reversed_entry_idx").on(table.reversedEntryId),
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS journal_entries_prevent_duplicate_posts ON journal_entries (tenant_id, source_document_type, source_document_id) WHERE status = 'posted' AND is_auto_generated = true`,
   sql`CONSTRAINT check_journal_entry_status CHECK (status IN ('draft', 'posted'))`,
+  sql`CONSTRAINT check_source_document_type CHECK (source_document_type IS NULL OR source_document_type IN ('invoice', 'bill', 'payment', 'customer_payment', 'credit_note', 'debit_note', 'expense', 'fixed_asset', 'inventory_adjustment', 'depreciation', 'payment_batch', 'approval'))`,
 ]);
 
 export const insertJournalEntrySchema = createInsertSchema(journalEntries, {
@@ -2421,6 +2497,267 @@ export type InsertOpenBankingAuditLog = z.infer<typeof insertOpenBankingAuditLog
 export type OpenBankingAuditLog = typeof openBankingAuditLogs.$inferSelect;
 
 // ============================================================================
+// PAYMENT BATCHES (for batch payment processing)
+// ============================================================================
+
+export const paymentBatches = pgTable("payment_batches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  batchNumber: varchar("batch_number", { length: 100 }),
+  totalAmount: decimal("total_amount", { precision: 12, scale: 2 }).notNull(),
+  paymentCount: integer("payment_count").notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, pending_approval, approved, processing, completed, partially_failed
+  approvedBy: varchar("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  executedBy: varchar("executed_by").references(() => users.id),
+  executedAt: timestamp("executed_at"),
+  notes: text("notes"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_payment_batch_number_tenant").on(table.tenantId, table.batchNumber),
+  index("payment_batches_status_idx").on(table.tenantId, table.status),
+]);
+
+export const insertPaymentBatchSchema = createInsertSchema(paymentBatches, {
+  totalAmount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertPaymentBatch = z.infer<typeof insertPaymentBatchSchema>;
+export type PaymentBatch = typeof paymentBatches.$inferSelect;
+
+// ============================================================================
+// APPROVAL WORKFLOWS (for multi-step approval processes)
+// ============================================================================
+
+export const approvalWorkflows = pgTable("approval_workflows", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  entityType: varchar("entity_type", { length: 100 }).notNull(), // purchase_orders, vendor_payments, debit_notes, bills, etc.
+  conditions: jsonb("conditions").notNull(), // JSON: {amountThreshold: 10000, department: 'IT', etc.}
+  isActive: boolean("is_active").default(true),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("approval_workflows_entity_type_idx").on(table.tenantId, table.entityType, table.isActive),
+]);
+
+export const insertApprovalWorkflowSchema = createInsertSchema(approvalWorkflows).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertApprovalWorkflow = z.infer<typeof insertApprovalWorkflowSchema>;
+export type ApprovalWorkflow = typeof approvalWorkflows.$inferSelect;
+
+// ============================================================================
+// APPROVAL STEPS (workflow step definitions)
+// ============================================================================
+
+export const approvalSteps = pgTable("approval_steps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  workflowId: varchar("workflow_id").notNull().references(() => approvalWorkflows.id, { onDelete: 'cascade' }),
+  stepOrder: integer("step_order").notNull(), // 1, 2, 3 for sequential
+  approverRole: varchar("approver_role", { length: 100 }), // Role that can approve this step
+  approverUserId: varchar("approver_user_id").references(() => users.id), // Specific user (optional)
+  requiresAll: boolean("requires_all").default(false), // If multiple approvers, all must approve
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("approval_steps_workflow_idx").on(table.workflowId, table.stepOrder),
+]);
+
+export const insertApprovalStepSchema = createInsertSchema(approvalSteps).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertApprovalStep = z.infer<typeof insertApprovalStepSchema>;
+export type ApprovalStep = typeof approvalSteps.$inferSelect;
+
+// ============================================================================
+// APPROVAL REQUESTS (active approval requests)
+// ============================================================================
+
+export const approvalRequests = pgTable("approval_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  workflowId: varchar("workflow_id").references(() => approvalWorkflows.id),
+  entityType: varchar("entity_type", { length: 100 }).notNull(),
+  entityId: varchar("entity_id").notNull(),
+  requestedBy: varchar("requested_by").notNull().references(() => users.id),
+  currentStep: integer("current_step").default(1),
+  status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, approved, rejected, cancelled
+  approvalDeadline: timestamp("approval_deadline"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("approval_requests_entity_idx").on(table.entityType, table.entityId),
+  index("approval_requests_status_idx").on(table.tenantId, table.status),
+  sql`CONSTRAINT check_approval_request_status CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled'))`,
+]);
+
+export const insertApprovalRequestSchema = createInsertSchema(approvalRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertApprovalRequest = z.infer<typeof insertApprovalRequestSchema>;
+export type ApprovalRequest = typeof approvalRequests.$inferSelect;
+
+// ============================================================================
+// APPROVAL HISTORY (immutable audit trail of approval decisions)
+// ============================================================================
+
+export const approvalHistory = pgTable("approval_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  approvalRequestId: varchar("approval_request_id").notNull().references(() => approvalRequests.id, { onDelete: 'cascade' }),
+  stepOrder: integer("step_order").notNull(),
+  approverUserId: varchar("approver_user_id").notNull().references(() => users.id),
+  decision: varchar("decision", { length: 20 }).notNull(), // approved, rejected
+  comments: text("comments"),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+}, (table) => [
+  index("approval_history_request_idx").on(table.approvalRequestId),
+  sql`CONSTRAINT check_approval_decision CHECK (decision IN ('approved', 'rejected'))`,
+]);
+
+export const insertApprovalHistorySchema = createInsertSchema(approvalHistory).omit({
+  id: true,
+  timestamp: true,
+});
+
+export type InsertApprovalHistory = z.infer<typeof insertApprovalHistorySchema>;
+export type ApprovalHistory = typeof approvalHistory.$inferSelect;
+
+// ============================================================================
+// DEBIT NOTES (vendor returns, AP adjustments)
+// ============================================================================
+
+export const debitNotes = pgTable("debit_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  vendorId: varchar("vendor_id").notNull().references(() => vendors.id),
+  billId: varchar("bill_id").references(() => bills.id), // Optional - link to specific bill
+  debitNoteNumber: varchar("debit_note_number", { length: 100 }),
+  debitNoteDate: timestamp("debit_note_date").notNull(),
+  reason: text("reason").notNull(), // Required: why issuing debit note
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, issued, applied, cancelled
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  appliedAmount: decimal("applied_amount", { precision: 12, scale: 2 }).default("0"), // How much has been applied to payments
+  notes: text("notes"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_debit_note_number_tenant").on(table.tenantId, table.debitNoteNumber),
+  index("debit_notes_vendor_idx").on(table.vendorId),
+  index("debit_notes_bill_idx").on(table.billId),
+  sql`CONSTRAINT check_debit_note_status CHECK (status IN ('draft', 'issued', 'applied', 'cancelled'))`,
+]);
+
+export const insertDebitNoteSchema = createInsertSchema(debitNotes, {
+  subtotal: decimalString,
+  taxAmount: decimalString,
+  total: decimalString,
+  appliedAmount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertDebitNote = z.infer<typeof insertDebitNoteSchema>;
+export type DebitNote = typeof debitNotes.$inferSelect;
+
+// ============================================================================
+// DEBIT NOTE LINE ITEMS
+// ============================================================================
+
+export const debitNoteLineItems = pgTable("debit_note_line_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  debitNoteId: varchar("debit_note_id").notNull().references(() => debitNotes.id, { onDelete: 'cascade' }),
+  accountId: varchar("account_id").notNull().references(() => accounts.id), // Expense/Inventory account to reverse
+  description: text("description").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertDebitNoteLineItemSchema = createInsertSchema(debitNoteLineItems, {
+  quantity: decimalString,
+  unitPrice: decimalString,
+  amount: decimalString,
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+});
+
+export type InsertDebitNoteLineItem = z.infer<typeof insertDebitNoteLineItemSchema>;
+export type DebitNoteLineItem = typeof debitNoteLineItems.$inferSelect;
+
+// ============================================================================
+// DEBIT NOTE SEQUENCES
+// ============================================================================
+
+export const debitNoteSequences = pgTable("debit_note_sequences", {
+  tenantId: varchar("tenant_id").primaryKey().references(() => tenants.id),
+  lastNumber: integer("last_number").notNull().default(0),
+  prefix: varchar("prefix", { length: 20 }).default("DN-"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type DebitNoteSequence = typeof debitNoteSequences.$inferSelect;
+
+// ============================================================================
+// AUDIT LOGS (immutable audit trail for all entities)
+// ============================================================================
+
+export const auditLogs = pgTable("audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").references(() => users.id), // null if system action
+  action: varchar("action", { length: 100 }).notNull(), // create, update, delete, approve, reject, post, reverse, etc.
+  entityType: varchar("entity_type", { length: 100 }).notNull(), // invoice, bill, payment, journal_entry, etc.
+  entityId: varchar("entity_id").notNull(),
+  changes: jsonb("changes"), // Before/after state (redacted sensitive fields)
+  ipAddress: varchar("ip_address", { length: 45 }), // IPv4/IPv6
+  userAgent: text("user_agent"),
+  wasSuccessful: boolean("was_successful").default(true),
+  errorMessage: text("error_message"), // If action failed
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+}, (table) => [
+  index("audit_logs_tenant_entity_idx").on(table.tenantId, table.entityType, table.entityId),
+  index("audit_logs_user_idx").on(table.userId),
+  index("audit_logs_timestamp_idx").on(table.timestamp),
+]);
+
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
+  id: true,
+  timestamp: true,
+});
+
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
+
+// ============================================================================
 // RELATIONS (for Drizzle ORM queries)
 // ============================================================================
 
@@ -2528,6 +2865,131 @@ export const reconciliationRulesRelations = relations(reconciliationRules, ({ on
   }),
   createdByUser: one(users, {
     fields: [reconciliationRules.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const paymentBatchesRelations = relations(paymentBatches, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [paymentBatches.tenantId],
+    references: [tenants.id],
+  }),
+  payments: many(payments),
+  approvedByUser: one(users, {
+    fields: [paymentBatches.approvedBy],
+    references: [users.id],
+  }),
+  executedByUser: one(users, {
+    fields: [paymentBatches.executedBy],
+    references: [users.id],
+  }),
+  createdByUser: one(users, {
+    fields: [paymentBatches.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [approvalWorkflows.tenantId],
+    references: [tenants.id],
+  }),
+  createdByUser: one(users, {
+    fields: [approvalWorkflows.createdBy],
+    references: [users.id],
+  }),
+  steps: many(approvalSteps),
+  requests: many(approvalRequests),
+}));
+
+export const approvalStepsRelations = relations(approvalSteps, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [approvalSteps.tenantId],
+    references: [tenants.id],
+  }),
+  workflow: one(approvalWorkflows, {
+    fields: [approvalSteps.workflowId],
+    references: [approvalWorkflows.id],
+  }),
+  approverUser: one(users, {
+    fields: [approvalSteps.approverUserId],
+    references: [users.id],
+  }),
+}));
+
+export const approvalRequestsRelations = relations(approvalRequests, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [approvalRequests.tenantId],
+    references: [tenants.id],
+  }),
+  workflow: one(approvalWorkflows, {
+    fields: [approvalRequests.workflowId],
+    references: [approvalWorkflows.id],
+  }),
+  requestedByUser: one(users, {
+    fields: [approvalRequests.requestedBy],
+    references: [users.id],
+  }),
+  history: many(approvalHistory),
+}));
+
+export const approvalHistoryRelations = relations(approvalHistory, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [approvalHistory.tenantId],
+    references: [tenants.id],
+  }),
+  approvalRequest: one(approvalRequests, {
+    fields: [approvalHistory.approvalRequestId],
+    references: [approvalRequests.id],
+  }),
+  approverUser: one(users, {
+    fields: [approvalHistory.approverUserId],
+    references: [users.id],
+  }),
+}));
+
+export const debitNotesRelations = relations(debitNotes, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [debitNotes.tenantId],
+    references: [tenants.id],
+  }),
+  vendor: one(vendors, {
+    fields: [debitNotes.vendorId],
+    references: [vendors.id],
+  }),
+  bill: one(bills, {
+    fields: [debitNotes.billId],
+    references: [bills.id],
+  }),
+  createdByUser: one(users, {
+    fields: [debitNotes.createdBy],
+    references: [users.id],
+  }),
+  lineItems: many(debitNoteLineItems),
+}));
+
+export const debitNoteLineItemsRelations = relations(debitNoteLineItems, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [debitNoteLineItems.tenantId],
+    references: [tenants.id],
+  }),
+  debitNote: one(debitNotes, {
+    fields: [debitNoteLineItems.debitNoteId],
+    references: [debitNotes.id],
+  }),
+  account: one(accounts, {
+    fields: [debitNoteLineItems.accountId],
+    references: [accounts.id],
+  }),
+}));
+
+export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [auditLogs.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [auditLogs.userId],
     references: [users.id],
   }),
 }));

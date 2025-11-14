@@ -12,6 +12,7 @@ export const PERMISSION_MODULES = {
   SALES_ORDERS: 'sales_orders',
   PURCHASE_ORDERS: 'purchase_orders',
   CREDIT_NOTES: 'credit_notes',
+  DEBIT_NOTES: 'debit_notes',
   CUSTOMER_PAYMENTS: 'customer_payments',
   RECURRING_INVOICES: 'recurring_invoices',
   RETAINER_INVOICES: 'retainer_invoices',
@@ -21,12 +22,18 @@ export const PERMISSION_MODULES = {
   BANK_RECONCILIATIONS: 'bank_reconciliations',
   EXPENSES: 'expenses',
   PAYMENTS: 'payments',
+  VENDOR_PAYMENTS: 'vendor_payments',
   DOCUMENTS: 'documents',
   REPORTS: 'reports',
   COMPANY_PROFILE: 'company_profile',
   USERS: 'users',
   BILLING: 'billing',
   SETTINGS: 'settings',
+  WORKFLOWS: 'workflows',
+  APPROVALS: 'approvals',
+  AUDIT: 'audit',
+  ENCUMBRANCES: 'encumbrances',
+  INVENTORY: 'inventory',
 } as const;
 
 export const PERMISSION_ACTIONS = {
@@ -42,6 +49,23 @@ export const PERMISSION_ACTIONS = {
   RECONCILE: 'reconcile',
   MANAGE_ROLES: 'manage_roles',
   MANAGE_BILLING: 'manage_billing',
+  POST: 'post',
+  REVERSE: 'reverse',
+  EXECUTE: 'execute',
+  AUTHORIZE: 'authorize',
+  CONFIGURE: 'configure',
+  REJECT: 'reject',
+  REVIEW: 'review',
+  APPROVE_POSTING: 'approve_posting',
+  APPROVE_OVERRIDE: 'approve_override',
+  MANAGE: 'manage',
+  ADJUST: 'adjust',
+  DEPRECIATE: 'depreciate',
+  DISPOSE: 'dispose',
+  REFUND: 'refund',
+  CREATE_BATCH: 'create_batch',
+  VIEW_AUDIT: 'view_audit',
+  VIEW_SENSITIVE: 'view_sensitive',
 } as const;
 
 // Permission definitions (~70 permissions covering all modules)
@@ -88,6 +112,9 @@ export const PERMISSION_DEFINITIONS = [
   { module: 'bills', action: 'delete', name: 'bills.delete', description: 'Delete bills' },
   { module: 'bills', action: 'approve', name: 'bills.approve', description: 'Approve bills for payment' },
   { module: 'bills', action: 'export', name: 'bills.export', description: 'Export bill data' },
+  { module: 'bills', action: 'review', name: 'bills.review_ai_extraction', description: 'Review and approve AI-extracted bill data' },
+  { module: 'bills', action: 'approve_posting', name: 'bills.approve_posting', description: 'Approve bill for posting to ledger' },
+  { module: 'bills', action: 'approve_override', name: 'bills.approve_override', description: 'Override three-way matching discrepancies' },
 
   // Quotes
   { module: 'quotes', action: 'create', name: 'quotes.create', description: 'Create quotes' },
@@ -145,6 +172,8 @@ export const PERMISSION_DEFINITIONS = [
   { module: 'journal_entries', action: 'update', name: 'journal_entries.update', description: 'Edit journal entries' },
   { module: 'journal_entries', action: 'delete', name: 'journal_entries.delete', description: 'Delete journal entries' },
   { module: 'journal_entries', action: 'approve', name: 'journal_entries.approve', description: 'Approve journal entries' },
+  { module: 'journal_entries', action: 'post', name: 'journal_entries.post', description: 'Post journal entries to ledger' },
+  { module: 'journal_entries', action: 'reverse', name: 'journal_entries.reverse', description: 'Reverse posted journal entries' },
 
   // Fixed Assets
   { module: 'assets', action: 'create', name: 'assets.create', description: 'Create fixed assets' },
@@ -195,10 +224,57 @@ export const PERMISSION_DEFINITIONS = [
   // Settings
   { module: 'settings', action: 'read', name: 'settings.read', description: 'View settings' },
   { module: 'settings', action: 'update', name: 'settings.update', description: 'Update settings' },
+
+  // Debit Notes
+  { module: 'debit_notes', action: 'create', name: 'debit_notes.create', description: 'Create debit notes' },
+  { module: 'debit_notes', action: 'read', name: 'debit_notes.read', description: 'View debit notes' },
+  { module: 'debit_notes', action: 'update', name: 'debit_notes.update', description: 'Edit debit notes' },
+  { module: 'debit_notes', action: 'delete', name: 'debit_notes.delete', description: 'Delete/cancel debit notes' },
+  { module: 'debit_notes', action: 'approve', name: 'debit_notes.approve', description: 'Approve debit notes for posting' },
+
+  // Vendor Payments
+  { module: 'vendor_payments', action: 'create', name: 'vendor_payments.create', description: 'Create vendor payments' },
+  { module: 'vendor_payments', action: 'read', name: 'vendor_payments.read', description: 'View vendor payments' },
+  { module: 'vendor_payments', action: 'approve', name: 'vendor_payments.approve', description: 'Approve vendor payments' },
+  { module: 'vendor_payments', action: 'execute', name: 'vendor_payments.execute', description: 'Execute approved vendor payments' },
+  { module: 'vendor_payments', action: 'authorize', name: 'vendor_payments.authorize', description: 'Authorize high-value payments (dual control)' },
+  { module: 'vendor_payments', action: 'create_batch', name: 'vendor_payments.create_batch', description: 'Create batch vendor payments' },
+  { module: 'vendor_payments', action: 'refund', name: 'vendor_payments.refund', description: 'Issue vendor refunds' },
+  { module: 'vendor_payments', action: 'view_sensitive', name: 'vendor_payments.view_sensitive', description: 'View sensitive payment details (bank accounts)' },
+
+  // Customer Refunds (extending customer_payments)
+  { module: 'customer_payments', action: 'refund', name: 'customer_payments.refund', description: 'Issue customer refunds' },
+
+  // Workflows
+  { module: 'workflows', action: 'configure', name: 'workflows.configure', description: 'Configure approval workflows' },
+  { module: 'workflows', action: 'read', name: 'workflows.read', description: 'View workflow configurations' },
+
+  // Approvals
+  { module: 'approvals', action: 'approve', name: 'approvals.approve', description: 'Approve pending requests' },
+  { module: 'approvals', action: 'reject', name: 'approvals.reject', description: 'Reject pending requests' },
+  { module: 'approvals', action: 'read', name: 'approvals.read', description: 'View pending approvals' },
+  { module: 'approvals', action: 'view_audit', name: 'approvals.view_audit', description: 'View approval audit trail' },
+
+  // Audit
+  { module: 'audit', action: 'read', name: 'audit.view', description: 'View audit logs' },
+  { module: 'audit', action: 'export', name: 'audit.export', description: 'Export audit logs' },
+
+  // Encumbrances (budget reservations)
+  { module: 'encumbrances', action: 'create', name: 'encumbrances.create', description: 'Create budget encumbrances' },
+  { module: 'encumbrances', action: 'read', name: 'encumbrances.view', description: 'View encumbrance reports' },
+  { module: 'encumbrances', action: 'manage', name: 'encumbrances.manage', description: 'Manage encumbrance settings' },
+
+  // Inventory
+  { module: 'inventory', action: 'adjust', name: 'inventory.adjust', description: 'Create inventory adjustments' },
+
+  // Fixed Assets (extending assets)
+  { module: 'assets', action: 'depreciate', name: 'assets.depreciate', description: 'Run depreciation for fixed assets' },
+  { module: 'assets', action: 'dispose', name: 'assets.dispose', description: 'Dispose of fixed assets' },
 ];
 
 // Permission inheritance rules (higher permissions inherit lower ones)
 // Example: delete permission includes update and read
+// approve_posting includes approve which includes read
 export const PERMISSION_HIERARCHY: Record<string, string[]> = {
   'delete': ['update', 'read'],
   'update': ['read'],
@@ -209,6 +285,23 @@ export const PERMISSION_HIERARCHY: Record<string, string[]> = {
   'reconcile': ['read'],
   'manage_roles': ['read'],
   'manage_billing': ['read'],
+  'post': ['read'],
+  'reverse': ['read'],
+  'execute': ['approve', 'read'],
+  'authorize': ['read'],
+  'configure': ['read'],
+  'reject': ['read'],
+  'review': ['read'],
+  'approve_posting': ['approve', 'read'],
+  'approve_override': ['approve', 'read'],
+  'manage': ['read'],
+  'adjust': ['read'],
+  'depreciate': ['read'],
+  'dispose': ['read'],
+  'refund': ['read'],
+  'create_batch': ['create', 'read'],
+  'view_audit': ['read'],
+  'view_sensitive': ['read'],
 };
 
 // Helper to expand permissions with inheritance
