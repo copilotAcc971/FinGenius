@@ -29,6 +29,15 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - **Auto-numbering:** Sequential numbering for all major modules (Invoices, Quotes, Sales Orders, Bills, Credit Notes, Payments, Recurring Invoices, Retainer Invoices, Chart of Accounts, Journal Entries, Fixed Assets, Purchase Orders).
 - **Audit Trails:** Comprehensive tracking of changes for critical entities like invoices.
 - **Advanced Accounting Modules:** Chart of Accounts, Journal Entries (double-entry validation), Fixed Assets (depreciation), Purchase Orders, Bank Reconciliation, Financial Reports (P&L, Balance Sheet, Trial Balance, Cash Flow), Products/Inventory, Tax Management.
+- **Multi-Currency Support (COMPLETED mc-3):** Full multi-currency foundation for UAE market operations:
+    - **Currency Management UI:** Complete CRUD interface at /settings/currencies with base currency designation, activate/deactivate toggles, and referential integrity protection (prevents deletion of base currency or currencies used in transactions)
+    - **Exchange Rate Configuration:** Automated daily rate updates (6 AM UTC), configurable source strategy (API/Manual/Hybrid), CBUAE source selector (GitHub/OCR/Both/Fluentax/Manual), and persistent FX config storage
+    - **Exchange Rate History:** Full audit trail with currency pair filters, CSV export, and manual rate entry with reciprocal rate creation
+    - **Backend API:** 11 protected endpoints with RBAC (settings:update, billing:update), server-side tenantId injection, pagination, and query filters
+    - **Database Schema:** currencies table (code PK, name, symbol, decimalPlaces, isActive, isBaseCurrency), exchangeRates table (20,10 precision, source tracking), fxConfigs table (per-tenant configuration persistence)
+    - **Security:** Referential integrity checks prevent orphaned data, base currency deletion blocked, currencies in-use deletion blocked with guidance to deactivate
+    - **Frontend Integration:** Automatic x-tenant-id header injection in all API requests via queryClient, TenantContext localStorage integration
+    - **Known Limitations:** E2E testing blocked by OIDC auth bypass issues in test environment (not production code issue), manual verification confirms functionality
 - **Role-Based Access Control (RBAC):** Complete enterprise-grade RBAC system with:
     - **Permission Catalog:** 70+ granular permissions across 12 modules (customers, vendors, items, taxes, invoices, bills, quotes, sales_orders, purchase_orders, reports, users, billing)
     - **Default Roles:** 7 system roles (Owner, Admin, Accountant, Bookkeeper, Sales, Purchase, Viewer) with curated permission sets

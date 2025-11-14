@@ -7,14 +7,35 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+function getTenantIdFromStorage(): string | null {
+  try {
+    const stored = localStorage.getItem("currentTenant");
+    if (stored) {
+      const tenant = JSON.parse(stored);
+      return tenant.id || null;
+    }
+  } catch (e) {
+    console.error("Failed to get tenant from localStorage", e);
+  }
+  return null;
+}
+
 export async function apiRequest(
   url: string,
   method: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
+  
+  // Add tenant ID header if available
+  const tenantId = getTenantIdFromStorage();
+  if (tenantId) {
+    headers["x-tenant-id"] = tenantId;
+  }
+  
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
@@ -49,7 +70,15 @@ export const getQueryFn: <T>(options: {
       url += `?${searchParams.toString()}`;
     }
     
+    // Add tenant ID header if available
+    const headers: Record<string, string> = {};
+    const tenantId = getTenantIdFromStorage();
+    if (tenantId) {
+      headers["x-tenant-id"] = tenantId;
+    }
+    
     const res = await fetch(url, {
+      headers,
       credentials: "include",
     });
 

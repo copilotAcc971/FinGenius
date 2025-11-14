@@ -12,13 +12,13 @@ interface ExchangeRateHistoryTableProps {
 }
 
 export function ExchangeRateHistoryTable({ currencies }: ExchangeRateHistoryTableProps) {
-  const [fromCurrency, setFromCurrency] = useState<string>('');
-  const [toCurrency, setToCurrency] = useState<string>('');
+  const [fromCurrency, setFromCurrency] = useState<string>('ALL');
+  const [toCurrency, setToCurrency] = useState<string>('ALL');
 
   const { data: rates = [], isLoading } = useQuery<ExchangeRate[]>({
     queryKey: ['/api/exchange-rates', { 
-      fromCurrency: fromCurrency || undefined,
-      toCurrency: toCurrency || undefined,
+      fromCurrency: fromCurrency === 'ALL' ? undefined : fromCurrency,
+      toCurrency: toCurrency === 'ALL' ? undefined : toCurrency,
       limit: 50,
     }],
     enabled: currencies.length > 0,
@@ -60,7 +60,7 @@ export function ExchangeRateHistoryTable({ currencies }: ExchangeRateHistoryTabl
               <SelectValue placeholder="From Currency (All)" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All</SelectItem>
+              <SelectItem value="ALL">All Currencies</SelectItem>
               {currencies.filter(c => c.isActive).map(currency => (
                 <SelectItem key={currency.code} value={currency.code}>
                   {currency.code} - {currency.name}
@@ -76,7 +76,7 @@ export function ExchangeRateHistoryTable({ currencies }: ExchangeRateHistoryTabl
               <SelectValue placeholder="To Currency (All)" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All</SelectItem>
+              <SelectItem value="ALL">All Currencies</SelectItem>
               {currencies.filter(c => c.isActive).map(currency => (
                 <SelectItem key={currency.code} value={currency.code}>
                   {currency.code} - {currency.name}
