@@ -6,7 +6,8 @@ import {
   billPayloadSchema, 
   type Bill, 
   type Vendor, 
-  type BillLineItem
+  type BillLineItem,
+  type Currency
 } from "@shared/schema";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ const formSchema = z.object({
   bill: z.object({
     tenantId: z.string(),
     vendorId: z.string().min(1, "Vendor is required"),
+    currencyCode: z.string().length(3, "Currency code must be 3 characters").min(1, "Currency is required"),
     billNumber: z.string().optional(),
     billDate: z.string().min(1, "Bill date is required"),
     dueDate: z.string().min(1, "Due date is required"),
@@ -103,6 +105,11 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
     enabled: !!currentTenant?.id && open,
   });
 
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
+  });
+
   const { data: lineItems, isLoading: lineItemsLoading } = useQuery<BillLineItem[]>({
     queryKey: ["/api/bills", bill?.id, "line-items", currentTenant?.id],
     queryFn: async () => {
@@ -116,12 +123,57 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
     enabled: !!bill?.id && !!currentTenant?.id && open,
   });
 
+  // Filter active currencies and find base currency
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
+  // Get the currency for the current bill (if editing)
+  const currentCurrency = bill?.currencyCode 
+    ? currencies.find(c => c.code === bill.currencyCode)
+    : null;
+
+  // Build available currencies list with useMemo
+  const availableCurrencies = useMemo(() => {
+    // If editing bill and currencies not loaded yet, create placeholder
+    if (bill?.currencyCode && currencies.length === 0) {
+      return [{
+        code: bill.currencyCode,
+        name: bill.currencyCode,
+        symbol: bill.currencyCode,
+        isActive: false,
+        decimalPlaces: 2,
+        isBaseCurrency: false,
+        tenantId: currentTenant?.id || '',
+        id: 'placeholder'
+      }];
+    }
+    
+    // Start with all active currencies
+    const available = [...activeCurrencies];
+    
+    // Add ALL inactive currencies (not just bill's currency)
+    const inactiveCurrencies = currencies.filter(c => !c.isActive);
+    for (const inactive of inactiveCurrencies) {
+      if (!available.find(c => c.code === inactive.code)) {
+        available.push(inactive);
+      }
+    }
+    
+    // Sort: active currencies first (alphabetically), then inactive
+    return available.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [activeCurrencies, currencies, bill?.currencyCode, currentTenant?.id]);
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       bill: {
         tenantId: currentTenant?.id || "",
         vendorId: "",
+        currencyCode: "USD",
         billNumber: "",
         billDate: new Date().toISOString().split('T')[0],
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -201,6 +253,26 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
     }
   }, [calculatedValues, form]);
 
+  // Reinitialize form when tenant/currency data loads (for new bills)
+  // This ensures tenantId and currencyCode are populated even if form initialized before data loaded
+  // CRITICAL: Only runs for NEW bills, NEVER when editing (prevents data corruption)
+  useEffect(() => {
+    if (!open || bill) return; // Only for new bills - prevents corruption of existing bill data
+    if (!currentTenant) return; // Wait for tenant to load
+    if (currenciesLoading) return; // Wait for currencies to finish loading
+    
+    // Reset form with loaded data while preserving any user edits
+    const currentValues = form.getValues();
+    form.reset({
+      bill: {
+        ...currentValues.bill,
+        tenantId: currentTenant.id,
+        currencyCode: baseCurrency?.code || "USD",
+      },
+      lineItems: currentValues.lineItems,
+    });
+  }, [open, bill, currentTenant, currenciesLoading, baseCurrency, form]);
+
   // Reset form when editing and line items have loaded
   useEffect(() => {
     if (!open || !bill || lineItemsLoading || !lineItems) return;
@@ -209,6 +281,7 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
       bill: {
         tenantId: bill.tenantId,
         vendorId: bill.vendorId,
+        currencyCode: bill.currencyCode,
         billNumber: bill.billNumber || "",
         billDate: new Date(bill.billDate).toISOString().split('T')[0],
         dueDate: new Date(bill.dueDate).toISOString().split('T')[0],
@@ -240,6 +313,7 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
       bill: {
         tenantId: currentTenant?.id || "",
         vendorId: "",
+        currencyCode: baseCurrency?.code || "USD",
         billNumber: "",
         billDate: new Date().toISOString().split('T')[0],
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -257,7 +331,7 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
       }],
     });
     setUploadedImage(null);
-  }, [bill, currentTenant, form, open]);
+  }, [bill, currentTenant, baseCurrency, form, open]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -349,6 +423,7 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
         bill: {
           tenantId: values.bill.tenantId,
           vendorId: values.bill.vendorId,
+          currencyCode: values.bill.currencyCode,
           billNumber: values.bill.billNumber || undefined,
           billDate: new Date(values.bill.billDate).toISOString(),
           dueDate: new Date(values.bill.dueDate).toISOString(),
@@ -503,7 +578,7 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
               </Alert>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <FormField
                 control={form.control}
                 name="bill.vendorId"
@@ -523,6 +598,32 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
                         {vendors.map((vendor) => (
                           <SelectItem key={vendor.id} value={vendor.id}>
                             {vendor.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="bill.currencyCode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Currency *</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-currency" disabled={currenciesLoading}>
+                          <SelectValue placeholder={currenciesLoading ? "Loading currencies..." : "Select currency"} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {availableCurrencies.map((currency) => (
+                          <SelectItem key={currency.code} value={currency.code}>
+                            {currency.code} - {currency.name} ({currency.symbol})
+                            {!currency.isActive && ' (Inactive)'}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -808,7 +909,7 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
               </Button>
               <Button 
                 type="submit" 
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || currenciesLoading}
                 data-testid="button-save-bill"
               >
                 {saveMutation.isPending && (

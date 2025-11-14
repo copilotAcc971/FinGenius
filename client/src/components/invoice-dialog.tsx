@@ -207,34 +207,33 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
 
   // Build available currencies list with useMemo
   const availableCurrencies = useMemo(() => {
-    const active = [...activeCurrencies];
+    // If editing invoice and currencies not loaded yet, create placeholder
+    if (invoice?.currencyCode && currencies.length === 0) {
+      return [{
+        code: invoice.currencyCode,
+        name: invoice.currencyCode,
+        symbol: invoice.currencyCode,
+        isActive: false,
+        decimalPlaces: 2,
+        isBaseCurrency: false,
+        tenantId: currentTenant?.id || '',
+        id: 'placeholder'
+      }];
+    }
     
-    // ALWAYS include invoice's currency, even if query not loaded yet
-    const invoiceCurrencyCode = invoice?.currencyCode;
-    if (invoiceCurrencyCode) {
-      // If currencies not loaded yet, create placeholder
-      if (currencies.length === 0) {
-        return [{ 
-          code: invoiceCurrencyCode, 
-          name: invoiceCurrencyCode, 
-          symbol: invoiceCurrencyCode, 
-          isActive: true, 
-          decimalPlaces: 2,
-          isBaseCurrency: false,
-          tenantId: currentTenant?.id || '',
-          id: 'placeholder'
-        }];
-      }
-      
-      // If invoice has inactive currency, include it
-      const invoiceCurrency = currencies.find(c => c.code === invoiceCurrencyCode);
-      if (invoiceCurrency && !invoiceCurrency.isActive && !active.find(c => c.code === invoiceCurrency.code)) {
-        active.push(invoiceCurrency);
+    // Start with all active currencies
+    const available = [...activeCurrencies];
+    
+    // Add ALL inactive currencies (not just invoice's currency)
+    const inactiveCurrencies = currencies.filter(c => !c.isActive);
+    for (const inactive of inactiveCurrencies) {
+      if (!available.find(c => c.code === inactive.code)) {
+        available.push(inactive);
       }
     }
     
     // Sort: active currencies first (alphabetically), then inactive
-    return active.sort((a, b) => {
+    return available.sort((a, b) => {
       if (a.isActive && !b.isActive) return -1;
       if (!a.isActive && b.isActive) return 1;
       return a.code.localeCompare(b.code);
@@ -1131,7 +1130,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                       <Button 
                         type="submit" 
                         variant="outline"
-                        disabled={!isDataReady || saveMutation.isPending || lineItemsLoading} 
+                        disabled={!isDataReady || saveMutation.isPending || lineItemsLoading || currenciesLoading} 
                         data-testid="button-save-draft"
                       >
                         {saveMutation.isPending ? "Saving..." : "Save as Draft"}
@@ -1152,7 +1151,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                       <Button 
                         type="button"
                         onClick={form.handleSubmit(onSaveAndSend)}
-                        disabled={!isDataReady || saveAndSendMutation.isPending || lineItemsLoading} 
+                        disabled={!isDataReady || saveAndSendMutation.isPending || lineItemsLoading || currenciesLoading} 
                         data-testid="button-save-send"
                       >
                         {saveAndSendMutation.isPending ? "Sending..." : "Save & Send"}

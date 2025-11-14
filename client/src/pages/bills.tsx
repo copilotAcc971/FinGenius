@@ -26,7 +26,26 @@ import { useAuth } from "@/hooks/useAuth";
 import { BillDialog } from "@/components/bill-dialog";
 import { BulkBillUpload } from "@/components/bulk-bill-upload";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Bill, Vendor } from "@shared/schema";
+import type { Bill, Vendor, Currency } from "@shared/schema";
+
+// Helper function to format currency amounts
+function formatCurrency(amount: number, currencyCode: string, currencies: Currency[]): string {
+  const currency = currencies.find(c => c.code === currencyCode);
+  const symbol = currency?.symbol || '';
+  const decimals = currency?.decimalPlaces ?? 2;
+  const displayCode = currencyCode || '???';
+  
+  // Format with thousand separators
+  const formatted = amount.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  
+  // Show: "$ USD 1,234.56" or "USD 1,234.56" if no symbol
+  return symbol && symbol !== displayCode 
+    ? `${symbol} ${displayCode} ${formatted}`
+    : `${displayCode} ${formatted}`;
+}
 
 export default function Bills() {
   const { currentTenant } = useTenant();
@@ -56,6 +75,11 @@ export default function Bills() {
 
   const { data: vendors = [] } = useQuery<Vendor[]>({
     queryKey: ["/api/vendors", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [] } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
     enabled: !!currentTenant?.id,
   });
 
@@ -209,6 +233,7 @@ export default function Bills() {
                 <TableHead>Date</TableHead>
                 <TableHead>Due Date</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Currency</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-[50px]"></TableHead>
               </TableRow>
@@ -220,7 +245,10 @@ export default function Bills() {
                   <TableCell>{getVendorName(bill.vendorId)}</TableCell>
                   <TableCell>{new Date(bill.billDate).toLocaleDateString()}</TableCell>
                   <TableCell>{new Date(bill.dueDate).toLocaleDateString()}</TableCell>
-                  <TableCell className="text-right font-mono">${parseFloat(bill.total).toFixed(2)}</TableCell>
+                  <TableCell className="text-right font-mono" data-testid={`amount-${bill.id}`}>
+                    {formatCurrency(parseFloat(bill.total), bill.currencyCode, currencies)}
+                  </TableCell>
+                  <TableCell data-testid={`currency-${bill.id}`}>{bill.currencyCode || 'N/A'}</TableCell>
                   <TableCell>{getStatusBadge(bill.status)}</TableCell>
                   <TableCell>
                     <DropdownMenu>
