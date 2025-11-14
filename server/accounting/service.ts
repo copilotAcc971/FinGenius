@@ -1,0 +1,1417 @@
+/**
+ * Accounting Service Infrastructure
+ * 
+ * This module provides foundational infrastructure for automatic journal entry creation,
+ * including validators, posting helpers, and transaction management. All accounting
+ * operations should use these utilities to ensure data integrity and consistency.
+ * 
+ * Phase 2: Service Infrastructure
+ * - Shared validators for journal entry inputs
+ * - Posting helpers (balance validation, precision normalization, account fetching)
+ * - Transaction management wrapper
+ * - Integrated error handling with typed errors
+ * 
+ * @module server/accounting/service
+ */
+
+import { z } from 'zod';
+import { db } from '../db';
+import type { IStorage } from '../storage';
+import type { Account } from '@shared/schema';
+import {
+  ValidationError,
+  AccountingError,
+  IntegrityError,
+  logError,
+  retryOperation,
+} from './errors';
+
+// ====================================
+// ZOD VALIDATORS
+// ====================================
+
+/**
+ * Helper schema to preprocess decimal values (accept both string and number)
+ * Used for all monetary amounts to ensure consistent handling
+ */
+const decimalString = z.preprocess(
+  (val) => (typeof val === 'number' ? val.toString() : val),
+  z.string()
+);
+
+/**
+ * Schema for a single journal entry line (debit or credit)
+ * 
+ * Business Rules:
+ * - Must have either accountId OR accountCode (for lookups)
+ * - Must have exactly ONE of debitAmount OR creditAmount (not both, not neither)
+ * - Amounts must be positive (>0)
+ * - Description is required for audit trail
+ */
+export const journalEntryLineSchema = z.object({
+  accountId: z.string().optional(),
+  accountCode: z.string().optional(),
+  debitAmount: decimalString.optional(),
+  creditAmount: decimalString.optional(),
+  description: z.string(),
+}).refine(
+  (data) => data.accountId || data.accountCode,
+  {
+    message: "Either accountId or accountCode must be provided",
+  }
+).refine(
+  (data) => {
+    const hasDebit = data.debitAmount && parseFloat(data.debitAmount) > 0;
+    const hasCredit = data.creditAmount && parseFloat(data.creditAmount) > 0;
+    return (hasDebit && !hasCredit) || (!hasDebit && hasCredit);
+  },
+  {
+    message: "Exactly one of debitAmount or creditAmount must be positive (not both or neither)",
+  }
+);
+
+export type JournalEntryLine = z.infer<typeof journalEntryLineSchema>;
+
+/**
+ * Schema for creating a journal entry
+ * 
+ * Business Rules:
+ * - At least 2 lines required (double-entry bookkeeping)
+ * - Entry date is required
+ * - Source document tracking is required for auto-generated entries
+ * - Description provides audit context
+ */
+export const createJournalEntrySchema = z.object({
+  entryDate: z.coerce.date(),
+  description: z.string(),
+  referenceNumber: z.string().optional(),
+  notes: z.string().optional(),
+  sourceDocumentType: z.enum([
+    'invoice',
+    'bill',
+    'payment',
+    'customer_payment',
+    'credit_note',
+    'debit_note',
+    'expense',
+    'fixed_asset',
+  ]),
+  sourceDocumentId: z.string(),
+  lines: z.array(journalEntryLineSchema).min(2), // At least 2 lines for double-entry
+});
+
+export type CreateJournalEntry = z.infer<typeof createJournalEntrySchema>;
+
+// ====================================
+// POSTING HELPERS
+// ====================================
+
+/**
+ * Validates that debits equal credits in a journal entry
+ * 
+ * **Core Accounting Principle:** Double-entry bookkeeping requires that
+ * total debits must equal total credits for every transaction.
+ * 
+ * **Tolerance:** Allows 0.01 difference for floating-point rounding errors
+ * 
+ * @param lines - Array of journal entry lines
+ * @throws {AccountingError} If debits don't equal credits
+ * 
+ * @example
+ * ```typescript
+ * const lines = [
+ *   { accountId: '1', debitAmount: 100.00, description: 'AR' },
+ *   { accountId: '2', creditAmount: 100.00, description: 'Revenue' }
+ * ];
+ * validateBalance(lines); // Pass
+ * 
+ * const unbalanced = [
+ *   { accountId: '1', debitAmount: 100.00, description: 'AR' },
+ *   { accountId: '2', creditAmount: 99.00, description: 'Revenue' }
+ * ];
+ * validateBalance(unbalanced); // Throws AccountingError
+ * ```
+ */
+export function validateBalance(lines: JournalEntryLine[]): void {
+  const totalDebits = lines.reduce((sum, line) => {
+    return sum + (line.debitAmount ? parseFloat(line.debitAmount.toString()) : 0);
+  }, 0);
+  
+  const totalCredits = lines.reduce((sum, line) => {
+    return sum + (line.creditAmount ? parseFloat(line.creditAmount.toString()) : 0);
+  }, 0);
+  
+  // Must match to 2 decimal places (0.01 tolerance for floating-point precision)
+  if (Math.abs(totalDebits - totalCredits) > 0.01) {
+    logError(
+      new AccountingError(
+        `Journal entry not balanced: debits=${totalDebits.toFixed(2)}, credits=${totalCredits.toFixed(2)}`,
+        { totalDebits, totalCredits }
+      )
+    );
+    throw new AccountingError(
+      `Journal entry not balanced: debits=${totalDebits.toFixed(2)}, credits=${totalCredits.toFixed(2)}`,
+      { totalDebits, totalCredits }
+    );
+  }
+}
+
+/**
+ * Normalizes a monetary amount to 2 decimal places
+ * 
+ * **Financial Precision:** All monetary values are stored with exactly 2 decimal places
+ * to prevent rounding errors and maintain consistency with accounting standards.
+ * 
+ * @param amount - The amount to normalize
+ * @returns Amount rounded to 2 decimal places
+ * 
+ * @example
+ * ```typescript
+ * normalizePrecision(10.123); // Returns 10.12
+ * normalizePrecision(10.125); // Returns 10.13 (banker's rounding)
+ * normalizePrecision(10); // Returns 10.00
+ * ```
+ */
+export function normalizePrecision(amount: number): number {
+  // Round to 2 decimal places for financial precision
+  return Math.round(amount * 100) / 100;
+}
+
+/**
+ * Validates a monetary amount against business rules
+ * 
+ * **Validation Rules:**
+ * - Amount must be non-negative (use separate debit/credit fields for direction)
+ * - Amount must be a finite number
+ * - Amount cannot have more than 2 decimal places
+ * 
+ * @param amount - The amount to validate
+ * @param fieldName - Name of the field (for error messages)
+ * @throws {ValidationError} If validation fails
+ * 
+ * @example
+ * ```typescript
+ * validateAmount(100.50, 'debitAmount'); // Pass
+ * validateAmount(-50, 'creditAmount'); // Throws ValidationError (negative)
+ * validateAmount(100.123, 'amount'); // Throws ValidationError (>2 decimals)
+ * validateAmount(Infinity, 'amount'); // Throws ValidationError (not finite)
+ * ```
+ */
+export function validateAmount(amount: number, fieldName: string): void {
+  if (amount < 0) {
+    logError(
+      new ValidationError(`${fieldName} cannot be negative`, { amount }),
+      { fieldName }
+    );
+    throw new ValidationError(`${fieldName} cannot be negative`, { amount });
+  }
+  
+  if (!Number.isFinite(amount)) {
+    logError(
+      new ValidationError(`${fieldName} must be a valid number`, { amount }),
+      { fieldName }
+    );
+    throw new ValidationError(`${fieldName} must be a valid number`, { amount });
+  }
+  
+  // Check precision (max 2 decimal places)
+  const decimalPlaces = (amount.toString().split('.')[1] || '').length;
+  if (decimalPlaces > 2) {
+    logError(
+      new ValidationError(
+        `${fieldName} cannot have more than 2 decimal places`,
+        { amount, decimalPlaces }
+      ),
+      { fieldName }
+    );
+    throw new ValidationError(
+      `${fieldName} cannot have more than 2 decimal places`,
+      { amount, decimalPlaces }
+    );
+  }
+}
+
+/**
+ * Fetches an account by ID with validation
+ * 
+ * **Validation Rules:**
+ * - Account must exist
+ * - Account must be active
+ * - Account must belong to the specified tenant (security)
+ * 
+ * @param storage - Storage instance for database access
+ * @param tenantId - Tenant ID for security isolation
+ * @param accountId - Account ID to fetch
+ * @returns The validated account
+ * @throws {ValidationError} If account not found, inactive, or tenant mismatch
+ * 
+ * @example
+ * ```typescript
+ * const account = await fetchAccount(storage, 'tenant-1', 'account-123');
+ * console.log(account.name); // "Cash"
+ * 
+ * // Throws if account doesn't exist
+ * await fetchAccount(storage, 'tenant-1', 'invalid-id'); // ValidationError
+ * 
+ * // Throws if account is inactive
+ * await fetchAccount(storage, 'tenant-1', 'inactive-account-id'); // ValidationError
+ * ```
+ */
+export async function fetchAccount(
+  storage: IStorage,
+  tenantId: string,
+  accountId: string
+): Promise<Account> {
+  const account = await retryOperation(
+    async () => storage.getAccount(accountId),
+    3, // maxAttempts
+    1000 // delayMs
+  );
+  
+  if (!account) {
+    logError(
+      new ValidationError(`Account not found: ${accountId}`, { accountId }),
+      { tenantId, accountId }
+    );
+    throw new ValidationError(`Account not found: ${accountId}`, { accountId });
+  }
+  
+  // Security: Verify account belongs to tenant
+  if (account.tenantId !== tenantId) {
+    logError(
+      new ValidationError(
+        `Account does not belong to tenant: ${accountId}`,
+        { accountId, accountTenantId: account.tenantId, requestTenantId: tenantId }
+      ),
+      { tenantId, accountId }
+    );
+    throw new ValidationError(
+      `Account does not belong to tenant: ${accountId}`,
+      { accountId, accountTenantId: account.tenantId, requestTenantId: tenantId }
+    );
+  }
+  
+  if (!account.isActive) {
+    logError(
+      new ValidationError(
+        `Account is inactive: ${account.code}`,
+        { accountId, accountCode: account.code }
+      ),
+      { tenantId, accountId }
+    );
+    throw new ValidationError(
+      `Account is inactive: ${account.code}`,
+      { accountId, accountCode: account.code }
+    );
+  }
+  
+  return account;
+}
+
+/**
+ * Fetches an account by code with validation
+ * 
+ * **Validation Rules:**
+ * - Account must exist
+ * - Account code must be unique within tenant
+ * - Account must be active
+ * 
+ * **Use Case:** When creating journal entries from external data (CSV imports, API)
+ * where only the account code is known, not the internal ID.
+ * 
+ * @param storage - Storage instance for database access
+ * @param tenantId - Tenant ID for security isolation
+ * @param accountCode - Account code to lookup (e.g., "1000", "ACC-0001")
+ * @returns The validated account
+ * @throws {ValidationError} If account not found or inactive
+ * @throws {IntegrityError} If multiple accounts have the same code
+ * 
+ * @example
+ * ```typescript
+ * const cashAccount = await fetchAccountByCode(storage, 'tenant-1', '1000');
+ * console.log(cashAccount.name); // "Cash"
+ * 
+ * // Throws if code doesn't exist
+ * await fetchAccountByCode(storage, 'tenant-1', '9999'); // ValidationError
+ * 
+ * // Throws if multiple accounts have same code (data integrity issue)
+ * await fetchAccountByCode(storage, 'tenant-1', 'DUPLICATE'); // IntegrityError
+ * ```
+ */
+export async function fetchAccountByCode(
+  storage: IStorage,
+  tenantId: string,
+  accountCode: string
+): Promise<Account> {
+  const accounts = await retryOperation(
+    async () => storage.getAccountByCode(tenantId, accountCode),
+    3, // maxAttempts
+    1000 // delayMs
+  );
+  
+  if (!accounts || accounts.length === 0) {
+    logError(
+      new ValidationError(`Account not found: ${accountCode}`, { accountCode }),
+      { tenantId, accountCode }
+    );
+    throw new ValidationError(`Account not found: ${accountCode}`, { accountCode });
+  }
+  
+  // Data integrity check: account codes should be unique within a tenant
+  if (accounts.length > 1) {
+    logError(
+      new IntegrityError(
+        `Multiple accounts found with code: ${accountCode}`,
+        { accountCode, accountCount: accounts.length }
+      ),
+      { tenantId, accountCode }
+    );
+    throw new IntegrityError(
+      `Multiple accounts found with code: ${accountCode}`,
+      { accountCode, accountCount: accounts.length }
+    );
+  }
+  
+  const account = accounts[0];
+  if (!account.isActive) {
+    logError(
+      new ValidationError(
+        `Account is inactive: ${accountCode}`,
+        { accountCode, accountId: account.id }
+      ),
+      { tenantId, accountCode }
+    );
+    throw new ValidationError(
+      `Account is inactive: ${accountCode}`,
+      { accountCode, accountId: account.id }
+    );
+  }
+  
+  return account;
+}
+
+// ====================================
+// TRANSACTION HELPER
+// ====================================
+
+/**
+ * Wraps an operation in a database transaction
+ * 
+ * **Atomicity Guarantee:** All operations within the transaction either
+ * succeed together or fail together. If any error occurs, all changes are
+ * automatically rolled back.
+ * 
+ * **CRITICAL:** The operation callback receives a transactional client (`tx`)
+ * that MUST be used for all database operations. Using the global `db` instance
+ * will bypass the transaction and defeat atomicity guarantees.
+ * 
+ * **Use Cases:**
+ * - Creating journal entry with multiple legs
+ * - Posting invoice with automatic journal entry
+ * - Processing payment with multiple account updates
+ * 
+ * **Error Handling:** Transaction automatically rolls back on any error.
+ * The error is re-thrown for handling by the caller.
+ * 
+ * @param operation - Async function that receives the transactional client
+ * @returns Result of the operation
+ * @throws Re-throws any error from the operation after rollback
+ * 
+ * @example
+ * ```typescript
+ * // Create journal entry with multiple lines atomically
+ * const result = await withTransaction(async (tx) => {
+ *   // ✅ Use tx for all database operations
+ *   const entry = await tx.insert(journalEntries).values({
+ *     tenantId: 'tenant-1',
+ *     entryDate: new Date(),
+ *     description: 'Invoice #1001',
+ *   }).returning();
+ *   
+ *   const lines = await tx.insert(journalEntryLineItems).values([
+ *     { journalEntryId: entry[0].id, accountId: 'acc-1', debitAmount: '100.00' },
+ *     { journalEntryId: entry[0].id, accountId: 'acc-2', creditAmount: '100.00' },
+ *   ]).returning();
+ *   
+ *   return { entry: entry[0], lines };
+ * });
+ * // If line insertion fails, entry insertion is automatically rolled back
+ * 
+ * // Multi-step accounting operation
+ * await withTransaction(async (tx) => {
+ *   // ✅ All operations use tx
+ *   await tx.update(accounts).set({ balance: '500.00' }).where(eq(accounts.id, accountId1));
+ *   await tx.update(accounts).set({ balance: '300.00' }).where(eq(accounts.id, accountId2));
+ *   await tx.insert(auditLog).values({ action: 'transfer', amount: '200.00' });
+ * });
+ * 
+ * // ❌ WRONG - using global db defeats transaction
+ * await withTransaction(async (tx) => {
+ *   await db.insert(table1).values({...}); // ❌ Won't be part of transaction!
+ *   await tx.insert(table2).values({...});  // ✅ Will be part of transaction
+ * });
+ * ```
+ */
+export async function withTransaction<T>(
+  operation: (tx: typeof db) => Promise<T>
+): Promise<T> {
+  // Use database transaction to ensure atomicity
+  return db.transaction(async (tx) => {
+    try {
+      // Pass the transactional client to the operation
+      return await operation(tx);
+    } catch (error) {
+      // Transaction will auto-rollback on error
+      logError(error as Error, { context: 'withTransaction' });
+      throw error;
+    }
+  });
+}
+
+// ====================================
+// UNIT TESTS FOR SCHEMA VALIDATION
+// ====================================
+
+/**
+ * Unit tests for journalEntryLineSchema validation
+ * 
+ * These tests verify the critical business rules:
+ * 1. At least one of accountId or accountCode must be provided
+ * 2. Exactly one of debitAmount or creditAmount must be positive
+ * 3. Amounts must be positive (>0)
+ * 
+ * Run these tests to verify schema enforcement before deploying
+ */
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+
+  describe('journalEntryLineSchema validation', () => {
+    describe('Valid scenarios', () => {
+      it('should accept valid line with accountId and debitAmount only', () => {
+        const validLine = {
+          accountId: 'acc-123',
+          debitAmount: '100.00',
+          description: 'Test debit entry',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(validLine);
+        expect(result.success).toBe(true);
+      });
+
+      it('should accept valid line with accountCode and creditAmount only', () => {
+        const validLine = {
+          accountCode: '1000',
+          creditAmount: '250.50',
+          description: 'Test credit entry',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(validLine);
+        expect(result.success).toBe(true);
+      });
+
+      it('should accept valid line with both accountId and accountCode', () => {
+        const validLine = {
+          accountId: 'acc-123',
+          accountCode: '1000',
+          debitAmount: '75.25',
+          description: 'Test entry with both identifiers',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(validLine);
+        expect(result.success).toBe(true);
+      });
+    });
+
+    describe('Invalid scenarios - missing account identifier', () => {
+      it('should reject line with neither accountId nor accountCode', () => {
+        const invalidLine = {
+          debitAmount: '100.00',
+          description: 'Missing account identifier',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(invalidLine);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.errors[0].message).toContain('Either accountId or accountCode must be provided');
+        }
+      });
+    });
+
+    describe('Invalid scenarios - debit/credit mutual exclusivity', () => {
+      it('should reject line with both debitAmount and creditAmount', () => {
+        const invalidLine = {
+          accountId: 'acc-123',
+          debitAmount: '100.00',
+          creditAmount: '100.00',
+          description: 'Both debit and credit',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(invalidLine);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.errors[0].message).toContain('Exactly one of debitAmount or creditAmount must be positive');
+        }
+      });
+
+      it('should reject line with neither debitAmount nor creditAmount', () => {
+        const invalidLine = {
+          accountId: 'acc-123',
+          description: 'No amount specified',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(invalidLine);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.errors[0].message).toContain('Exactly one of debitAmount or creditAmount must be positive');
+        }
+      });
+    });
+
+    describe('Invalid scenarios - zero or negative amounts', () => {
+      it('should reject line with debitAmount = 0', () => {
+        const invalidLine = {
+          accountId: 'acc-123',
+          debitAmount: '0',
+          description: 'Zero debit amount',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(invalidLine);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.errors[0].message).toContain('Exactly one of debitAmount or creditAmount must be positive');
+        }
+      });
+
+      it('should reject line with creditAmount = 0', () => {
+        const invalidLine = {
+          accountId: 'acc-123',
+          creditAmount: '0.00',
+          description: 'Zero credit amount',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(invalidLine);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.errors[0].message).toContain('Exactly one of debitAmount or creditAmount must be positive');
+        }
+      });
+
+      it('should reject line with negative debitAmount', () => {
+        const invalidLine = {
+          accountId: 'acc-123',
+          debitAmount: '-50.00',
+          description: 'Negative debit amount',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(invalidLine);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.errors[0].message).toContain('Exactly one of debitAmount or creditAmount must be positive');
+        }
+      });
+
+      it('should reject line with negative creditAmount', () => {
+        const invalidLine = {
+          accountId: 'acc-123',
+          creditAmount: '-100.00',
+          description: 'Negative credit amount',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(invalidLine);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.errors[0].message).toContain('Exactly one of debitAmount or creditAmount must be positive');
+        }
+      });
+    });
+
+    describe('Edge cases', () => {
+      it('should accept very small positive amounts', () => {
+        const validLine = {
+          accountId: 'acc-123',
+          debitAmount: '0.01',
+          description: 'Minimum valid amount',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(validLine);
+        expect(result.success).toBe(true);
+      });
+
+      it('should accept large amounts', () => {
+        const validLine = {
+          accountId: 'acc-123',
+          creditAmount: '999999999.99',
+          description: 'Large amount',
+        };
+        
+        const result = journalEntryLineSchema.safeParse(validLine);
+        expect(result.success).toBe(true);
+      });
+    });
+  });
+
+  // ====================================
+  // CREATE JOURNAL ENTRY SCHEMA TESTS
+  // ====================================
+
+  describe('createJournalEntrySchema validation', () => {
+    describe('ISO Date String Handling (Critical for JSON Payloads)', () => {
+      it('should accept ISO date string from JSON payload', () => {
+        // CRITICAL: JSON payloads from API routes provide ISO strings, not Date instances
+        const jsonPayload = {
+          entryDate: "2025-11-14",  // ISO string (typical JSON payload)
+          description: "Test entry from JSON",
+          sourceDocumentType: "invoice" as const,
+          sourceDocumentId: "inv-123",
+          lines: [
+            {
+              accountCode: "1000",
+              debitAmount: "100.00",
+              description: "Debit line"
+            },
+            {
+              accountCode: "4000",
+              creditAmount: "100.00",
+              description: "Credit line"
+            }
+          ]
+        };
+
+        const result = createJournalEntrySchema.safeParse(jsonPayload);
+        
+        // Should successfully parse the payload
+        expect(result.success).toBe(true);
+        
+        if (result.success) {
+          // Should coerce the ISO string to a Date instance
+          expect(result.data.entryDate).toBeInstanceOf(Date);
+          
+          // Verify the date was parsed correctly
+          expect(result.data.entryDate.toISOString().split('T')[0]).toBe('2025-11-14');
+        }
+      });
+
+      it('should accept Date instance (backward compatibility)', () => {
+        const payload = {
+          entryDate: new Date('2025-11-14'),  // Date instance
+          description: "Test entry with Date instance",
+          sourceDocumentType: "bill" as const,
+          sourceDocumentId: "bill-456",
+          lines: [
+            {
+              accountId: "acc-123",
+              debitAmount: "200.00",
+              description: "Debit line"
+            },
+            {
+              accountId: "acc-456",
+              creditAmount: "200.00",
+              description: "Credit line"
+            }
+          ]
+        };
+
+        const result = createJournalEntrySchema.safeParse(payload);
+        
+        expect(result.success).toBe(true);
+        
+        if (result.success) {
+          expect(result.data.entryDate).toBeInstanceOf(Date);
+        }
+      });
+
+      it('should accept ISO datetime string with time component', () => {
+        const payload = {
+          entryDate: "2025-11-14T10:30:00Z",  // ISO datetime string
+          description: "Entry with datetime",
+          sourceDocumentType: "payment" as const,
+          sourceDocumentId: "pay-789",
+          lines: [
+            {
+              accountCode: "1000",
+              debitAmount: "50.00",
+              description: "Debit line"
+            },
+            {
+              accountCode: "2000",
+              creditAmount: "50.00",
+              description: "Credit line"
+            }
+          ]
+        };
+
+        const result = createJournalEntrySchema.safeParse(payload);
+        
+        expect(result.success).toBe(true);
+        
+        if (result.success) {
+          expect(result.data.entryDate).toBeInstanceOf(Date);
+        }
+      });
+
+      it('should reject invalid date string', () => {
+        const payload = {
+          entryDate: "not-a-date",  // Invalid date string
+          description: "Invalid date entry",
+          sourceDocumentType: "invoice" as const,
+          sourceDocumentId: "inv-999",
+          lines: [
+            {
+              accountCode: "1000",
+              debitAmount: "100.00",
+              description: "Debit line"
+            },
+            {
+              accountCode: "4000",
+              creditAmount: "100.00",
+              description: "Credit line"
+            }
+          ]
+        };
+
+        const result = createJournalEntrySchema.safeParse(payload);
+        
+        expect(result.success).toBe(false);
+      });
+    });
+
+    describe('Required Fields Validation', () => {
+      it('should require entryDate', () => {
+        const payload = {
+          // Missing entryDate
+          description: "Missing date",
+          sourceDocumentType: "invoice" as const,
+          sourceDocumentId: "inv-001",
+          lines: [
+            {
+              accountCode: "1000",
+              debitAmount: "100.00",
+              description: "Debit line"
+            },
+            {
+              accountCode: "4000",
+              creditAmount: "100.00",
+              description: "Credit line"
+            }
+          ]
+        };
+
+        const result = createJournalEntrySchema.safeParse(payload);
+        expect(result.success).toBe(false);
+      });
+
+      it('should require minimum 2 lines for double-entry', () => {
+        const payload = {
+          entryDate: "2025-11-14",
+          description: "Single line entry",
+          sourceDocumentType: "invoice" as const,
+          sourceDocumentId: "inv-002",
+          lines: [
+            {
+              accountCode: "1000",
+              debitAmount: "100.00",
+              description: "Only one line"
+            }
+          ]
+        };
+
+        const result = createJournalEntrySchema.safeParse(payload);
+        expect(result.success).toBe(false);
+      });
+    });
+  });
+
+  // ====================================
+  // TRANSACTION TESTS
+  // ====================================
+
+  describe('withTransaction - Transaction Atomicity', () => {
+    const { journalEntries, journalEntryLegs, tenants, users } = await import('@shared/schema');
+    const { eq } = await import('drizzle-orm');
+    
+    describe('Transaction Rollback on Error', () => {
+      it('should rollback all changes when an error is thrown mid-transaction', async () => {
+        // Create test tenant and user for isolation
+        const testTenantId = `test-tenant-rollback-${Date.now()}`;
+        const testUserId = `test-user-rollback-${Date.now()}`;
+        
+        // Setup: Create user and tenant
+        await db.insert(users).values({
+          id: testUserId,
+          email: `rollback-test-${Date.now()}@example.com`,
+          firstName: 'Rollback',
+          lastName: 'Test',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Rollback Test Tenant',
+          ownerId: testUserId,
+        });
+
+        // Verify no journal entries exist for this tenant
+        const beforeEntries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.tenantId, testTenantId));
+        expect(beforeEntries).toHaveLength(0);
+
+        // Attempt transaction that will fail midway
+        try {
+          await withTransaction(async (tx) => {
+            // Step 1: Insert journal entry (should succeed initially)
+            const [entry] = await tx.insert(journalEntries).values({
+              tenantId: testTenantId,
+              entryDate: new Date('2024-01-01'),
+              description: 'Test Entry - Should Rollback',
+              status: 'draft',
+              referenceNumber: 'TEST-ROLLBACK-001',
+            }).returning();
+
+            // Step 2: Insert first journal entry leg (should succeed initially)
+            await tx.insert(journalEntryLegs).values({
+              journalEntryId: entry.id,
+              accountId: 'acc-debit-test',
+              debitAmount: '100.00',
+              creditAmount: '0.00',
+              description: 'Debit leg - should rollback',
+            });
+
+            // Step 3: Throw error to trigger rollback
+            throw new Error('Simulated error to test rollback');
+          });
+
+          // Should not reach here
+          expect.fail('Transaction should have thrown an error');
+        } catch (error) {
+          // Error is expected
+          expect((error as Error).message).toContain('Simulated error to test rollback');
+        }
+
+        // Verify rollback: No entries should exist for this tenant
+        const afterEntries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.tenantId, testTenantId));
+        expect(afterEntries).toHaveLength(0);
+
+        const afterLegs = await db.select()
+          .from(journalEntryLegs)
+          .where(eq(journalEntryLegs.description, 'Debit leg - should rollback'));
+        expect(afterLegs).toHaveLength(0);
+
+        // Cleanup
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+
+      it('should rollback journal entry and all legs when leg insertion fails', async () => {
+        const testTenantId = `test-tenant-rollback-legs-${Date.now()}`;
+        const testUserId = `test-user-rollback-legs-${Date.now()}`;
+
+        // Setup
+        await db.insert(users).values({
+          id: testUserId,
+          email: `rollback-legs-test-${Date.now()}@example.com`,
+          firstName: 'Rollback',
+          lastName: 'Legs Test',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Rollback Legs Test Tenant',
+          ownerId: testUserId,
+        });
+
+        try {
+          await withTransaction(async (tx) => {
+            // Insert journal entry
+            const [entry] = await tx.insert(journalEntries).values({
+              tenantId: testTenantId,
+              entryDate: new Date('2024-01-01'),
+              description: 'Entry with failed leg',
+              status: 'draft',
+            }).returning();
+
+            // Insert first leg (succeeds)
+            await tx.insert(journalEntryLegs).values({
+              journalEntryId: entry.id,
+              accountId: 'acc-debit',
+              debitAmount: '100.00',
+              creditAmount: '0.00',
+              description: 'First leg - should rollback',
+            });
+
+            // Attempt to insert second leg with invalid data (force error)
+            // Using a non-existent journal entry ID will violate foreign key
+            await tx.insert(journalEntryLegs).values({
+              journalEntryId: 'non-existent-entry-id',
+              accountId: 'acc-credit',
+              debitAmount: '0.00',
+              creditAmount: '100.00',
+              description: 'Second leg - invalid',
+            });
+          });
+
+          expect.fail('Transaction should have failed');
+        } catch (error) {
+          // Expected to fail
+        }
+
+        // Verify complete rollback
+        const entries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.tenantId, testTenantId));
+        expect(entries).toHaveLength(0);
+
+        const legs = await db.select()
+          .from(journalEntryLegs)
+          .where(eq(journalEntryLegs.description, 'First leg - should rollback'));
+        expect(legs).toHaveLength(0);
+
+        // Cleanup
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+    });
+
+    describe('Transaction Commit on Success', () => {
+      it('should commit all changes when transaction completes successfully', async () => {
+        const testTenantId = `test-tenant-commit-${Date.now()}`;
+        const testUserId = `test-user-commit-${Date.now()}`;
+
+        // Setup
+        await db.insert(users).values({
+          id: testUserId,
+          email: `commit-test-${Date.now()}@example.com`,
+          firstName: 'Commit',
+          lastName: 'Test',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Commit Test Tenant',
+          ownerId: testUserId,
+        });
+
+        // Execute successful transaction
+        const result = await withTransaction(async (tx) => {
+          // Insert journal entry
+          const [entry] = await tx.insert(journalEntries).values({
+            tenantId: testTenantId,
+            entryDate: new Date('2024-01-15'),
+            description: 'Complete Transaction Test',
+            status: 'posted',
+            referenceNumber: 'TEST-COMMIT-001',
+          }).returning();
+
+          // Insert debit leg
+          const [debitLeg] = await tx.insert(journalEntryLegs).values({
+            journalEntryId: entry.id,
+            accountId: 'acc-ar',
+            debitAmount: '500.00',
+            creditAmount: '0.00',
+            description: 'Accounts Receivable',
+          }).returning();
+
+          // Insert credit leg
+          const [creditLeg] = await tx.insert(journalEntryLegs).values({
+            journalEntryId: entry.id,
+            accountId: 'acc-revenue',
+            debitAmount: '0.00',
+            creditAmount: '500.00',
+            description: 'Revenue',
+          }).returning();
+
+          return { entry, debitLeg, creditLeg };
+        });
+
+        // Verify transaction was committed
+        expect(result.entry).toBeDefined();
+        expect(result.entry.tenantId).toBe(testTenantId);
+        expect(result.entry.referenceNumber).toBe('TEST-COMMIT-001');
+
+        // Verify entry persisted in database
+        const persistedEntries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.tenantId, testTenantId));
+        expect(persistedEntries).toHaveLength(1);
+        expect(persistedEntries[0].description).toBe('Complete Transaction Test');
+
+        // Verify both legs persisted
+        const persistedLegs = await db.select()
+          .from(journalEntryLegs)
+          .where(eq(journalEntryLegs.journalEntryId, result.entry.id));
+        expect(persistedLegs).toHaveLength(2);
+
+        // Verify debit leg
+        const debitLeg = persistedLegs.find(leg => leg.debitAmount !== '0.00');
+        expect(debitLeg).toBeDefined();
+        expect(debitLeg?.debitAmount).toBe('500.00');
+        expect(debitLeg?.description).toBe('Accounts Receivable');
+
+        // Verify credit leg
+        const creditLeg = persistedLegs.find(leg => leg.creditAmount !== '0.00');
+        expect(creditLeg).toBeDefined();
+        expect(creditLeg?.creditAmount).toBe('500.00');
+        expect(creditLeg?.description).toBe('Revenue');
+
+        // Cleanup
+        await db.delete(journalEntryLegs).where(eq(journalEntryLegs.journalEntryId, result.entry.id));
+        await db.delete(journalEntries).where(eq(journalEntries.id, result.entry.id));
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+
+      it('should handle multiple nested operations atomically', async () => {
+        const testTenantId = `test-tenant-nested-${Date.now()}`;
+        const testUserId = `test-user-nested-${Date.now()}`;
+
+        // Setup
+        await db.insert(users).values({
+          id: testUserId,
+          email: `nested-test-${Date.now()}@example.com`,
+          firstName: 'Nested',
+          lastName: 'Test',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Nested Transaction Test',
+          ownerId: testUserId,
+        });
+
+        // Execute transaction with multiple entries
+        const results = await withTransaction(async (tx) => {
+          const entries = [];
+
+          // Create first journal entry
+          const [entry1] = await tx.insert(journalEntries).values({
+            tenantId: testTenantId,
+            entryDate: new Date('2024-01-01'),
+            description: 'Entry 1',
+            status: 'posted',
+          }).returning();
+          entries.push(entry1);
+
+          // Create legs for entry 1
+          await tx.insert(journalEntryLegs).values([
+            {
+              journalEntryId: entry1.id,
+              accountId: 'acc-1',
+              debitAmount: '100.00',
+              creditAmount: '0.00',
+              description: 'Entry 1 Debit',
+            },
+            {
+              journalEntryId: entry1.id,
+              accountId: 'acc-2',
+              debitAmount: '0.00',
+              creditAmount: '100.00',
+              description: 'Entry 1 Credit',
+            },
+          ]);
+
+          // Create second journal entry
+          const [entry2] = await tx.insert(journalEntries).values({
+            tenantId: testTenantId,
+            entryDate: new Date('2024-01-02'),
+            description: 'Entry 2',
+            status: 'posted',
+          }).returning();
+          entries.push(entry2);
+
+          // Create legs for entry 2
+          await tx.insert(journalEntryLegs).values([
+            {
+              journalEntryId: entry2.id,
+              accountId: 'acc-3',
+              debitAmount: '200.00',
+              creditAmount: '0.00',
+              description: 'Entry 2 Debit',
+            },
+            {
+              journalEntryId: entry2.id,
+              accountId: 'acc-4',
+              debitAmount: '0.00',
+              creditAmount: '200.00',
+              description: 'Entry 2 Credit',
+            },
+          ]);
+
+          return entries;
+        });
+
+        // Verify all entries persisted
+        const persistedEntries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.tenantId, testTenantId));
+        expect(persistedEntries).toHaveLength(2);
+
+        // Verify all legs persisted (4 total: 2 per entry)
+        const allLegs = await db.select().from(journalEntryLegs);
+        const relevantLegs = allLegs.filter(leg => 
+          results.some(entry => entry.id === leg.journalEntryId)
+        );
+        expect(relevantLegs).toHaveLength(4);
+
+        // Cleanup
+        for (const entry of results) {
+          await db.delete(journalEntryLegs).where(eq(journalEntryLegs.journalEntryId, entry.id));
+          await db.delete(journalEntries).where(eq(journalEntries.id, entry.id));
+        }
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+    });
+  });
+
+  // ====================================
+  // STORAGE LAYER INTEGRATION TESTS
+  // ====================================
+
+  describe('Storage Layer Transaction Integration', () => {
+    const { DatabaseStorage } = await import('../storage');
+    const { journalEntries, journalEntryLegs, tenants, users } = await import('@shared/schema');
+    const { eq } = await import('drizzle-orm');
+    const storage = new DatabaseStorage();
+
+    describe('createJournalEntry with transaction support', () => {
+      it('should rollback journal entry when transaction fails', async () => {
+        const testTenantId = `test-storage-rollback-${Date.now()}`;
+        const testUserId = `test-storage-user-rollback-${Date.now()}`;
+
+        // Setup test tenant and user
+        await db.insert(users).values({
+          id: testUserId,
+          email: `storage-rollback-${Date.now()}@example.com`,
+          firstName: 'Storage',
+          lastName: 'Rollback',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Storage Rollback Test',
+          ownerId: testUserId,
+        });
+
+        // Verify no entries exist before test
+        const beforeEntries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.tenantId, testTenantId));
+        expect(beforeEntries).toHaveLength(0);
+
+        // Attempt transaction that will fail
+        try {
+          await withTransaction(async (tx) => {
+            // Create journal entry using storage layer WITH tx
+            const entry = await storage.createJournalEntry(
+              testTenantId,
+              {
+                entryDate: new Date('2024-01-01'),
+                description: 'Test Entry - Should Rollback',
+                status: 'draft',
+                referenceNumber: 'STORAGE-ROLLBACK-001',
+              },
+              tx // ✅ Pass transaction
+            );
+
+            // Create first leg using storage layer WITH tx
+            await storage.createJournalEntryLegs(
+              testTenantId,
+              [{
+                journalEntryId: entry.id,
+                accountId: 'acc-test-debit',
+                type: 'Debit',
+                amount: '100.00',
+                description: 'Debit leg - should rollback',
+              }],
+              tx // ✅ Pass transaction
+            );
+
+            // Force error to trigger rollback
+            throw new Error('Storage layer rollback test');
+          });
+
+          expect.fail('Transaction should have thrown an error');
+        } catch (error) {
+          expect((error as Error).message).toContain('Storage layer rollback test');
+        }
+
+        // Verify rollback: Entry should NOT exist
+        const afterEntries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.tenantId, testTenantId));
+        expect(afterEntries).toHaveLength(0);
+
+        // Verify rollback: Legs should NOT exist
+        const afterLegs = await db.select()
+          .from(journalEntryLegs)
+          .where(eq(journalEntryLegs.description, 'Debit leg - should rollback'));
+        expect(afterLegs).toHaveLength(0);
+
+        // Cleanup
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+
+      it('should commit journal entry and legs when transaction succeeds', async () => {
+        const testTenantId = `test-storage-commit-${Date.now()}`;
+        const testUserId = `test-storage-user-commit-${Date.now()}`;
+
+        // Setup
+        await db.insert(users).values({
+          id: testUserId,
+          email: `storage-commit-${Date.now()}@example.com`,
+          firstName: 'Storage',
+          lastName: 'Commit',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Storage Commit Test',
+          ownerId: testUserId,
+        });
+
+        // Execute successful transaction using storage layer
+        const result = await withTransaction(async (tx) => {
+          // Create journal entry using storage layer WITH tx
+          const entry = await storage.createJournalEntry(
+            testTenantId,
+            {
+              entryDate: new Date('2024-02-01'),
+              description: 'Storage Layer Commit Test',
+              status: 'posted',
+              referenceNumber: 'STORAGE-COMMIT-001',
+            },
+            tx // ✅ Pass transaction
+          );
+
+          // Create legs using storage layer WITH tx
+          const legs = await storage.createJournalEntryLegs(
+            testTenantId,
+            [
+              {
+                journalEntryId: entry.id,
+                accountId: 'acc-ar-storage',
+                type: 'Debit',
+                amount: '250.00',
+                description: 'Accounts Receivable (storage)',
+              },
+              {
+                journalEntryId: entry.id,
+                accountId: 'acc-revenue-storage',
+                type: 'Credit',
+                amount: '250.00',
+                description: 'Revenue (storage)',
+              },
+            ],
+            tx // ✅ Pass transaction
+          );
+
+          return { entry, legs };
+        });
+
+        // Verify entry was committed
+        expect(result.entry).toBeDefined();
+        expect(result.entry.tenantId).toBe(testTenantId);
+        expect(result.entry.referenceNumber).toBe('STORAGE-COMMIT-001');
+
+        // Verify entry persisted in database
+        const persistedEntries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.tenantId, testTenantId));
+        expect(persistedEntries).toHaveLength(1);
+        expect(persistedEntries[0].description).toBe('Storage Layer Commit Test');
+
+        // Verify legs were committed
+        expect(result.legs).toHaveLength(2);
+
+        const persistedLegs = await db.select()
+          .from(journalEntryLegs)
+          .where(eq(journalEntryLegs.journalEntryId, result.entry.id));
+        expect(persistedLegs).toHaveLength(2);
+
+        // Verify debit leg
+        const debitLeg = persistedLegs.find(leg => leg.type === 'Debit');
+        expect(debitLeg).toBeDefined();
+        expect(debitLeg?.amount).toBe('250.00');
+        expect(debitLeg?.description).toBe('Accounts Receivable (storage)');
+
+        // Verify credit leg
+        const creditLeg = persistedLegs.find(leg => leg.type === 'Credit');
+        expect(creditLeg).toBeDefined();
+        expect(creditLeg?.amount).toBe('250.00');
+        expect(creditLeg?.description).toBe('Revenue (storage)');
+
+        // Cleanup
+        await db.delete(journalEntryLegs).where(eq(journalEntryLegs.journalEntryId, result.entry.id));
+        await db.delete(journalEntries).where(eq(journalEntries.id, result.entry.id));
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+
+      it('should use global db when tx is not provided', async () => {
+        const testTenantId = `test-storage-no-tx-${Date.now()}`;
+        const testUserId = `test-storage-user-no-tx-${Date.now()}`;
+
+        // Setup
+        await db.insert(users).values({
+          id: testUserId,
+          email: `storage-no-tx-${Date.now()}@example.com`,
+          firstName: 'Storage',
+          lastName: 'NoTx',
+        });
+
+        await db.insert(tenants).values({
+          id: testTenantId,
+          name: 'Storage No Tx Test',
+          ownerId: testUserId,
+        });
+
+        // Create entry WITHOUT transaction (tx parameter omitted)
+        const entry = await storage.createJournalEntry(
+          testTenantId,
+          {
+            entryDate: new Date('2024-03-01'),
+            description: 'Entry without transaction context',
+            status: 'draft',
+            referenceNumber: 'STORAGE-NO-TX-001',
+          }
+          // ✅ No tx parameter - should use global db
+        );
+
+        // Create legs WITHOUT transaction
+        const legs = await storage.createJournalEntryLegs(
+          testTenantId,
+          [{
+            journalEntryId: entry.id,
+            accountId: 'acc-test',
+            type: 'Debit',
+            amount: '50.00',
+            description: 'Test leg without tx',
+          }]
+          // ✅ No tx parameter - should use global db
+        );
+
+        // Verify entry persisted (even without explicit transaction)
+        const persistedEntries = await db.select()
+          .from(journalEntries)
+          .where(eq(journalEntries.id, entry.id));
+        expect(persistedEntries).toHaveLength(1);
+        expect(persistedEntries[0].referenceNumber).toBe('STORAGE-NO-TX-001');
+
+        // Verify legs persisted
+        expect(legs).toHaveLength(1);
+        const persistedLegs = await db.select()
+          .from(journalEntryLegs)
+          .where(eq(journalEntryLegs.journalEntryId, entry.id));
+        expect(persistedLegs).toHaveLength(1);
+
+        // Cleanup
+        await db.delete(journalEntryLegs).where(eq(journalEntryLegs.journalEntryId, entry.id));
+        await db.delete(journalEntries).where(eq(journalEntries.id, entry.id));
+        await db.delete(tenants).where(eq(tenants.id, testTenantId));
+        await db.delete(users).where(eq(users.id, testUserId));
+      });
+    });
+  });
+}

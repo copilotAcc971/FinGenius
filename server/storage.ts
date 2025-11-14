@@ -161,6 +161,7 @@ export interface IStorage {
   // Account operations
   getAccounts(tenantId: string): Promise<Account[]>;
   getAccount(id: string): Promise<Account | undefined>;
+  getAccountByCode(tenantId: string, code: string): Promise<Account[]>;
   createAccount(account: InsertAccount & { tenantId: string }): Promise<Account>;
   updateAccount(id: string, tenantId: string, account: Partial<InsertAccount>): Promise<Account>;
   deleteAccount(id: string, tenantId: string): Promise<void>;
@@ -302,6 +303,18 @@ export interface IStorage {
   updateJournalEntryWithLegs(id: string, tenantId: string, payload: JournalEntryPayload): Promise<JournalEntry>;
   deleteJournalEntry(id: string, tenantId: string): Promise<void>;
   getNextJournalEntryNumber(tenantId: string): Promise<string>;
+  
+  // Transaction-enabled journal entry methods (Phase 3)
+  createJournalEntry(
+    tenantId: string,
+    data: InsertJournalEntry,
+    tx?: typeof db
+  ): Promise<JournalEntry>;
+  createJournalEntryLegs(
+    tenantId: string,
+    data: InsertJournalEntryLeg[],
+    tx?: typeof db
+  ): Promise<JournalEntryLeg[]>;
 
   // Asset operations
   getAssets(tenantId: string): Promise<Asset[]>;
@@ -605,6 +618,13 @@ export class DatabaseStorage implements IStorage {
   async getAccount(id: string): Promise<Account | undefined> {
     const [account] = await db.select().from(accounts).where(eq(accounts.id, id));
     return account;
+  }
+
+  async getAccountByCode(tenantId: string, code: string): Promise<Account[]> {
+    return await db
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.tenantId, tenantId), eq(accounts.code, code)));
   }
 
   async createAccount(accountData: InsertAccount & { tenantId: string }): Promise<Account> {
@@ -3699,6 +3719,44 @@ export class DatabaseStorage implements IStorage {
 
       return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
     });
+  }
+
+  // Transaction-enabled journal entry methods (Phase 3)
+  async createJournalEntry(
+    tenantId: string,
+    data: InsertJournalEntry,
+    tx?: typeof db
+  ): Promise<JournalEntry> {
+    const client = tx || db; // Use tx if provided, fallback to db
+    const [entry] = await client
+      .insert(journalEntries)
+      .values({ ...data, tenantId })
+      .returning();
+    
+    if (!entry) {
+      throw new Error("Failed to create journal entry");
+    }
+    
+    return entry;
+  }
+
+  async createJournalEntryLegs(
+    tenantId: string,
+    data: InsertJournalEntryLeg[],
+    tx?: typeof db
+  ): Promise<JournalEntryLeg[]> {
+    const client = tx || db; // Use tx if provided, fallback to db
+    
+    if (data.length === 0) {
+      return [];
+    }
+    
+    const legs = await client
+      .insert(journalEntryLegs)
+      .values(data.map(d => ({ ...d, tenantId })))
+      .returning();
+    
+    return legs;
   }
 
   // Asset operations
