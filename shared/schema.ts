@@ -833,6 +833,29 @@ export const insertPaymentSchema = createInsertSchema(payments, {
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
 
+// Bill Payment Applications (tracks payment allocations to bills)
+export const billPaymentApplications = pgTable("bill_payment_applications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  paymentId: varchar("payment_id").notNull().references(() => payments.id),
+  billId: varchar("bill_id").notNull().references(() => bills.id),
+  amountApplied: decimal("amount_applied", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("bill_payment_applications_payment_idx").on(table.paymentId),
+  index("bill_payment_applications_bill_idx").on(table.billId),
+]);
+
+export const insertBillPaymentApplicationSchema = createInsertSchema(billPaymentApplications, {
+  amountApplied: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertBillPaymentApplication = z.infer<typeof insertBillPaymentApplicationSchema>;
+export type BillPaymentApplication = typeof billPaymentApplications.$inferSelect;
+
 // Document Uploads (for AI extraction)
 export const documents = pgTable("documents", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1151,6 +1174,29 @@ export const insertCustomerPaymentSequenceSchema = createInsertSchema(customerPa
 
 export type InsertCustomerPaymentSequence = z.infer<typeof insertCustomerPaymentSequenceSchema>;
 export type CustomerPaymentSequence = typeof customerPaymentSequences.$inferSelect;
+
+// Customer Payment Applications (tracks payment allocations to invoices)
+export const customerPaymentApplications = pgTable("customer_payment_applications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  paymentId: varchar("payment_id").notNull().references(() => customerPayments.id),
+  invoiceId: varchar("invoice_id").notNull().references(() => invoices.id),
+  amountApplied: decimal("amount_applied", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("customer_payment_applications_payment_idx").on(table.paymentId),
+  index("customer_payment_applications_invoice_idx").on(table.invoiceId),
+]);
+
+export const insertCustomerPaymentApplicationSchema = createInsertSchema(customerPaymentApplications, {
+  amountApplied: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCustomerPaymentApplication = z.infer<typeof insertCustomerPaymentApplicationSchema>;
+export type CustomerPaymentApplication = typeof customerPaymentApplications.$inferSelect;
 
 // Recurring Invoices
 export const recurringInvoices = pgTable("recurring_invoices", {
