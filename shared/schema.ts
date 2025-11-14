@@ -11,6 +11,7 @@ import {
   decimal,
   boolean,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -73,6 +74,76 @@ export const insertTenantSchema = createInsertSchema(tenants).omit({
 
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
+
+// Helper to preprocess decimal values (accept both string and number)
+const decimalString = z.preprocess(
+  (val) => (typeof val === 'number' ? val.toString() : val),
+  z.string()
+);
+
+// ====================================
+// MULTI-CURRENCY SUPPORT
+// ====================================
+
+// Currencies (ISO 4217 currency codes per tenant)
+export const currencies = pgTable("currencies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  code: varchar("code", { length: 3 }).notNull(), // ISO 4217 (USD, AED, EUR, GBP, etc.)
+  name: varchar("name", { length: 100 }).notNull(), // US Dollar, UAE Dirham, Euro, etc.
+  symbol: varchar("symbol", { length: 10 }).notNull(), // $, د.إ, €, £, etc.
+  isBaseCurrency: boolean("is_base_currency").default(false).notNull(), // One base currency per tenant
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_currency_per_tenant").on(table.tenantId, table.code),
+  index("currencies_tenant_idx").on(table.tenantId),
+  index("currencies_code_idx").on(table.code),
+  // Partial unique index - only one base currency per tenant (database-enforced)
+  uniqueIndex("unique_base_currency_per_tenant").on(table.tenantId).where(sql`${table.isBaseCurrency} = true`),
+]);
+
+export const insertCurrencySchema = createInsertSchema(currencies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCurrency = z.infer<typeof insertCurrencySchema>;
+export type Currency = typeof currencies.$inferSelect;
+
+// Exchange Rates (historical FX rates for accurate conversion)
+export const exchangeRates = pgTable("exchange_rates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  fromCurrencyCode: varchar("from_currency_code", { length: 3 }).notNull(),
+  toCurrencyCode: varchar("to_currency_code", { length: 3 }).notNull(),
+  rate: decimal("rate", { precision: 20, scale: 10 }).notNull(), // High precision for FX rates
+  effectiveDate: timestamp("effective_date").notNull(), // When this rate became effective
+  source: varchar("source", { length: 50 }).notNull(), // 'uae_central_bank', 'ecb', 'manual', etc.
+  createdAt: timestamp("created_at").defaultNow(),
+  createdBy: varchar("created_by").references(() => users.id), // For manual rates
+}, (table) => [
+  index("exchange_rates_tenant_idx").on(table.tenantId),
+  index("exchange_rates_from_currency_idx").on(table.fromCurrencyCode),
+  index("exchange_rates_to_currency_idx").on(table.toCurrencyCode),
+  index("exchange_rates_effective_date_idx").on(table.effectiveDate),
+]);
+
+export const insertExchangeRateSchema = createInsertSchema(exchangeRates, {
+  rate: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertExchangeRate = z.infer<typeof insertExchangeRateSchema>;
+export type ExchangeRate = typeof exchangeRates.$inferSelect;
+
+// ====================================
+// RBAC & TENANT MEMBERS
+// ====================================
 
 // Tenant members (users can belong to multiple tenants)
 export const tenantMembers = pgTable("tenant_members", {
@@ -352,12 +423,6 @@ export type InsertVendor = z.infer<typeof insertVendorSchema>;
 export type VendorFormValues = z.infer<typeof vendorFormSchema>;
 export type Vendor = typeof vendors.$inferSelect;
 
-// Helper to preprocess decimal values (accept both string and number)
-const decimalString = z.preprocess(
-  (val) => (typeof val === 'number' ? val.toString() : val),
-  z.string()
-);
-
 // Chart of Accounts
 export const accounts = pgTable("accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -479,6 +544,12 @@ export const invoices = pgTable("invoices", {
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   notes: text("notes"),
   
   // Email tracking fields
@@ -674,6 +745,12 @@ export const bills = pgTable("bills", {
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   notes: text("notes"),
   documentUrl: varchar("document_url", { length: 500 }), // uploaded document
   createdAt: timestamp("created_at").defaultNow(),
@@ -780,6 +857,12 @@ export const payments = pgTable("payments", {
   expenseId: varchar("expense_id").references(() => expenses.id),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   currency: varchar("currency", { length: 3 }).notNull().default("usd"),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, scheduled, processing, completed, failed
   scheduledDate: timestamp("scheduled_date"),
   completedDate: timestamp("completed_date"),
@@ -899,6 +982,12 @@ export const quotes = pgTable("quotes", {
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   notes: text("notes"),
   
   // Conversion tracking
@@ -975,6 +1064,12 @@ export const salesOrders = pgTable("sales_orders", {
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   notes: text("notes"),
   
   // Conversion tracking
@@ -1052,6 +1147,11 @@ export const creditNotes = pgTable("credit_notes", {
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
   balanceRemaining: decimal("balance_remaining", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
   notes: text("notes"),
   
@@ -1137,6 +1237,12 @@ export const customerPayments = pgTable("customer_payments", {
   referenceNumber: varchar("reference_number", { length: 100 }),
   
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   notes: text("notes"),
   
   deletedAt: timestamp("deleted_at"),
@@ -1500,6 +1606,11 @@ export const journalEntries = pgTable("journal_entries", {
   notes: text("notes"),
   status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, posted
   
+  // Multi-currency support (for FX gain/loss entries)
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   // Source document tracking for automatic journal entries
   sourceDocumentType: varchar("source_document_type", { length: 50 }), // 'invoice', 'bill', 'payment', 'credit_note', 'debit_note', 'expense', 'fixed_asset'
   sourceDocumentId: varchar("source_document_id"), // ID of source document
@@ -1631,6 +1742,12 @@ export const purchaseOrders = pgTable("purchase_orders", {
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   notes: text("notes"),
   terms: text("terms"),
   
@@ -2705,6 +2822,12 @@ export const debitNotes = pgTable("debit_notes", {
   taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull(),
   appliedAmount: decimal("applied_amount", { precision: 12, scale: 2 }).default("0"), // How much has been applied to payments
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
   notes: text("notes"),
   createdBy: varchar("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
