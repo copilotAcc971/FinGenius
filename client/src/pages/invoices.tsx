@@ -22,8 +22,27 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import type { Invoice, Customer } from "@shared/schema";
+import type { Invoice, Customer, Currency } from "@shared/schema";
 import { InvoiceDialog } from "@/components/invoice-dialog";
+
+// Helper function to format currency amounts
+function formatCurrency(amount: number, currencyCode: string, currencies: Currency[]): string {
+  const currency = currencies.find(c => c.code === currencyCode);
+  const symbol = currency?.symbol || '';
+  const decimals = currency?.decimalPlaces ?? 2;
+  const displayCode = currencyCode || '???';
+  
+  // Format with thousand separators
+  const formatted = amount.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  
+  // Show: "$ USD 1,234.56" or "USD 1,234.56" if no symbol
+  return symbol && symbol !== displayCode 
+    ? `${symbol} ${displayCode} ${formatted}`
+    : `${displayCode} ${formatted}`;
+}
 
 export default function Invoices() {
   const [showDialog, setShowDialog] = useState(false);
@@ -52,6 +71,11 @@ export default function Invoices() {
 
   const { data: customers = [] } = useQuery<Customer[]>({
     queryKey: ["/api/customers", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [] } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
     enabled: !!currentTenant?.id,
   });
 
@@ -212,6 +236,7 @@ export default function Invoices() {
                 <TableHead>Date</TableHead>
                 <TableHead>Due Date</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Currency</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Email Status</TableHead>
                 <TableHead className="w-[70px]"></TableHead>
@@ -224,7 +249,10 @@ export default function Invoices() {
                   <TableCell>{getCustomerName(invoice.customerId)}</TableCell>
                   <TableCell>{new Date(invoice.invoiceDate).toLocaleDateString()}</TableCell>
                   <TableCell>{new Date(invoice.dueDate).toLocaleDateString()}</TableCell>
-                  <TableCell className="text-right font-mono">${parseFloat(invoice.total).toFixed(2)}</TableCell>
+                  <TableCell className="text-right font-mono" data-testid={`text-amount-${invoice.id}`}>
+                    {formatCurrency(parseFloat(invoice.total), invoice.currencyCode, currencies)}
+                  </TableCell>
+                  <TableCell data-testid={`text-currency-${invoice.id}`}>{invoice.currencyCode || 'N/A'}</TableCell>
                   <TableCell>{getStatusBadge(invoice.status)}</TableCell>
                   <TableCell>
                     {!invoice.emailStatus || invoice.emailStatus === 'pending' ? (

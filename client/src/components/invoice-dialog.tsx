@@ -9,7 +9,8 @@ import {
   type InvoiceLineItem,
   type Item,
   type Tax,
-  type TenantCompanyProfile
+  type TenantCompanyProfile,
+  type Currency
 } from "@shared/schema";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,7 @@ const formSchema = z.object({
   invoice: z.object({
     tenantId: z.string(),
     customerId: z.string().min(1, "Customer is required"),
+    currencyCode: z.string().length(3, "Currency code must be 3 characters").min(1, "Currency is required"),
     invoiceNumber: z.string().optional(),
     invoiceDate: z.string().min(1, "Invoice date is required"),
     dueDate: z.string().min(1, "Due date is required"),
@@ -123,6 +125,11 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
     enabled: !!currentTenant?.id && open,
   });
 
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
+  });
+
   const { data: companyProfile, isLoading: profileLoading } = useQuery<TenantCompanyProfile>({
     queryKey: ["/api/company-profile", currentTenant?.id],
     enabled: !!currentTenant?.id && open,
@@ -147,6 +154,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
       invoice: {
         tenantId: currentTenant?.id || "",
         customerId: "",
+        currencyCode: "USD",
         invoiceNumber: "",
         invoiceDate: new Date().toISOString().split('T')[0],
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -188,10 +196,56 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
     name: "invoice.customerId",
   });
 
+  // Filter active currencies and find base currency
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
+  // Get the currency for the current invoice (if editing)
+  const currentCurrency = invoice?.currencyCode 
+    ? currencies.find(c => c.code === invoice.currencyCode)
+    : null;
+
+  // Build available currencies list with useMemo
+  const availableCurrencies = useMemo(() => {
+    const active = [...activeCurrencies];
+    
+    // ALWAYS include invoice's currency, even if query not loaded yet
+    const invoiceCurrencyCode = invoice?.currencyCode;
+    if (invoiceCurrencyCode) {
+      // If currencies not loaded yet, create placeholder
+      if (currencies.length === 0) {
+        return [{ 
+          code: invoiceCurrencyCode, 
+          name: invoiceCurrencyCode, 
+          symbol: invoiceCurrencyCode, 
+          isActive: true, 
+          decimalPlaces: 2,
+          isBaseCurrency: false,
+          tenantId: currentTenant?.id || '',
+          id: 'placeholder'
+        }];
+      }
+      
+      // If invoice has inactive currency, include it
+      const invoiceCurrency = currencies.find(c => c.code === invoiceCurrencyCode);
+      if (invoiceCurrency && !invoiceCurrency.isActive && !active.find(c => c.code === invoiceCurrency.code)) {
+        active.push(invoiceCurrency);
+      }
+    }
+    
+    // Sort: active currencies first (alphabetically), then inactive
+    return active.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [activeCurrencies, currencies, invoice?.currencyCode, currentTenant?.id]);
+
   // Reinitialize form when tenant/profile data loads (for new invoices)
-  // This ensures tenantId and issuerTaxId are populated even if form initialized before data loaded
+  // This ensures tenantId, issuerTaxId, and currencyCode are populated even if form initialized before data loaded
+  // CRITICAL: Only runs for NEW invoices, NEVER when editing (prevents data corruption)
   useEffect(() => {
-    if (!open || invoice) return; // Only for new invoices
+    if (!open || invoice) return; // Only for new invoices - prevents corruption of existing invoice data
     if (!currentTenant) return; // Wait for tenant to load
     if (profileLoading) return; // Wait for profile to finish loading
     
@@ -201,11 +255,12 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
       invoice: {
         ...currentValues.invoice,
         tenantId: currentTenant.id,
+        currencyCode: baseCurrency?.code || "USD",
         issuerTaxId: companyProfile?.taxRegistrationNumber || "",
       },
       lineItems: currentValues.lineItems,
     });
-  }, [open, invoice, currentTenant, companyProfile, profileLoading, form]);
+  }, [open, invoice, currentTenant, companyProfile, profileLoading, baseCurrency, form]);
 
   // Auto-populate customer tax ID when customer is selected
   useEffect(() => {
@@ -331,6 +386,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
       invoice: {
         tenantId: invoice.tenantId,
         customerId: invoice.customerId,
+        currencyCode: invoice.currencyCode,
         invoiceNumber: invoice.invoiceNumber || "",
         invoiceDate: new Date(invoice.invoiceDate).toISOString().split('T')[0],
         dueDate: new Date(invoice.dueDate).toISOString().split('T')[0],
@@ -374,6 +430,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
       invoice: {
         tenantId: currentTenant?.id || "",
         customerId: "",
+        currencyCode: baseCurrency?.code || "USD",
         invoiceNumber: "",
         invoiceDate: new Date().toISOString().split('T')[0],
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -398,7 +455,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
         accountId: null,
       }],
     });
-  }, [invoice, currentTenant, companyProfile, form, open]);
+  }, [invoice, currentTenant, companyProfile, baseCurrency, form, open]);
 
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
@@ -406,6 +463,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
         invoice: {
           tenantId: values.invoice.tenantId,
           customerId: values.invoice.customerId,
+          currencyCode: values.invoice.currencyCode,
           invoiceNumber: values.invoice.invoiceNumber || undefined,
           invoiceDate: new Date(values.invoice.invoiceDate).toISOString(),
           dueDate: new Date(values.invoice.dueDate).toISOString(),
@@ -476,6 +534,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
         invoice: {
           tenantId: values.invoice.tenantId,
           customerId: values.invoice.customerId,
+          currencyCode: values.invoice.currencyCode,
           invoiceNumber: values.invoice.invoiceNumber || undefined,
           invoiceDate: new Date(values.invoice.invoiceDate).toISOString(),
           dueDate: new Date(values.invoice.dueDate).toISOString(),
@@ -742,7 +801,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
             {/* Customer Section */}
             <div className="space-y-3">
               <h3 className="text-lg font-semibold">Customer Information</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
                   name="invoice.customerId"
@@ -759,6 +818,31 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                           {customers.map((customer) => (
                             <SelectItem key={customer.id} value={customer.id}>
                               {customer.displayName || customer.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="invoice.currencyCode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Currency *</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-currency" disabled={currenciesLoading}>
+                            <SelectValue placeholder={currenciesLoading ? "Loading currencies..." : "Select currency"} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {availableCurrencies.map((currency) => (
+                            <SelectItem key={currency.code} value={currency.code}>
+                              {currency.code} - {currency.name} ({currency.symbol})
+                              {!currency.isActive && ' (Inactive)'}
                             </SelectItem>
                           ))}
                         </SelectContent>
