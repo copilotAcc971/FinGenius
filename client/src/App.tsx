@@ -44,6 +44,7 @@ import APAgingReport from "@/pages/ap-aging";
 import BankConnections from "@/pages/bank-connections";
 import RoleManagement from "@/pages/role-management";
 import UserManagement from "@/pages/user-management";
+import CurrenciesPage from "@/pages/settings/currencies";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -84,6 +85,7 @@ function Router() {
           <Route path="/settings" component={Settings} />
           <Route path="/settings/roles" component={RoleManagement} />
           <Route path="/settings/users" component={UserManagement} />
+          <Route path="/settings/currencies" component={CurrenciesPage} />
         </>
       )}
       <Route component={NotFound} />

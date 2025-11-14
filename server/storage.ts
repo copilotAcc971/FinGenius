@@ -8,6 +8,9 @@ import {
   accounts,
   items,
   taxes,
+  currencies,
+  exchangeRates,
+  fxConfigs,
   invoices,
   invoiceLineItems,
   invoiceSequences,
@@ -57,6 +60,10 @@ import {
   type InsertItem,
   type Tax,
   type InsertTax,
+  type Currency,
+  type InsertCurrency,
+  type ExchangeRate,
+  type InsertExchangeRate,
   type Invoice,
   type InsertInvoice,
   type InvoiceLineItem,
@@ -121,9 +128,11 @@ import {
   type CashFlowReport,
   type ARAgingReport,
   type APAgingReport,
+  type FXConfig,
+  type InsertFXConfig,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, ne, isNull, sum, gte, lte, sql } from "drizzle-orm";
+import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -341,6 +350,40 @@ export interface IStorage {
   getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport>;
   getARAgingReport(tenantId: string, groupBy?: 'customer' | 'invoice' | 'project'): Promise<ARAgingReport>;
   getAPAgingReport(tenantId: string, groupBy?: 'vendor' | 'invoice' | 'project'): Promise<APAgingReport>;
+
+  // Currencies
+  getCurrencies(tenantId: string): Promise<Currency[]>;
+  getCurrencyByCode(tenantId: string, code: string): Promise<Currency | null>;
+  createCurrency(tenantId: string, data: InsertCurrency): Promise<Currency>;
+  updateCurrency(tenantId: string, code: string, data: Partial<InsertCurrency>): Promise<Currency>;
+  deleteCurrency(tenantId: string, code: string): Promise<void>;
+  setBaseCurrency(tenantId: string, code: string): Promise<void>;
+  checkCurrencyUsageAny(tenantId: string, currencyCode: string): Promise<boolean>;
+
+  // Exchange Rates
+  getExchangeRates(tenantId: string, filters?: {
+    fromCurrency?: string;
+    toCurrency?: string;
+    startDate?: Date;
+    endDate?: Date;
+    source?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ExchangeRate[]>;
+  getLatestExchangeRates(tenantId: string): Promise<ExchangeRate[]>;
+  createExchangeRate(tenantId: string, data: InsertExchangeRate & {
+    applyReciprocal?: boolean;
+  }): Promise<ExchangeRate[]>;
+  getExchangeRateHistory(
+    tenantId: string,
+    fromCurrency: string,
+    toCurrency: string,
+    limit?: number
+  ): Promise<ExchangeRate[]>;
+
+  // FX Configuration
+  getFXConfig(tenantId: string): Promise<FXConfig | null>;
+  updateFXConfig(tenantId: string, data: Partial<InsertFXConfig>): Promise<FXConfig>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4884,6 +4927,257 @@ export class DatabaseStorage implements IStorage {
         summary,
         vendors: vendorLines,
       };
+    }
+  }
+
+  // Currencies
+  async getCurrencies(tenantId: string): Promise<Currency[]> {
+    return await db.query.currencies.findMany({
+      where: eq(currencies.tenantId, tenantId),
+      orderBy: [desc(currencies.isBaseCurrency), asc(currencies.code)],
+    });
+  }
+
+  async getCurrencyByCode(tenantId: string, code: string): Promise<Currency | null> {
+    const currency = await db.query.currencies.findFirst({
+      where: and(
+        eq(currencies.tenantId, tenantId),
+        eq(currencies.code, code)
+      ),
+    });
+    return currency || null;
+  }
+
+  async createCurrency(tenantId: string, data: InsertCurrency): Promise<Currency> {
+    const [currency] = await db.insert(currencies)
+      .values({ ...data, tenantId })
+      .returning();
+    return currency;
+  }
+
+  async updateCurrency(tenantId: string, code: string, data: Partial<InsertCurrency>): Promise<Currency> {
+    const [currency] = await db.update(currencies)
+      .set(data)
+      .where(and(
+        eq(currencies.tenantId, tenantId),
+        eq(currencies.code, code)
+      ))
+      .returning();
+    return currency;
+  }
+
+  async deleteCurrency(tenantId: string, code: string): Promise<void> {
+    await db.delete(currencies)
+      .where(and(
+        eq(currencies.tenantId, tenantId),
+        eq(currencies.code, code)
+      ));
+  }
+
+  async setBaseCurrency(tenantId: string, code: string): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx.update(currencies)
+        .set({ isBaseCurrency: false })
+        .where(eq(currencies.tenantId, tenantId));
+      
+      await tx.update(currencies)
+        .set({ isBaseCurrency: true })
+        .where(and(
+          eq(currencies.tenantId, tenantId),
+          eq(currencies.code, code)
+        ));
+    });
+  }
+
+  async checkCurrencyUsageAny(
+    tenantId: string,
+    currencyCode: string
+  ): Promise<boolean> {
+    const checks = await Promise.all([
+      db.select({ count: sql<number>`count(*)` })
+        .from(invoices)
+        .where(and(eq(invoices.tenantId, tenantId), eq(invoices.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(bills)
+        .where(and(eq(bills.tenantId, tenantId), eq(bills.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(quotes)
+        .where(and(eq(quotes.tenantId, tenantId), eq(quotes.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(salesOrders)
+        .where(and(eq(salesOrders.tenantId, tenantId), eq(salesOrders.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(creditNotes)
+        .where(and(eq(creditNotes.tenantId, tenantId), eq(creditNotes.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(customerPayments)
+        .where(and(eq(customerPayments.tenantId, tenantId), eq(customerPayments.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(recurringInvoices)
+        .where(and(eq(recurringInvoices.tenantId, tenantId), eq(recurringInvoices.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(retainerInvoices)
+        .where(and(eq(retainerInvoices.tenantId, tenantId), eq(retainerInvoices.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.tenantId, tenantId), eq(purchaseOrders.currencyCode, currencyCode)))
+        .execute(),
+      db.select({ count: sql<number>`count(*)` })
+        .from(journalEntries)
+        .where(and(eq(journalEntries.tenantId, tenantId), eq(journalEntries.currencyCode, currencyCode)))
+        .execute(),
+    ]);
+    
+    return checks.some(result => (result[0]?.count || 0) > 0);
+  }
+
+  // Exchange Rates
+  async getExchangeRates(tenantId: string, filters?: {
+    fromCurrency?: string;
+    toCurrency?: string;
+    startDate?: Date;
+    endDate?: Date;
+    source?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ExchangeRate[]> {
+    const conditions = [eq(exchangeRates.tenantId, tenantId)];
+    
+    if (filters?.fromCurrency) {
+      conditions.push(eq(exchangeRates.fromCurrencyCode, filters.fromCurrency));
+    }
+    if (filters?.toCurrency) {
+      conditions.push(eq(exchangeRates.toCurrencyCode, filters.toCurrency));
+    }
+    if (filters?.startDate) {
+      conditions.push(gte(exchangeRates.effectiveDate, filters.startDate));
+    }
+    if (filters?.endDate) {
+      conditions.push(lte(exchangeRates.effectiveDate, filters.endDate));
+    }
+    if (filters?.source) {
+      conditions.push(eq(exchangeRates.source, filters.source));
+    }
+    
+    return await db.query.exchangeRates.findMany({
+      where: and(...conditions),
+      orderBy: [desc(exchangeRates.effectiveDate)],
+      limit: filters?.limit || 100,
+      offset: filters?.offset || 0,
+    });
+  }
+
+  async getLatestExchangeRates(tenantId: string): Promise<ExchangeRate[]> {
+    const allRates = await db.query.exchangeRates.findMany({
+      where: eq(exchangeRates.tenantId, tenantId),
+      orderBy: [desc(exchangeRates.effectiveDate)],
+    });
+    
+    const latestMap = new Map<string, ExchangeRate>();
+    for (const rate of allRates) {
+      const key = `${rate.fromCurrencyCode}-${rate.toCurrencyCode}`;
+      if (!latestMap.has(key)) {
+        latestMap.set(key, rate);
+      }
+    }
+    
+    return Array.from(latestMap.values());
+  }
+
+  async createExchangeRate(tenantId: string, data: InsertExchangeRate & {
+    applyReciprocal?: boolean;
+  }): Promise<ExchangeRate[]> {
+    const { applyReciprocal, ...rateData } = data;
+    
+    const rates: any[] = [{
+      ...rateData,
+      tenantId,
+    }];
+    
+    if (applyReciprocal && rateData.fromCurrencyCode !== rateData.toCurrencyCode) {
+      const reciprocalRate = (1 / parseFloat(rateData.rate)).toFixed(10);
+      rates.push({
+        fromCurrencyCode: rateData.toCurrencyCode,
+        toCurrencyCode: rateData.fromCurrencyCode,
+        rate: reciprocalRate,
+        effectiveDate: rateData.effectiveDate,
+        source: rateData.source || 'manual',
+        tenantId,
+        createdBy: rateData.createdBy || null,
+      });
+    }
+    
+    const inserted = await db.insert(exchangeRates)
+      .values(rates)
+      .returning();
+    
+    return inserted;
+  }
+
+  async getExchangeRateHistory(
+    tenantId: string,
+    fromCurrency: string,
+    toCurrency: string,
+    limit = 30
+  ): Promise<ExchangeRate[]> {
+    return await db.query.exchangeRates.findMany({
+      where: and(
+        eq(exchangeRates.tenantId, tenantId),
+        eq(exchangeRates.fromCurrencyCode, fromCurrency),
+        eq(exchangeRates.toCurrencyCode, toCurrency)
+      ),
+      orderBy: [desc(exchangeRates.effectiveDate)],
+      limit,
+    });
+  }
+
+  // FX Configuration
+  async getFXConfig(tenantId: string): Promise<FXConfig | null> {
+    const config = await db.query.fxConfigs.findFirst({
+      where: eq(fxConfigs.tenantId, tenantId),
+    });
+    
+    // Return default if not found
+    if (!config) {
+      return {
+        tenantId,
+        autoRefreshEnabled: true,
+        sourceStrategy: 'api',
+        cbuaeSource: 'github',
+        lastRefreshAt: null,
+        updatedAt: new Date(),
+      };
+    }
+    
+    return config;
+  }
+
+  async updateFXConfig(tenantId: string, data: Partial<InsertFXConfig>): Promise<FXConfig> {
+    // Try to update existing
+    const existing = await db.query.fxConfigs.findFirst({
+      where: eq(fxConfigs.tenantId, tenantId),
+    });
+    
+    if (existing) {
+      const [updated] = await db.update(fxConfigs)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(fxConfigs.tenantId, tenantId))
+        .returning();
+      return updated;
+    } else {
+      // Create new if doesn't exist
+      const [created] = await db.insert(fxConfigs)
+        .values({ ...data, tenantId })
+        .returning();
+      return created;
     }
   }
 }

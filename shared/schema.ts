@@ -92,6 +92,7 @@ export const currencies = pgTable("currencies", {
   code: varchar("code", { length: 3 }).notNull(), // ISO 4217 (USD, AED, EUR, GBP, etc.)
   name: varchar("name", { length: 100 }).notNull(), // US Dollar, UAE Dirham, Euro, etc.
   symbol: varchar("symbol", { length: 10 }).notNull(), // $, د.إ, €, £, etc.
+  decimalPlaces: integer("decimal_places").default(2).notNull(), // Number of decimal places (0-4)
   isBaseCurrency: boolean("is_base_currency").default(false).notNull(), // One base currency per tenant
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
@@ -140,6 +141,21 @@ export const insertExchangeRateSchema = createInsertSchema(exchangeRates, {
 
 export type InsertExchangeRate = z.infer<typeof insertExchangeRateSchema>;
 export type ExchangeRate = typeof exchangeRates.$inferSelect;
+
+// FX Configuration (per tenant settings for exchange rate management)
+export const fxConfigs = pgTable('fx_configs', {
+  tenantId: varchar('tenant_id').primaryKey().references(() => tenants.id),
+  autoRefreshEnabled: boolean('auto_refresh_enabled').default(true).notNull(),
+  sourceStrategy: varchar('source_strategy').default('api').notNull(), // 'api' | 'manual' | 'hybrid'
+  cbuaeSource: varchar('cbuae_source').default('github').notNull(), // 'github' | 'ocr' | 'both' | 'fluentax' | 'manual'
+  lastRefreshAt: timestamp('last_refresh_at'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const insertFXConfigSchema = createInsertSchema(fxConfigs).omit({ tenantId: true });
+
+export type FXConfig = typeof fxConfigs.$inferSelect;
+export type InsertFXConfig = typeof fxConfigs.$inferInsert;
 
 // ====================================
 // RBAC & TENANT MEMBERS

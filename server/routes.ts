@@ -35,6 +35,8 @@ import {
   insertItemSchema,
   insertTaxSchema,
   updateTaxSchema,
+  insertCurrencySchema,
+  insertExchangeRateSchema,
   insertInvoiceSchema,
   invoicePayloadSchema,
   insertBillSchema,
@@ -64,6 +66,7 @@ import {
   customers,
   vendors,
 } from "@shared/schema";
+import { insertFXConfigSchema } from "@shared/fx-types";
 
 // Initialize Stripe and OpenAI only if credentials are available
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -760,6 +763,199 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error deleting tax:", error);
       res.status(400).json({ message: error.message || "Failed to delete tax" });
+    }
+  });
+
+  // Currency routes
+  app.get('/api/currencies', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      const currencies = await storage.getCurrencies(tenantId);
+      res.json(currencies);
+    } catch (error) {
+      console.error('Error fetching currencies:', error);
+      res.status(500).json({ error: 'Failed to fetch currencies' });
+    }
+  });
+
+  app.post('/api/currencies', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('settings:update'), async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      // Don't require tenantId from client - use server-side verified tenantId
+      const data = insertCurrencySchema.omit({ tenantId: true }).parse(req.body);
+      const currency = await storage.createCurrency(tenantId, data);
+      res.json(currency);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid currency data', details: error.errors });
+      }
+      console.error('Error creating currency:', error);
+      res.status(500).json({ error: 'Failed to create currency' });
+    }
+  });
+
+  app.patch('/api/currencies/:code', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('settings:update'), async (req: any, res) => {
+    const tenantId = req.tenantId;
+    const { code } = req.params;
+    
+    try {
+      // Use partial schema without tenantId to prevent client from changing it
+      const data = insertCurrencySchema.partial().omit({ tenantId: true }).parse(req.body);
+      const currency = await storage.updateCurrency(tenantId, code, data);
+      res.json(currency);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid currency data', details: error.errors });
+      }
+      console.error('Error updating currency:', error);
+      res.status(500).json({ error: 'Failed to update currency' });
+    }
+  });
+
+  app.delete('/api/currencies/:code', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('settings:update'), async (req: any, res) => {
+    const tenantId = req.tenantId;
+    const { code } = req.params;
+    
+    try {
+      // Check if it's the base currency
+      const currency = await storage.getCurrencyByCode(tenantId, code);
+      if (!currency) {
+        return res.status(404).json({ error: 'Currency not found' });
+      }
+      
+      if (currency.isBaseCurrency) {
+        return res.status(400).json({ error: 'Cannot delete base currency' });
+      }
+      
+      // Check if currency is used in any financial transactions
+      const isUsed = await storage.checkCurrencyUsageAny(tenantId, code);
+      
+      if (isUsed) {
+        return res.status(400).json({ 
+          error: 'Cannot delete currency that is used in transactions',
+          details: 'This currency is referenced by existing financial records. You can deactivate it instead.'
+        });
+      }
+      
+      await storage.deleteCurrency(tenantId, code);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting currency:', error);
+      res.status(500).json({ error: 'Failed to delete currency' });
+    }
+  });
+
+  app.post('/api/currencies/:code/set-base', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('settings:update'), async (req: any, res) => {
+    const tenantId = req.tenantId;
+    const { code } = req.params;
+    
+    try {
+      await storage.setBaseCurrency(tenantId, code);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error setting base currency:', error);
+      res.status(500).json({ error: 'Failed to set base currency' });
+    }
+  });
+
+  // Exchange Rate routes
+  app.get('/api/exchange-rates', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      const filters = {
+        fromCurrency: req.query.fromCurrency as string | undefined,
+        toCurrency: req.query.toCurrency as string | undefined,
+        startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
+        endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined,
+        source: req.query.source as string | undefined,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
+        offset: req.query.offset ? parseInt(req.query.offset as string) : undefined,
+      };
+      
+      const rates = await storage.getExchangeRates(tenantId, filters);
+      res.json(rates);
+    } catch (error) {
+      console.error('Error fetching exchange rates:', error);
+      res.status(500).json({ error: 'Failed to fetch exchange rates' });
+    }
+  });
+
+  app.get('/api/exchange-rates/latest', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      const rates = await storage.getLatestExchangeRates(tenantId);
+      res.json(rates);
+    } catch (error) {
+      console.error('Error fetching latest exchange rates:', error);
+      res.status(500).json({ error: 'Failed to fetch latest exchange rates' });
+    }
+  });
+
+  app.post('/api/exchange-rates', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('settings:update'), async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      const { applyReciprocal, ...rateData } = req.body;
+      const data = insertExchangeRateSchema.parse(rateData);
+      
+      const rates = await storage.createExchangeRate(tenantId, {
+        ...data,
+        applyReciprocal: applyReciprocal === true,
+      });
+      
+      res.json(rates);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid exchange rate data', details: error.errors });
+      }
+      console.error('Error creating exchange rate:', error);
+      res.status(500).json({ error: 'Failed to create exchange rate' });
+    }
+  });
+
+  app.post('/api/exchange-rates/refresh', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('billing:update'), async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      await updateExchangeRatesForTenant(tenantId);
+      
+      res.json({ success: true, message: 'Exchange rates refreshed successfully' });
+    } catch (error) {
+      console.error('Error refreshing exchange rates:', error);
+      res.status(500).json({ error: 'Failed to refresh exchange rates' });
+    }
+  });
+
+  // FX Configuration routes
+  app.get('/api/settings/fx-config', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      const config = await storage.getFXConfig(tenantId);
+      res.json(config);
+    } catch (error) {
+      console.error('Error fetching FX config:', error);
+      res.status(500).json({ error: 'Failed to fetch FX configuration' });
+    }
+  });
+
+  app.patch('/api/settings/fx-config', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('billing:update'), async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      const data = insertFXConfigSchema.partial().parse(req.body);
+      const config = await storage.updateFXConfig(tenantId, data);
+      res.json(config);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid FX config data', details: error.errors });
+      }
+      console.error('Error updating FX config:', error);
+      res.status(500).json({ error: 'Failed to update FX configuration' });
     }
   });
 

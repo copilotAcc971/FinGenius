@@ -20,6 +20,7 @@ import {
   Landmark,
   Shield,
   UserCog,
+  Coins,
 } from "lucide-react";
 import {
   Sidebar,
@@ -81,6 +82,7 @@ const otherItems = [
 const adminItems = [
   { title: "Role Management", url: "/settings/roles", icon: Shield },
   { title: "User Management", url: "/settings/users", icon: UserCog },
+  { title: "Currencies", url: "/settings/currencies", icon: Coins },
 ];
 
 export function AppSidebar() {
