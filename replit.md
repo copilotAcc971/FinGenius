@@ -29,6 +29,17 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - **Auto-numbering:** Sequential numbering for all major modules (Invoices, Quotes, Sales Orders, Bills, Credit Notes, Payments, Recurring Invoices, Retainer Invoices, Chart of Accounts, Journal Entries, Fixed Assets, Purchase Orders).
 - **Audit Trails:** Comprehensive tracking of changes for critical entities like invoices.
 - **Advanced Accounting Modules:** Chart of Accounts, Journal Entries (double-entry validation), Fixed Assets (depreciation), Purchase Orders, Bank Reconciliation, Financial Reports (P&L, Balance Sheet, Trial Balance, Cash Flow), Products/Inventory, Tax Management.
+- **Role-Based Access Control (RBAC):** Complete enterprise-grade RBAC system with:
+    - **Permission Catalog:** 70+ granular permissions across 12 modules (customers, vendors, items, taxes, invoices, bills, quotes, sales_orders, purchase_orders, reports, users, billing)
+    - **Default Roles:** 7 system roles (Owner, Admin, Accountant, Bookkeeper, Sales, Purchase, Viewer) with curated permission sets
+    - **Custom Roles:** Tenants can create custom roles with specific permission combinations
+    - **Multi-Role Support:** Users can have multiple roles with combined permissions
+    - **Permission Inheritance:** Hierarchical permissions (delete → update → read, approve → read)
+    - **Route Protection:** All 60+ critical financial routes protected with permission checks
+    - **UI Gating:** Frontend components conditionally render based on user permissions
+    - **Owner Bypass:** Owner role has universal access to all features
+    - **Migration Support:** Automatic migration from legacy role strings to new RBAC system
+    - **Administration UI:** Role management and user management pages with full CRUD operations
 
 ## External Dependencies
 - **OpenAI GPT-5:** Used for AI-powered document data extraction from bills and categorisation.
