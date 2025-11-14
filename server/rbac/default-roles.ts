@@ -16,9 +16,9 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
     permissions: '*', // Special: all permissions
   },
   
-  ADMIN: {
-    name: 'Admin',
-    description: 'Full accounting features and user management (no billing)',
+  CFO: {
+    name: 'CFO',
+    description: 'Chief Financial Officer - financial oversight and critical payment execution authority',
     isSystem: true,
     permissions: [
       // All accounting modules
@@ -32,19 +32,132 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       'sales_orders.*',
       'purchase_orders.*',
       'credit_notes.*',
+      
+      // Debit notes: full access including approve
+      'debit_notes.create',
+      'debit_notes.read',
+      'debit_notes.update',
+      'debit_notes.delete',
+      'debit_notes.approve',
+      
       'customer_payments.*',
       'recurring_invoices.*',
       'retainer_invoices.*',
       'accounts.*',
-      'journal_entries.*',
+      
+      // Journal entries: full access including reverse
+      'journal_entries.create',
+      'journal_entries.read',
+      'journal_entries.update',
+      'journal_entries.delete',
+      'journal_entries.approve',
+      'journal_entries.post',
+      'journal_entries.reverse',
+      
       'assets.*',
       'bank_reconciliations.*',
       'expenses.*',
       'payments.*',
+      
+      // Vendor payments: EXECUTE and AUTHORIZE authority ONLY (segregated from approval)
+      'vendor_payments.read',
+      'vendor_payments.execute',
+      'vendor_payments.authorize',
+      'vendor_payments.create_batch',
+      'vendor_payments.refund',
+      'vendor_payments.view_sensitive',
+      
       'documents.*',
       'reports.*',
       'company_profile.*',
       'settings.*',
+      
+      // Approvals: full access
+      'approvals.*',
+      
+      // Workflows: configure authority
+      'workflows.read',
+      'workflows.configure',
+      
+      // Audit: full access including export
+      'audit.view',
+      'audit.export',
+      
+      // Encumbrances
+      'encumbrances.*',
+      
+      // Inventory
+      'inventory.*',
+      
+      // User management but not billing
+      'users.*',
+    ],
+  },
+
+  ADMIN: {
+    name: 'Admin',
+    description: 'Accounting operations and approvals (no payment execution or critical financial controls)',
+    isSystem: true,
+    permissions: [
+      // All accounting modules
+      'customers.*',
+      'vendors.*',
+      'items.*',
+      'taxes.*',
+      'invoices.*',
+      'bills.*',
+      'quotes.*',
+      'sales_orders.*',
+      'purchase_orders.*',
+      'credit_notes.*',
+      
+      // Debit notes: create and update only, NOT approve (segregation of duties)
+      'debit_notes.read',
+      'debit_notes.create',
+      'debit_notes.update',
+      
+      'customer_payments.*',
+      'recurring_invoices.*',
+      'retainer_invoices.*',
+      'accounts.*',
+      
+      // Journal entries: all except reverse (requires CFO authority)
+      'journal_entries.create',
+      'journal_entries.read',
+      'journal_entries.update',
+      'journal_entries.delete',
+      'journal_entries.approve',
+      'journal_entries.post',
+      
+      'assets.*',
+      'bank_reconciliations.*',
+      'expenses.*',
+      'payments.*',
+      
+      // Vendor payments: APPROVE only, NOT create or execute (segregation of duties)
+      'vendor_payments.read',
+      'vendor_payments.approve',
+      'vendor_payments.view_sensitive',
+      
+      'documents.*',
+      'reports.*',
+      'company_profile.*',
+      'settings.*',
+      
+      // Approvals
+      'approvals.*',
+      
+      // Workflows: read only (configure is CFO only)
+      'workflows.read',
+      
+      // Audit: view only (export is CFO/Auditor only)
+      'audit.view',
+      
+      // Encumbrances
+      'encumbrances.*',
+      
+      // Inventory
+      'inventory.*',
       
       // User management but not billing
       'users.*',
@@ -75,6 +188,8 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       'bills.update',
       'bills.approve',
       'bills.export',
+      'bills.review_ai_extraction',
+      'bills.approve_posting',
       
       'purchase_orders.create',
       'purchase_orders.read',
@@ -87,7 +202,22 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       
       // Full access to accounting
       'accounts.*',
-      'journal_entries.*',
+      
+      // Journal entries: can post but NOT reverse (requires higher authority)
+      'journal_entries.create',
+      'journal_entries.read',
+      'journal_entries.update',
+      'journal_entries.post',
+      
+      // Debit notes: can create/update but NOT approve (segregation of duties)
+      'debit_notes.create',
+      'debit_notes.read',
+      'debit_notes.update',
+      
+      // Vendor payments: create and read (segregation of duties - no approve or execute)
+      'vendor_payments.create',
+      'vendor_payments.read',
+      
       'assets.*',
       'bank_reconciliations.*',
       'expenses.*',
@@ -99,6 +229,19 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       
       // Reports
       'reports.*',
+      
+      // Approvals
+      'approvals.read',
+      
+      // Audit: view only
+      'audit.view',
+      
+      // Encumbrances
+      'encumbrances.create',
+      'encumbrances.view',
+      
+      // Inventory: read only
+      'inventory.read',
       
       // Read company profile
       'company_profile.read',
@@ -132,11 +275,12 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       'invoices.send',
       'invoices.export',
       
-      // Bills: no approve or delete
+      // Bills: no approve or delete, can review AI extraction
       'bills.create',
       'bills.read',
       'bills.update',
       'bills.export',
+      'bills.review_ai_extraction',
       
       // Quotes and Sales Orders: no delete
       'quotes.create',
@@ -157,6 +301,10 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       'credit_notes.read',
       'credit_notes.update',
       
+      // Debit notes: draft only (no approve)
+      'debit_notes.create',
+      'debit_notes.read',
+      
       // Payments: no approve
       'customer_payments.create',
       'customer_payments.read',
@@ -164,6 +312,10 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       
       'payments.create',
       'payments.read',
+      
+      // Vendor payments: create and read (segregation of duties - no approve or execute)
+      'vendor_payments.create',
+      'vendor_payments.read',
       
       // Recurring and retainer invoices
       'recurring_invoices.create',
@@ -177,10 +329,9 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       // Accounts: read only
       'accounts.read',
       
-      // Journal entries: no delete or approve
+      // Journal entries: create only, NOT post or reverse
       'journal_entries.create',
       'journal_entries.read',
-      'journal_entries.update',
       
       // Assets: no delete
       'assets.create',
@@ -200,6 +351,9 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       // Items and taxes: read
       'items.read',
       'taxes.read',
+      
+      // Inventory: read only
+      'inventory.read',
       
       // Documents
       'documents.create',
@@ -263,6 +417,15 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       'purchase_orders.*',
       'expenses.*',
       
+      // Debit notes: read only
+      'debit_notes.read',
+      
+      // Vendor payments: read only
+      'vendor_payments.read',
+      
+      // Encumbrances: read only
+      'encumbrances.view',
+      
       // Read items
       'items.read',
       
@@ -298,6 +461,7 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       'sales_orders.read',
       'purchase_orders.read',
       'credit_notes.read',
+      'debit_notes.read',
       'customer_payments.read',
       'recurring_invoices.read',
       'retainer_invoices.read',
@@ -307,10 +471,17 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       'bank_reconciliations.read',
       'expenses.read',
       'payments.read',
+      'vendor_payments.read',
       'documents.read',
       
       // Full reports access
       'reports.*',
+      
+      // Approvals: read only
+      'approvals.read',
+      
+      // Audit: view only
+      'audit.view',
       
       // Company profile: read only
       'company_profile.read',
@@ -324,6 +495,7 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
 // Helper to get role names in order of privilege (highest to lowest)
 export const ROLE_HIERARCHY = [
   'Owner',
+  'CFO',
   'Admin',
   'Accountant',
   'Bookkeeper',

@@ -265,6 +265,7 @@ export const PERMISSION_DEFINITIONS = [
   { module: 'encumbrances', action: 'manage', name: 'encumbrances.manage', description: 'Manage encumbrance settings' },
 
   // Inventory
+  { module: 'inventory', action: 'read', name: 'inventory.read', description: 'View inventory' },
   { module: 'inventory', action: 'adjust', name: 'inventory.adjust', description: 'Create inventory adjustments' },
 
   // Fixed Assets (extending assets)
