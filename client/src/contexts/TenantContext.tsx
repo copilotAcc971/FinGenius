@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import type { Tenant } from "@shared/schema";
+import { tenantSession } from "@/lib/tenantSession";
 
 interface TenantContextType {
   currentTenant: Tenant | null;
@@ -12,24 +13,49 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [currentTenant, setCurrentTenantState] = useState<Tenant | null>(null);
   
   useEffect(() => {
-    const stored = localStorage.getItem("currentTenant");
-    if (stored) {
-      try {
-        setCurrentTenantState(JSON.parse(stored));
-      } catch (e) {
-        console.error("Failed to parse stored tenant", e);
-        localStorage.removeItem("currentTenant");
-      }
+    let mounted = true;
+
+    async function initializeTenant() {
+      console.log("[TenantProvider] Initializing TenantSession...");
+      await tenantSession.initialize();
+      
+      if (!mounted) return;
+
+      const tenant = tenantSession.getTenant();
+      console.log("[TenantProvider] Initial tenant from TenantSession:", tenant?.name || "none");
+      setCurrentTenantState(tenant);
     }
+
+    initializeTenant();
+
+    const handleTenantChanged = (tenant: Tenant | null) => {
+      console.log("[TenantProvider] Tenant changed event:", tenant?.name || "none");
+      if (mounted) {
+        setCurrentTenantState(tenant);
+      }
+    };
+
+    const handleTenantLost = () => {
+      console.log("[TenantProvider] Tenant lost event");
+      if (mounted) {
+        setCurrentTenantState(null);
+      }
+    };
+
+    tenantSession.on("tenant-changed", handleTenantChanged);
+    tenantSession.on("tenant-lost", handleTenantLost);
+
+    return () => {
+      mounted = false;
+      tenantSession.off("tenant-changed", handleTenantChanged);
+      tenantSession.off("tenant-lost", handleTenantLost);
+    };
   }, []);
 
   const setCurrentTenant = (tenant: Tenant | null) => {
+    console.log("[TenantProvider] setCurrentTenant called:", tenant?.name || "null");
+    tenantSession.setTenant(tenant);
     setCurrentTenantState(tenant);
-    if (tenant) {
-      localStorage.setItem("currentTenant", JSON.stringify(tenant));
-    } else {
-      localStorage.removeItem("currentTenant");
-    }
   };
 
   return (

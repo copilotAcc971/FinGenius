@@ -11,6 +11,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { TenantProvider } from "@/contexts/TenantContext";
 import { RBACProvider } from "@/contexts/rbac-context";
 import { useTenant } from "@/hooks/useTenant";
+import { TenantGate } from "@/components/TenantGate";
+import { GlobalTenantEvents } from "@/components/GlobalTenantEvents";
 
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
@@ -113,29 +115,31 @@ function AppContent() {
 
   return (
     <>
-      <RBACProvider tenantId={currentTenant?.id || null}>
-        <SidebarProvider style={sidebarStyle as React.CSSProperties}>
-          <div className="flex h-screen w-full">
-            <AppSidebar />
-            <div className="flex flex-col flex-1 overflow-hidden">
-              <header className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background">
-                <div className="flex items-center gap-4">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
-                  <WorkspaceSwitcher />
-                </div>
-                <div className="flex items-center gap-4">
-                  <UserMenu />
-                </div>
-              </header>
-              <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
-                <div className="mx-auto max-w-7xl">
-                  <Router />
-                </div>
-              </main>
+      <TenantGate>
+        <RBACProvider tenantId={currentTenant?.id || null}>
+          <SidebarProvider style={sidebarStyle as React.CSSProperties}>
+            <div className="flex h-screen w-full">
+              <AppSidebar />
+              <div className="flex flex-col flex-1 overflow-hidden">
+                <header className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background">
+                  <div className="flex items-center gap-4">
+                    <SidebarTrigger data-testid="button-sidebar-toggle" />
+                    <WorkspaceSwitcher />
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <UserMenu />
+                  </div>
+                </header>
+                <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
+                  <div className="mx-auto max-w-7xl">
+                    <Router />
+                  </div>
+                </main>
+              </div>
             </div>
-          </div>
-        </SidebarProvider>
-      </RBACProvider>
+          </SidebarProvider>
+        </RBACProvider>
+      </TenantGate>
       <Toaster />
     </>
   );
@@ -146,6 +150,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <TenantProvider>
+          <GlobalTenantEvents />
           <AppContent />
         </TenantProvider>
       </TooltipProvider>

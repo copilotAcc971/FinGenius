@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { tenantSession } from "./tenantSession";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -7,17 +8,22 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-function getTenantIdFromStorage(): string | null {
+async function getTenantIdFromSession(timeout: number = 5000): Promise<string | null> {
   try {
-    const stored = localStorage.getItem("currentTenant");
-    if (stored) {
-      const tenant = JSON.parse(stored);
-      return tenant.id || null;
+    console.log("[queryClient] Waiting for tenant context...");
+    const tenant = await tenantSession.waitForTenant(timeout);
+    
+    if (!tenant) {
+      console.warn("[queryClient] No tenant context available after waiting");
+      return null;
     }
-  } catch (e) {
-    console.error("Failed to get tenant from localStorage", e);
+    
+    console.log("[queryClient] Tenant context obtained:", tenant.name);
+    return tenant.id;
+  } catch (error) {
+    console.error("[queryClient] Failed to get tenant context:", error);
+    throw new Error("Failed to load workspace context. Please select a workspace and try again.");
   }
-  return null;
 }
 
 export async function apiRequest(
@@ -27,10 +33,12 @@ export async function apiRequest(
 ): Promise<Response> {
   const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
   
-  // Add tenant ID header if available
-  const tenantId = getTenantIdFromStorage();
+  // Wait for tenant context before making API request
+  const tenantId = await getTenantIdFromSession();
   if (tenantId) {
     headers["x-tenant-id"] = tenantId;
+  } else {
+    console.warn("[apiRequest] No tenant context available for:", url);
   }
   
   const res = await fetch(url, {
@@ -70,11 +78,13 @@ export const getQueryFn: <T>(options: {
       url += `?${searchParams.toString()}`;
     }
     
-    // Add tenant ID header if available
+    // Wait for tenant context before making API request
     const headers: Record<string, string> = {};
-    const tenantId = getTenantIdFromStorage();
+    const tenantId = await getTenantIdFromSession();
     if (tenantId) {
       headers["x-tenant-id"] = tenantId;
+    } else {
+      console.warn("[getQueryFn] No tenant context available for:", url);
     }
     
     const res = await fetch(url, {
