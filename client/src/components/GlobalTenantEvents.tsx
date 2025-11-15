@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { tenantSession } from "@/lib/tenantSession";
+import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Tenant } from "@shared/schema";
 
@@ -7,18 +8,32 @@ export function GlobalTenantEvents() {
   const { toast } = useToast();
 
   useEffect(() => {
-    const handleTenantLost = () => {
-      console.log("[GlobalTenantEvents] Tenant lost - showing notification");
+    const handleTenantLost = async () => {
+      console.log("[GlobalTenantEvents] Tenant lost, clearing all query cache");
+      
+      // Clear ALL queries and mutations to prevent stale data
+      await queryClient.clear();
+      
+      // Show warning toast
       toast({
         title: "Workspace Disconnected",
-        description: "Please select a workspace to continue using the application.",
+        description: "Please select a workspace to continue.",
         variant: "destructive",
       });
     };
 
-    const handleTenantChanged = (tenant: Tenant | null) => {
+    const handleTenantChanged = async (tenant: Tenant | null) => {
       if (tenant) {
-        console.log("[GlobalTenantEvents] Tenant changed to:", tenant.name);
+        console.log("[GlobalTenantEvents] Tenant changed, invalidating queries");
+        
+        // Invalidate ALL queries to refetch with new tenant context
+        await queryClient.invalidateQueries({ exact: false });
+        
+        // Show success toast
+        toast({
+          title: "Workspace Selected",
+          description: `Now viewing ${tenant.name}`,
+        });
       }
     };
 

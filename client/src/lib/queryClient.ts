@@ -8,21 +8,32 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-async function getTenantIdFromSession(timeout: number = 5000): Promise<string | null> {
+async function getTenantIdFromSession(timeout: number = 5000): Promise<string> {
   try {
     console.log("[queryClient] Waiting for tenant context...");
     const tenant = await tenantSession.waitForTenant(timeout);
     
     if (!tenant) {
-      console.warn("[queryClient] No tenant context available after waiting");
-      return null;
+      console.error("[queryClient] Tenant context unavailable after timeout");
+      throw new Error(
+        "No workspace selected. Please select a workspace to continue."
+      );
     }
     
-    console.log("[queryClient] Tenant context obtained:", tenant.name);
-    return tenant.id;
+    // Double-check tenant hasn't been lost between await and fetch
+    const currentTenant = tenantSession.getTenant();
+    if (!currentTenant) {
+      console.error("[queryClient] Tenant lost between wait and fetch");
+      throw new Error(
+        "Workspace disconnected. Please select a workspace to continue."
+      );
+    }
+    
+    console.log("[queryClient] Tenant context obtained:", currentTenant.name);
+    return currentTenant.id;
   } catch (error) {
     console.error("[queryClient] Failed to get tenant context:", error);
-    throw new Error("Failed to load workspace context. Please select a workspace and try again.");
+    throw error instanceof Error ? error : new Error("Failed to load workspace context. Please select a workspace and try again.");
   }
 }
 
@@ -34,12 +45,9 @@ export async function apiRequest(
   const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
   
   // Wait for tenant context before making API request
+  // This will throw if tenant is unavailable
   const tenantId = await getTenantIdFromSession();
-  if (tenantId) {
-    headers["x-tenant-id"] = tenantId;
-  } else {
-    console.warn("[apiRequest] No tenant context available for:", url);
-  }
+  headers["x-tenant-id"] = tenantId;
   
   const res = await fetch(url, {
     method,
@@ -79,13 +87,10 @@ export const getQueryFn: <T>(options: {
     }
     
     // Wait for tenant context before making API request
+    // This will throw if tenant is unavailable
     const headers: Record<string, string> = {};
     const tenantId = await getTenantIdFromSession();
-    if (tenantId) {
-      headers["x-tenant-id"] = tenantId;
-    } else {
-      console.warn("[getQueryFn] No tenant context available for:", url);
-    }
+    headers["x-tenant-id"] = tenantId;
     
     const res = await fetch(url, {
       headers,

@@ -102,7 +102,22 @@ class TenantSession {
     return new Promise<Tenant | null>((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
-        console.warn("[TenantSession] Tenant wait timeout expired");
+        console.warn("[TenantSession] Timeout waiting for tenant context", { 
+          timeout,
+          timestamp: new Date().toISOString(),
+          ready: this._ready,
+          hasTenant: !!this._tenant
+        });
+        
+        // Telemetry hook for production monitoring
+        if (typeof window !== "undefined" && (window as any).trackEvent) {
+          (window as any).trackEvent("tenant_session_timeout", {
+            timeout,
+            ready: this._ready,
+            hasTenant: !!this._tenant
+          });
+        }
+        
         resolve(null);
       }, timeout);
 
