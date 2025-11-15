@@ -9,6 +9,8 @@ import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
+import { type Currency } from "@shared/schema";
+import { formatCurrency } from "@/lib/currency-utils";
 import {
   BarChart,
   Bar,
@@ -126,6 +128,14 @@ export default function FinancialReports() {
     enabled: !!currentTenant?.id && fetchCF,
   });
 
+  // Currency query for formatting
+  const { data: currencies = [] } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
   if (!currentTenant) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] gap-4">
@@ -221,7 +231,7 @@ export default function FinancialReports() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-green-600" data-testid="text-total-revenue">
-                      ${plReport.totalRevenue.toFixed(2)}
+                      {formatCurrency(plReport.totalRevenue, baseCurrency?.code || "USD", currencies)}
                     </div>
                   </CardContent>
                 </Card>
@@ -231,7 +241,7 @@ export default function FinancialReports() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-red-600" data-testid="text-total-expenses">
-                      ${plReport.totalExpenses.toFixed(2)}
+                      {formatCurrency(plReport.totalExpenses, baseCurrency?.code || "USD", currencies)}
                     </div>
                   </CardContent>
                 </Card>
@@ -244,7 +254,7 @@ export default function FinancialReports() {
                       className={`text-2xl font-bold ${plReport.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}
                       data-testid="text-net-profit"
                     >
-                      ${plReport.netProfit.toFixed(2)}
+                      {formatCurrency(plReport.netProfit, baseCurrency?.code || "USD", currencies)}
                     </div>
                   </CardContent>
                 </Card>
@@ -295,14 +305,14 @@ export default function FinancialReports() {
                             <TableRow key={idx} data-testid={`row-revenue-${idx}`}>
                               <TableCell>{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono">
-                                ${item.amount.toFixed(2)}
+                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Revenue</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-revenue">
-                              ${plReport.totalRevenue.toFixed(2)}
+                              {formatCurrency(plReport.totalRevenue, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -331,14 +341,14 @@ export default function FinancialReports() {
                             <TableRow key={idx} data-testid={`row-expense-${idx}`}>
                               <TableCell>{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono">
-                                ${item.amount.toFixed(2)}
+                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Expenses</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-expenses">
-                              ${plReport.totalExpenses.toFixed(2)}
+                              {formatCurrency(plReport.totalExpenses, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -407,7 +417,7 @@ export default function FinancialReports() {
                         cx="50%"
                         cy="50%"
                         labelLine={false}
-                        label={(entry) => `${entry.name}: $${entry.value.toFixed(2)}`}
+                        label={(entry) => `${entry.name}: ${formatCurrency(entry.value, baseCurrency?.code || "USD", currencies)}`}
                         outerRadius={80}
                         fill="#8884d8"
                         dataKey="value"
@@ -444,14 +454,14 @@ export default function FinancialReports() {
                             <TableRow key={idx} data-testid={`row-asset-${idx}`}>
                               <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                ${item.amount.toFixed(2)}
+                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Assets</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-assets">
-                              ${bsReport.totalAssets.toFixed(2)}
+                              {formatCurrency(bsReport.totalAssets, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -480,14 +490,14 @@ export default function FinancialReports() {
                             <TableRow key={idx} data-testid={`row-liability-${idx}`}>
                               <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                ${item.amount.toFixed(2)}
+                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Liabilities</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-liabilities">
-                              ${bsReport.totalLiabilities.toFixed(2)}
+                              {formatCurrency(bsReport.totalLiabilities, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -516,14 +526,14 @@ export default function FinancialReports() {
                             <TableRow key={idx} data-testid={`row-equity-${idx}`}>
                               <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                ${item.amount.toFixed(2)}
+                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Equity</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-equity">
-                              ${bsReport.totalEquity.toFixed(2)}
+                              {formatCurrency(bsReport.totalEquity, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -541,12 +551,12 @@ export default function FinancialReports() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="font-medium">Assets:</span>
-                      <span className="font-mono">${bsReport.totalAssets.toFixed(2)}</span>
+                      <span className="font-mono">{formatCurrency(bsReport.totalAssets, baseCurrency?.code || "USD", currencies)}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="font-medium">Liabilities + Equity:</span>
                       <span className="font-mono">
-                        ${(bsReport.totalLiabilities + bsReport.totalEquity).toFixed(2)}
+                        {formatCurrency(bsReport.totalLiabilities + bsReport.totalEquity, baseCurrency?.code || "USD", currencies)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center pt-2 border-t font-semibold">
@@ -620,13 +630,13 @@ export default function FinancialReports() {
                     <div className="p-4 border rounded-lg">
                       <div className="text-sm font-medium text-muted-foreground">Total Debits</div>
                       <div className="text-2xl font-bold font-mono" data-testid="text-total-debits">
-                        ${tbReport.totalDebits.toFixed(2)}
+                        {formatCurrency(tbReport.totalDebits, baseCurrency?.code || "USD", currencies)}
                       </div>
                     </div>
                     <div className="p-4 border rounded-lg">
                       <div className="text-sm font-medium text-muted-foreground">Total Credits</div>
                       <div className="text-2xl font-bold font-mono" data-testid="text-total-credits">
-                        ${tbReport.totalCredits.toFixed(2)}
+                        {formatCurrency(tbReport.totalCredits, baseCurrency?.code || "USD", currencies)}
                       </div>
                     </div>
                     <div className="p-4 border rounded-lg">
@@ -665,20 +675,20 @@ export default function FinancialReports() {
                             <TableCell className="font-mono text-sm">{account.accountCode}</TableCell>
                             <TableCell>{account.accountName}</TableCell>
                             <TableCell className="text-right font-mono">
-                              {account.debit > 0 ? `$${account.debit.toFixed(2)}` : '-'}
+                              {account.debit > 0 ? formatCurrency(account.debit, baseCurrency?.code || "USD", currencies) : '-'}
                             </TableCell>
                             <TableCell className="text-right font-mono">
-                              {account.credit > 0 ? `$${account.credit.toFixed(2)}` : '-'}
+                              {account.credit > 0 ? formatCurrency(account.credit, baseCurrency?.code || "USD", currencies) : '-'}
                             </TableCell>
                           </TableRow>
                         ))}
                         <TableRow className="font-semibold bg-muted/50">
                           <TableCell colSpan={2}>Totals</TableCell>
                           <TableCell className="text-right font-mono" data-testid="cell-total-debits">
-                            ${tbReport.totalDebits.toFixed(2)}
+                            {formatCurrency(tbReport.totalDebits, baseCurrency?.code || "USD", currencies)}
                           </TableCell>
                           <TableCell className="text-right font-mono" data-testid="cell-total-credits">
-                            ${tbReport.totalCredits.toFixed(2)}
+                            {formatCurrency(tbReport.totalCredits, baseCurrency?.code || "USD", currencies)}
                           </TableCell>
                         </TableRow>
                       </TableBody>
@@ -785,14 +795,14 @@ export default function FinancialReports() {
                             <TableRow key={idx} data-testid={`row-operating-${idx}`}>
                               <TableCell className="text-sm">{item.activity}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                ${item.amount.toFixed(2)}
+                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Net Operating</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-net-operating">
-                              ${cfReport.netOperating.toFixed(2)}
+                              {formatCurrency(cfReport.netOperating, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -821,14 +831,14 @@ export default function FinancialReports() {
                             <TableRow key={idx} data-testid={`row-investing-${idx}`}>
                               <TableCell className="text-sm">{item.activity}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                ${item.amount.toFixed(2)}
+                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Net Investing</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-net-investing">
-                              ${cfReport.netInvesting.toFixed(2)}
+                              {formatCurrency(cfReport.netInvesting, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -857,14 +867,14 @@ export default function FinancialReports() {
                             <TableRow key={idx} data-testid={`row-financing-${idx}`}>
                               <TableCell className="text-sm">{item.activity}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                ${item.amount.toFixed(2)}
+                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Net Financing</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-net-financing">
-                              ${cfReport.netFinancing.toFixed(2)}
+                              {formatCurrency(cfReport.netFinancing, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -887,7 +897,7 @@ export default function FinancialReports() {
                       className={`text-3xl font-bold ${cfReport.netCashFlow >= 0 ? 'text-green-600' : 'text-red-600'}`}
                       data-testid="text-net-cash-flow"
                     >
-                      ${cfReport.netCashFlow.toFixed(2)}
+                      {formatCurrency(cfReport.netCashFlow, baseCurrency?.code || "USD", currencies)}
                     </div>
                   </div>
                 </CardContent>
