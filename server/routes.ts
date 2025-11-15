@@ -757,7 +757,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
    * 
    * @testid API endpoint for account transaction history used in UI transaction tables
    */
-  app.get('/api/accounts/:id/transaction-history', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/accounts/:id/transaction-history', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;

@@ -55,6 +55,7 @@ import CurrenciesPage from "@/pages/settings/currencies";
 import PendingApprovals from "@/pages/pending-approvals";
 import Workflows from "@/pages/workflows";
 import WorkflowForm from "@/pages/workflow-form";
+import ChartOfAccountsReport from "@/pages/chart-of-accounts-report";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -93,6 +94,7 @@ function Router() {
           <Route path="/customer-payments" component={CustomerPayments} />
           <Route path="/documents" component={Documents} />
           <Route path="/reports" component={Reports} />
+          <Route path="/reports/chart-of-accounts" component={ChartOfAccountsReport} />
           <Route path="/financial-reports" component={FinancialReports} />
           <Route path="/ar-aging" component={ARAgingReport} />
           <Route path="/ap-aging" component={APAgingReport} />

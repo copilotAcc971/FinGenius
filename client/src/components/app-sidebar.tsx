@@ -29,6 +29,7 @@ import {
   StarOff,
   ChevronDown,
   ChevronRight,
+  FileBarChart,
 } from "lucide-react";
 import logoImage from "@assets/generated_images/Copilot_Accountant_app_logo_0a4d944c.png";
 import {
@@ -86,6 +87,7 @@ const paymentsItems = [
 
 const accountingItems = [
   { title: "Chart of Accounts", url: "/accounts", icon: BookOpen },
+  { title: "Chart of Accounts Report", url: "/reports/chart-of-accounts", icon: FileBarChart },
   { title: "Journal Entries", url: "/journal-entries", icon: FileText },
   { title: "Approvals", url: "/approvals", icon: CheckCircle },
   { title: "Approval Workflows", url: "/workflows", icon: Workflow },
@@ -138,6 +140,7 @@ function getIconName(IconComponent: any): string {
     [Shield.name]: "Shield",
     [UserCog.name]: "UserCog",
     [Coins.name]: "Coins",
+    [FileBarChart.name]: "FileBarChart",
   };
   return iconMap[IconComponent.name] || "FileText";
 }
