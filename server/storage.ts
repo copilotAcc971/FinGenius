@@ -258,6 +258,13 @@ export interface IStorage {
   createExpense(expense: InsertExpense): Promise<Expense>;
   updateExpense(id: string, tenantId: string, expense: Partial<InsertExpense>): Promise<Expense>;
 
+  // Employee Expense Management operations
+  getEmployeeExpenses(tenantId: string, filters?: { employeeId?: string; reimbursementStatus?: string; startDate?: Date; endDate?: Date }): Promise<Expense[]>;
+  submitEmployeeExpense(data: InsertExpense & { tenantId: string; employeeId: string; submittedBy: string }): Promise<Expense>;
+  approveExpense(expenseId: string, tenantId: string, approvedBy: string): Promise<Expense>;
+  rejectExpense(expenseId: string, tenantId: string, rejectedBy: string, reason: string): Promise<Expense>;
+  reimburseExpense(expenseId: string, tenantId: string, reimbursedBy: string, paymentDetails: { paymentReference: string; paymentMethod: string }): Promise<Expense>;
+
   // Payment operations
   getPaymentsByTenant(tenantId: string): Promise<Payment[]>;
   createPayment(payment: InsertPayment, tx?: typeof db): Promise<Payment>;
@@ -1730,6 +1737,105 @@ export class DatabaseStorage implements IStorage {
       .update(expenses)
       .set({ ...expenseData, updatedAt: new Date() })
       .where(eq(expenses.id, id))
+      .returning();
+    return updatedExpense;
+  }
+
+  // Employee Expense Management operations
+  async getEmployeeExpenses(tenantId: string, filters?: { employeeId?: string; reimbursementStatus?: string; startDate?: Date; endDate?: Date }): Promise<Expense[]> {
+    const conditions: any[] = [eq(expenses.tenantId, tenantId)];
+    
+    if (filters?.employeeId) {
+      conditions.push(eq(expenses.employeeId, filters.employeeId));
+    }
+    
+    if (filters?.reimbursementStatus) {
+      conditions.push(eq(expenses.reimbursementStatus, filters.reimbursementStatus));
+    }
+    
+    if (filters?.startDate) {
+      conditions.push(gte(expenses.date, filters.startDate));
+    }
+    
+    if (filters?.endDate) {
+      conditions.push(lte(expenses.date, filters.endDate));
+    }
+    
+    return await db
+      .select()
+      .from(expenses)
+      .where(and(...conditions))
+      .orderBy(desc(expenses.createdAt));
+  }
+
+  async submitEmployeeExpense(data: InsertExpense & { tenantId: string; employeeId: string; submittedBy: string }): Promise<Expense> {
+    const [expense] = await db
+      .insert(expenses)
+      .values({
+        ...data,
+        submittedAt: new Date(),
+        reimbursementStatus: 'pending',
+      })
+      .returning();
+    return expense;
+  }
+
+  async approveExpense(expenseId: string, tenantId: string, approvedBy: string): Promise<Expense> {
+    const expense = await this.getExpense(expenseId);
+    if (!expense || expense.tenantId !== tenantId) {
+      throw new Error("Expense not found");
+    }
+    
+    const [updatedExpense] = await db
+      .update(expenses)
+      .set({
+        reimbursementStatus: 'approved',
+        approvedBy,
+        approvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(expenses.id, expenseId))
+      .returning();
+    return updatedExpense;
+  }
+
+  async rejectExpense(expenseId: string, tenantId: string, rejectedBy: string, reason: string): Promise<Expense> {
+    const expense = await this.getExpense(expenseId);
+    if (!expense || expense.tenantId !== tenantId) {
+      throw new Error("Expense not found");
+    }
+    
+    const [updatedExpense] = await db
+      .update(expenses)
+      .set({
+        reimbursementStatus: 'rejected',
+        rejectedBy,
+        rejectedAt: new Date(),
+        rejectionReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(expenses.id, expenseId))
+      .returning();
+    return updatedExpense;
+  }
+
+  async reimburseExpense(expenseId: string, tenantId: string, reimbursedBy: string, paymentDetails: { paymentReference: string; paymentMethod: string }): Promise<Expense> {
+    const expense = await this.getExpense(expenseId);
+    if (!expense || expense.tenantId !== tenantId) {
+      throw new Error("Expense not found");
+    }
+    
+    const [updatedExpense] = await db
+      .update(expenses)
+      .set({
+        reimbursementStatus: 'reimbursed',
+        reimbursedBy,
+        reimbursedAt: new Date(),
+        paymentReference: paymentDetails.paymentReference,
+        paymentMethod: paymentDetails.paymentMethod,
+        updatedAt: new Date(),
+      })
+      .where(eq(expenses.id, expenseId))
       .returning();
     return updatedExpense;
   }

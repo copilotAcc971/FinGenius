@@ -58,6 +58,7 @@ import WorkflowForm from "@/pages/workflow-form";
 import ChartOfAccountsReport from "@/pages/chart-of-accounts-report";
 import CustomReportBuilder from "@/pages/custom-report-builder";
 import ScheduledReports from "@/pages/scheduled-reports";
+import EmployeeExpenses from "@/pages/employee-expenses";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -92,6 +93,7 @@ function Router() {
           <Route path="/bills" component={Bills} />
           <Route path="/purchase-orders" component={PurchaseOrders} />
           <Route path="/expenses" component={Expenses} />
+          <Route path="/employee-expenses" component={EmployeeExpenses} />
           <Route path="/payments" component={Payments} />
           <Route path="/customer-payments" component={CustomerPayments} />
           <Route path="/documents" component={Documents} />

@@ -30,6 +30,7 @@ const routeMap: Record<string, string> = {
   "/bills": "Bills",
   "/purchase-orders": "Purchase Orders",
   "/expenses": "Expenses",
+  "/employee-expenses": "Employee Expenses",
   "/payments": "Vendor Payments",
   "/customer-payments": "Customer Payments",
   "/documents": "Documents",

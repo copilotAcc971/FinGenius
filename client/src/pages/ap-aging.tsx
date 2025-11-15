@@ -212,7 +212,7 @@ export default function APAgingReport() {
           <TabsTrigger value="vendor" data-testid="tab-vendor">
             By Vendor
           </TabsTrigger>
-          <TabsTrigger value="invoice" data-testid="tab-invoice">
+          <TabsTrigger value="invoice" data-testid="tab-bill">
             By Bill
           </TabsTrigger>
           <TabsTrigger value="project" data-testid="tab-project">

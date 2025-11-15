@@ -88,6 +88,7 @@ import {
   approvalHistory,
   approvalSteps,
   approvalWorkflows,
+  type Expense,
 } from "@shared/schema";
 import { insertFXConfigSchema } from "@shared/fx-types";
 
@@ -114,6 +115,25 @@ const approveJournalEntrySchema = z.object({
 const rejectJournalEntrySchema = z.object({
   rejectionReason: z.string().min(1, "Rejection reason is required")
 });
+
+// Schema for employee expense reimburse endpoint
+const reimburseExpenseSchema = z.object({
+  paymentMethod: z.string().min(1, "Payment method is required"),
+  paymentReference: z.string().min(1, "Payment reference is required"),
+});
+
+// Expense serialization helper
+function serializeExpense(expense: Expense): any {
+  return {
+    ...expense,
+    date: expense.date?.toISOString() || null,
+    submittedAt: expense.submittedAt?.toISOString() || null,
+    approvedAt: expense.approvedAt?.toISOString() || null,
+    rejectedAt: expense.rejectedAt?.toISOString() || null,
+    reimbursedAt: expense.reimbursedAt?.toISOString() || null,
+    createdAt: expense.createdAt?.toISOString() || null,
+  };
+}
 
 // Middleware to verify tenant membership
 async function verifyTenantAccess(req: any, res: any, next: any) {
@@ -5023,6 +5043,169 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching expenses:", error);
       res.status(500).json({ message: "Failed to fetch expenses" });
+    }
+  });
+
+  // Employee Expense Management routes
+  app.get('/api/employee-expenses', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      // Check permissions
+      const hasRead = req.permissions?.includes('*') || req.permissions?.includes('employee_expenses.read');
+      const hasSubmit = req.permissions?.includes('*') || req.permissions?.includes('employee_expenses.submit');
+      const hasViewAll = req.permissions?.includes('*') || req.permissions?.includes('employee_expenses.view_all');
+      
+      // Must have at least submit or read permission
+      if (!hasRead && !hasSubmit) {
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      const { status, employeeId, startDate, endDate } = req.query;
+      
+      const filters: any = {};
+      
+      // Permission-based filtering:
+      if (!hasViewAll) {
+        // Users without view_all can see:
+        // 1. Expenses where they are the employee (their own)
+        // 2. Expenses they submitted (on behalf of others)
+        // This is handled in storage layer by passing userId
+        filters.userId = userId; // Storage will filter by employeeId OR submittedBy
+      } else if (employeeId) {
+        // Has view_all and specified employeeId filter
+        filters.employeeId = employeeId;
+      }
+      
+      if (status) filters.reimbursementStatus = status;
+      if (startDate) filters.startDate = new Date(startDate);
+      if (endDate) filters.endDate = new Date(endDate);
+      
+      const expenses = await storage.getEmployeeExpenses(tenantId, filters);
+      
+      // Serialize dates
+      res.json(expenses.map(serializeExpense));
+    } catch (error) {
+      console.error("Error fetching employee expenses:", error);
+      res.status(500).json({ message: "Failed to fetch employee expenses" });
+    }
+  });
+
+  app.post('/api/employee-expenses', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('employee_expenses.submit'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      
+      // Backend controls all system fields
+      const expenseData = {
+        // User-provided fields
+        employeeId: req.body.employeeId || userId, // Default to self
+        date: req.body.date,
+        amount: req.body.amount,
+        category: req.body.category,
+        description: req.body.description,
+        documentUrl: req.body.documentUrl,
+        vendorId: req.body.vendorId,
+        accountId: req.body.accountId,
+        currencyCode: req.body.currencyCode || 'USD',
+        
+        // System-controlled fields (backend sets these)
+        tenantId,
+        submittedBy: userId,
+        submittedAt: new Date(),
+        reimbursementStatus: 'pending',
+      };
+      
+      // Validate with Zod
+      const validatedData = insertExpenseSchema.parse(expenseData);
+      
+      const expense = await storage.submitEmployeeExpense(validatedData);
+      
+      // Serialize dates
+      res.status(201).json(serializeExpense(expense));
+    } catch (error: any) {
+      console.error("Error submitting employee expense:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Validation error", errors: error.errors });
+      } else {
+        res.status(500).json({ message: "Failed to submit expense" });
+      }
+    }
+  });
+
+  app.post('/api/employee-expenses/:id/approve', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('employee_expenses.approve'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      
+      const expense = await storage.approveExpense(id, tenantId, userId);
+      
+      // Serialize dates
+      res.json(serializeExpense(expense));
+    } catch (error: any) {
+      console.error("Error approving expense:", error);
+      res.status(400).json({ message: error.message || "Failed to approve expense" });
+    }
+  });
+
+  app.post('/api/employee-expenses/:id/reject', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('employee_expenses.reject'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      
+      if (!reason) {
+        return res.status(400).json({ message: "Rejection reason is required" });
+      }
+      
+      const expense = await storage.rejectExpense(id, tenantId, userId, reason);
+      
+      // Serialize dates
+      res.json(serializeExpense(expense));
+    } catch (error: any) {
+      console.error("Error rejecting expense:", error);
+      res.status(400).json({ message: error.message || "Failed to reject expense" });
+    }
+  });
+
+  app.post('/api/employee-expenses/:id/reimburse', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('employee_expenses.reimburse'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      
+      // Validate payment details with Zod
+      const validatedData = reimburseExpenseSchema.parse(req.body);
+      
+      const expense = await storage.reimburseExpense(
+        id,
+        tenantId,
+        userId,
+        {
+          paymentMethod: validatedData.paymentMethod,
+          paymentReference: validatedData.paymentReference,
+        }
+      );
+      
+      // Serialize dates for frontend
+      res.json({
+        ...expense,
+        date: expense.date?.toISOString() || null,
+        submittedAt: expense.submittedAt?.toISOString() || null,
+        approvedAt: expense.approvedAt?.toISOString() || null,
+        rejectedAt: expense.rejectedAt?.toISOString() || null,
+        reimbursedAt: expense.reimbursedAt?.toISOString() || null,
+        createdAt: expense.createdAt?.toISOString() || null,
+      });
+    } catch (error: any) {
+      console.error("Error reimbursing expense:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Validation error", errors: error.errors });
+      } else {
+        res.status(500).json({ message: "Failed to reimburse expense" });
+      }
     }
   });
 

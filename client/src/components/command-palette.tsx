@@ -76,6 +76,7 @@ const navigationItems: NavigationItem[] = [
   { id: "assets", label: "Fixed Assets", icon: Package, url: "/assets", category: "Accounting", keywords: ["depreciation"] },
   { id: "bank-reconciliations", label: "Bank Reconciliation", icon: CreditCard, url: "/bank-reconciliations", category: "Accounting" },
   { id: "bank-connections", label: "Bank Connections", icon: Landmark, url: "/bank-connections", category: "Accounting", keywords: ["open banking"] },
+  { id: "employee-expenses", label: "Employee Expenses", icon: Receipt, url: "/employee-expenses", category: "Accounting", keywords: ["reimbursement", "claims", "receipts"] },
   { id: "financial-reports", label: "Financial Reports", icon: TrendingUp, url: "/financial-reports", category: "Reports", keywords: ["p&l", "balance sheet"] },
   { id: "ar-aging", label: "AR Aging Report", icon: Clock, url: "/ar-aging", category: "Reports", keywords: ["receivables"] },
   { id: "ap-aging", label: "AP Aging Report", icon: Clock, url: "/ap-aging", category: "Reports", keywords: ["payables"] },

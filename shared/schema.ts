@@ -975,9 +975,31 @@ export const expenses = pgTable("expenses", {
   exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
   
   description: text("description"),
-  status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, approved, paid, rejected
+  status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, approved, paid, rejected (legacy, use reimbursementStatus)
   documentUrl: varchar("document_url", { length: 500 }), // uploaded receipt
   notes: text("notes"),
+  
+  // Employee Reimbursement Fields
+  employeeId: varchar("employee_id").references(() => users.id),
+  submittedAt: timestamp("submitted_at"),
+  submittedBy: varchar("submitted_by").references(() => users.id),
+  
+  // Approval workflow integration
+  approvalWorkflowId: varchar("approval_workflow_id").references(() => approvalWorkflows.id),
+  approvalRequestId: varchar("approval_request_id").references(() => approvalRequests.id),
+  approvedBy: varchar("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  rejectedBy: varchar("rejected_by").references(() => users.id),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+  
+  // Reimbursement tracking
+  reimbursementStatus: varchar("reimbursement_status", { length: 50 }).default("pending"),
+  reimbursedBy: varchar("reimbursed_by").references(() => users.id),
+  reimbursedAt: timestamp("reimbursed_at"),
+  paymentReference: varchar("payment_reference", { length: 200 }),
+  paymentMethod: varchar("payment_method", { length: 50 }),
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -986,10 +1008,27 @@ export const insertExpenseSchema = createInsertSchema(expenses, {
   amount: decimalString,
   transactionRateValue: decimalString.optional(),
   transactionAmount: decimalString.optional(),
+  date: z.coerce.date(),
 }).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  employeeId: z.string().optional(),
+  submittedBy: z.string().optional(),
+  submittedAt: z.coerce.date().optional(),
+  approvalWorkflowId: z.string().optional(),
+  approvalRequestId: z.string().optional(),
+  approvedBy: z.string().optional(),
+  approvedAt: z.coerce.date().optional(),
+  rejectedBy: z.string().optional(),
+  rejectedAt: z.coerce.date().optional(),
+  rejectionReason: z.string().optional(),
+  reimbursementStatus: z.string().optional().default("pending"),
+  reimbursedBy: z.string().optional(),
+  reimbursedAt: z.coerce.date().optional(),
+  paymentReference: z.string().optional(),
+  paymentMethod: z.string().optional(),
 });
 
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;

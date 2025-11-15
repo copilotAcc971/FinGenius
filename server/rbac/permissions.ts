@@ -21,6 +21,7 @@ export const PERMISSION_MODULES = {
   ASSETS: 'assets',
   BANK_RECONCILIATIONS: 'bank_reconciliations',
   EXPENSES: 'expenses',
+  EMPLOYEE_EXPENSES: 'employee_expenses',
   PAYMENTS: 'payments',
   VENDOR_PAYMENTS: 'vendor_payments',
   DOCUMENTS: 'documents',
@@ -193,6 +194,14 @@ export const PERMISSION_DEFINITIONS = [
   { module: 'expenses', action: 'read', name: 'expenses.read', description: 'View expenses' },
   { module: 'expenses', action: 'update', name: 'expenses.update', description: 'Edit expenses' },
   { module: 'expenses', action: 'delete', name: 'expenses.delete', description: 'Delete expenses' },
+
+  // Employee Expense Management
+  { module: 'employee_expenses', action: 'submit', name: 'employee_expenses.submit', description: 'Submit own expense claims' },
+  { module: 'employee_expenses', action: 'read', name: 'employee_expenses.read', description: 'View expense claims' },
+  { module: 'employee_expenses', action: 'approve', name: 'employee_expenses.approve', description: 'Approve expense claims' },
+  { module: 'employee_expenses', action: 'reject', name: 'employee_expenses.reject', description: 'Reject expense claims' },
+  { module: 'employee_expenses', action: 'reimburse', name: 'employee_expenses.reimburse', description: 'Process reimbursements' },
+  { module: 'employee_expenses', action: 'view_all', name: 'employee_expenses.view_all', description: 'View all employees expense claims' },
 
   // Payments (vendor payments)
   { module: 'payments', action: 'create', name: 'payments.create', description: 'Create vendor payments' },

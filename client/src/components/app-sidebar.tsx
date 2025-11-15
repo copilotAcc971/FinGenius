@@ -97,6 +97,7 @@ const accountingItems = [
   { title: "Fixed Assets", url: "/assets", icon: Package },
   { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
   { title: "Bank Connections", url: "/bank-connections", icon: Landmark },
+  { title: "Employee Expenses", url: "/employee-expenses", icon: Receipt },
   { title: "Financial Reports", url: "/financial-reports", icon: TrendingUp },
   { title: "Custom Reports", url: "/custom-reports", icon: FileSpreadsheet },
   { title: "Scheduled Reports", url: "/scheduled-reports", icon: Calendar },
