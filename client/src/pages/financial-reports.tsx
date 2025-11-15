@@ -173,6 +173,11 @@ interface TrialBalanceReport {
   totalDebits: number;
   totalCredits: number;
   isBalanced: boolean;
+  baseCurrency?: string;
+  ifrsComplianceEnabled?: boolean;
+  fxTranslationStandard?: string | null;
+  translationMethod?: string;
+  fxTranslationApplied?: boolean;
 }
 
 interface EnhancedCashFlowReport {
@@ -1794,6 +1799,15 @@ export default function FinancialReports() {
                   )}
                 </CardContent>
               </Card>
+
+              {tbReport.ifrsComplianceEnabled && (
+                <FxDisclosure
+                  standard={tbReport.fxTranslationStandard!}
+                  method={tbReport.translationMethod}
+                  baseCurrency={tbReport.baseCurrency || "USD"}
+                  applied={tbReport.fxTranslationApplied || false}
+                />
+              )}
             </>
           )}
         </TabsContent>

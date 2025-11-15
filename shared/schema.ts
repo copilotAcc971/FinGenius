@@ -2537,6 +2537,12 @@ export const trialBalanceReportSchema = z.object({
   totalDebits: z.string(),
   totalCredits: z.string(),
   isBalanced: z.boolean(),
+  
+  baseCurrency: z.string(),
+  ifrsComplianceEnabled: z.boolean(),
+  fxTranslationStandard: z.string().nullable(),
+  translationMethod: z.string().optional(),
+  fxTranslationApplied: z.boolean(),
 });
 
 export type TrialBalanceReport = z.infer<typeof trialBalanceReportSchema>;

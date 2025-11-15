@@ -4642,6 +4642,24 @@ export class DatabaseStorage implements IStorage {
     const totalCredits = accountLines.reduce((sum, line) => sum + parseFloat(line.credit), 0);
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
 
+    // Get base currency
+    const baseCurrencyRecord = await db.query.currencies.findFirst({
+      where: and(
+        eq(currencies.tenantId, tenantId),
+        eq(currencies.isBaseCurrency, true)
+      )
+    });
+    const baseCurrency = baseCurrencyRecord?.code || 'USD';
+
+    // Get tenant company profile for IFRS settings
+    const companyProfile = await db
+      .select()
+      .from(tenantCompanyProfiles)
+      .where(eq(tenantCompanyProfiles.tenantId, tenantId))
+      .limit(1);
+
+    const profile = companyProfile[0];
+
     return {
       tenantId,
       asOfDate,
@@ -4649,6 +4667,11 @@ export class DatabaseStorage implements IStorage {
       totalDebits: totalDebits.toFixed(2),
       totalCredits: totalCredits.toFixed(2),
       isBalanced,
+      baseCurrency: baseCurrency,
+      ifrsComplianceEnabled: profile?.ifrsComplianceEnabled || false,
+      fxTranslationStandard: profile?.fxTranslationStandard || null,
+      translationMethod: profile?.fxIncomeExpenseMethod || undefined,
+      fxTranslationApplied: false,
     };
   }
 
