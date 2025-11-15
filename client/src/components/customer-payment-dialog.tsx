@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { insertCustomerPaymentSchema, type CustomerPayment, type Customer, type Invoice } from "@shared/schema";
+import { insertCustomerPaymentSchema, type CustomerPayment, type Customer, type Invoice, type Currency } from "@shared/schema";
 import { z } from "zod";
+import { formatCurrency } from "@/lib/currency-utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -37,6 +38,7 @@ import { useTenant } from "@/hooks/useTenant";
 
 const paymentFormSchema = insertCustomerPaymentSchema.omit({ tenantId: true }).extend({
   paymentDate: z.string().min(1, "Payment date is required"),
+  currencyCode: z.string().length(3, "Currency code must be 3 characters").min(1, "Currency is required"),
 });
 type PaymentFormValues = z.infer<typeof paymentFormSchema>;
 
@@ -60,6 +62,50 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
     enabled: !!currentTenant?.id && open,
   });
 
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
+  });
+
+  // Currency variables
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
+  // availableCurrencies with useMemo (seeded pattern)
+  const availableCurrencies = useMemo(() => {
+    // If editing payment and currencies not loaded yet, create placeholder
+    if (payment?.currencyCode && currencies.length === 0) {
+      return [{
+        code: payment.currencyCode,
+        name: payment.currencyCode,
+        symbol: payment.currencyCode,
+        isActive: false,
+        decimalPlaces: 2,
+        isBaseCurrency: false,
+        tenantId: currentTenant?.id || '',
+        id: 'placeholder'
+      }];
+    }
+    
+    // Start with all active currencies
+    const available = [...activeCurrencies];
+    
+    // Add ALL inactive currencies (not just payment's currency)
+    const inactiveCurrencies = currencies.filter(c => !c.isActive);
+    for (const inactive of inactiveCurrencies) {
+      if (!available.find(c => c.code === inactive.code)) {
+        available.push(inactive);
+      }
+    }
+    
+    // Sort: active currencies first (alphabetically), then inactive
+    return available.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [activeCurrencies, currencies, payment?.currencyCode, currentTenant?.id]);
+
   const form = useForm<PaymentFormValues>({
     resolver: zodResolver(payment ? paymentFormSchema.partial() : paymentFormSchema),
     defaultValues: {
@@ -67,6 +113,7 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
       invoiceId: null,
       paymentDate: new Date().toISOString().split('T')[0],
       amount: "0.00",
+      currencyCode: "USD",
       paymentMethod: "cash",
       referenceNumber: "",
       notes: "",
@@ -75,6 +122,9 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
 
   const watchedCustomerId = form.watch("customerId");
 
+  // Watch currency for invoice display
+  const selectedCurrencyCode = useWatch({ control: form.control, name: "currencyCode" });
+
   useEffect(() => {
     if (payment) {
       form.reset({
@@ -82,6 +132,7 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
         invoiceId: payment.invoiceId || null,
         paymentDate: payment.paymentDate ? new Date(payment.paymentDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         amount: payment.amount,
+        currencyCode: payment.currencyCode,
         paymentMethod: payment.paymentMethod,
         referenceNumber: payment.referenceNumber || "",
         notes: payment.notes || "",
@@ -92,12 +143,27 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
         invoiceId: null,
         paymentDate: new Date().toISOString().split('T')[0],
         amount: "0.00",
+        currencyCode: baseCurrency?.code || "USD",
         paymentMethod: "cash",
         referenceNumber: "",
         notes: "",
       });
     }
-  }, [payment, form]);
+  }, [payment, baseCurrency, form]);
+
+  // CRITICAL: Guarded form reset (prevents data corruption)
+  // Only runs for NEW payments, NEVER when editing
+  useEffect(() => {
+    if (!open || payment) return; // Only for new payments - prevents corruption
+    if (currenciesLoading) return; // Wait for currencies to load
+    
+    // Reset form with loaded data while preserving any user edits
+    const currentValues = form.getValues();
+    form.reset({
+      ...currentValues,
+      currencyCode: baseCurrency?.code || "USD",
+    });
+  }, [open, payment, currenciesLoading, baseCurrency, form]);
 
   const saveMutation = useMutation({
     mutationFn: async (data: PaymentFormValues) => {
@@ -205,7 +271,41 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
                       <SelectItem value="none">No specific invoice</SelectItem>
                       {customerInvoices.map((invoice) => (
                         <SelectItem key={invoice.id} value={invoice.id} data-testid={`select-invoice-${invoice.id}`}>
-                          {invoice.invoiceNumber} - ${parseFloat(invoice.total).toFixed(2)}
+                          {invoice.invoiceNumber} - {formatCurrency(
+                            parseFloat(invoice.total || "0"),
+                            invoice.currencyCode,
+                            currencies
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="currencyCode"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Currency</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger data-testid="select-currency" disabled={currenciesLoading}>
+                        <SelectValue placeholder="Loading currencies..." />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {availableCurrencies.map(currency => (
+                        <SelectItem 
+                          key={currency.code} 
+                          value={currency.code}
+                          data-testid={`option-currency-${currency.code}`}
+                        >
+                          {currency.code} - {currency.name} ({currency.symbol})
+                          {!currency.isActive && ' (Inactive)'}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -324,7 +424,7 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
               </Button>
               <Button
                 type="submit"
-                disabled={saveMutation.isPending}
+                disabled={currenciesLoading || saveMutation.isPending}
                 data-testid="button-save"
               >
                 {saveMutation.isPending ? "Saving..." : payment ? "Update" : "Save"}

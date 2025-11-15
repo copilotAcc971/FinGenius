@@ -28,7 +28,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { CustomerPaymentDialog } from "@/components/customer-payment-dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import type { CustomerPayment, Customer, Invoice } from "@shared/schema";
+import { formatCurrency } from "@/lib/currency-utils";
+import type { CustomerPayment, Customer, Invoice, Currency } from "@shared/schema";
 
 export default function CustomerPayments() {
   const { currentTenant } = useTenant();
@@ -64,6 +65,11 @@ export default function CustomerPayments() {
 
   const { data: invoices = [] } = useQuery<Invoice[]>({
     queryKey: ["/api/invoices", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
     enabled: !!currentTenant?.id,
   });
 
@@ -237,8 +243,11 @@ export default function CustomerPayments() {
                   <TableCell data-testid={`text-date-${payment.id}`}>
                     {new Date(payment.paymentDate).toLocaleDateString()}
                   </TableCell>
-                  <TableCell className="text-right font-mono" data-testid={`text-amount-${payment.id}`}>
-                    ${parseFloat(payment.amount).toFixed(2)}
+                  <TableCell className="text-right font-mono" data-testid={`amount-${payment.id}`}>
+                    {currenciesLoading 
+                      ? '...' 
+                      : formatCurrency(parseFloat(payment.amount), payment.currencyCode, currencies)
+                    }
                   </TableCell>
                   <TableCell>{getPaymentMethodBadge(payment.paymentMethod)}</TableCell>
                   <TableCell data-testid={`text-reference-${payment.id}`}>
