@@ -17,6 +17,12 @@ The application uses a multi-tenant architecture with a "verified-tenant pattern
 - React Hook Form + Zod for form validation.
 - TanStack Query for data fetching and cache invalidation.
 - `data-testid` attributes for all interactive elements.
+- **Brand Identity:** Crimson professional theme (#DC143C) with charcoal sidebar, white backgrounds, and professional "Copilot Accountant" branding.
+- **Navigation Enhancement (Phase 1 - COMPLETED):**
+  - **Command Palette:** Global Cmd/Ctrl+K shortcut for quick navigation with fuzzy search across all modules, categorized results, and keyword support.
+  - **Breadcrumbs:** Contextual navigation trail showing tenant name and current location with clickable intermediate paths.
+  - **Tenant Context Indicators:** Visual badge in header showing active workspace for clear multi-tenant context.
+  - **Professional Logo:** AI-generated logo integrated into sidebar branding.
 
 **Technical Implementations & Feature Specifications:**
 - **Core Accounting:** Modules for Company Profile, Customers, Vendors, Items, Taxes, Invoices (auto-numbering, audit trail, soft delete, tax compliance), Bills (AI extraction), Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices.
