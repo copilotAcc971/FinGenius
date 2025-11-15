@@ -36,7 +36,8 @@ interface ProfitLossResponse {
   totalExpenses: number;
   netProfit: number;
   baseCurrency: string;
-  fxTranslationStandard: string;
+  ifrsComplianceEnabled: boolean;
+  fxTranslationStandard: string | null;
   incomeExpenseMethod: string;
   fxTranslationApplied: boolean;
 }
@@ -49,7 +50,8 @@ interface BalanceSheetResponse {
   totalLiabilities: number;
   totalEquity: number;
   baseCurrency: string;
-  fxTranslationStandard: string;
+  ifrsComplianceEnabled: boolean;
+  fxTranslationStandard: string | null;
   translationMethod: string;
   fxTranslationApplied: boolean;
 }
@@ -397,12 +399,14 @@ export default function FinancialReports() {
                 </Card>
               </div>
 
-              <FxDisclosure
-                standard={profitLossData.fxTranslationStandard}
-                method={profitLossData.incomeExpenseMethod}
-                baseCurrency={profitLossData.baseCurrency}
-                applied={profitLossData.fxTranslationApplied}
-              />
+              {profitLossData.ifrsComplianceEnabled ? (
+                <FxDisclosure
+                  standard={profitLossData.fxTranslationStandard!}
+                  method={profitLossData.incomeExpenseMethod}
+                  baseCurrency={profitLossData.baseCurrency}
+                  applied={profitLossData.fxTranslationApplied}
+                />
+              ) : null}
             </>
           )}
         </TabsContent>
@@ -624,12 +628,14 @@ export default function FinancialReports() {
                 </CardContent>
               </Card>
 
-              <FxDisclosure
-                standard={balanceSheetData.fxTranslationStandard}
-                method={balanceSheetData.translationMethod}
-                baseCurrency={balanceSheetData.baseCurrency}
-                applied={balanceSheetData.fxTranslationApplied}
-              />
+              {balanceSheetData.ifrsComplianceEnabled ? (
+                <FxDisclosure
+                  standard={balanceSheetData.fxTranslationStandard!}
+                  method={balanceSheetData.translationMethod}
+                  baseCurrency={balanceSheetData.baseCurrency}
+                  applied={balanceSheetData.fxTranslationApplied}
+                />
+              ) : null}
             </>
           )}
         </TabsContent>

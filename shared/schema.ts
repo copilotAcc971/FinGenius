@@ -147,7 +147,9 @@ export const fxConfigs = pgTable('fx_configs', {
   tenantId: varchar('tenant_id').primaryKey().references(() => tenants.id),
   autoRefreshEnabled: boolean('auto_refresh_enabled').default(true).notNull(),
   sourceStrategy: varchar('source_strategy').default('api').notNull(), // 'api' | 'manual' | 'hybrid'
-  cbuaeSource: varchar('cbuae_source').default('github').notNull(), // 'github' | 'ocr' | 'both' | 'fluentax' | 'manual'
+  primaryRateSource: varchar('primary_rate_source').default('cbuae').notNull(), // 'cbuae' | 'ecb' | 'sama' | 'boe' | 'fed' | 'manual'
+  primarySourceProvider: varchar('primary_source_provider').default('github').notNull(), // 'github' | 'api' | 'fluentax' | 'manual'
+  fallbackRateSource: varchar('fallback_rate_source'), // Optional fallback if primary fails
   lastRefreshAt: timestamp('last_refresh_at'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -297,9 +299,12 @@ export const tenantCompanyProfiles = pgTable("tenant_company_profiles", {
   phone: varchar("phone", { length: 50 }),
   website: varchar("website", { length: 255 }),
   
-  // IFRS Foreign Currency Translation Configuration
+  // IFRS Compliance Master Toggle
+  ifrsComplianceEnabled: boolean("ifrs_compliance_enabled").default(false).notNull(),
+  
+  // IFRS Foreign Currency Translation Configuration (only used if ifrsComplianceEnabled = true)
   fxTranslationStandard: varchar("fx_translation_standard", { length: 20 }).default("ifrs-sme"),
-  fxIncomeExpenseMethod: varchar("fx_income_expense_method", { length: 20 }).default("average-rate"),
+  fxIncomeExpenseMethod: varchar("fx_income_expense_method", { length: 20 }).default("transaction-date"),
   fxGainAccountId: varchar("fx_gain_account_id", { length: 255 }),
   fxLossAccountId: varchar("fx_loss_account_id", { length: 255 }),
   
@@ -311,6 +316,7 @@ export const insertTenantCompanyProfileSchema = createInsertSchema(tenantCompany
   legalName: z.string().min(1, "Legal name is required"),
   taxRegistrationNumber: z.string().min(1, "Tax registration number is required"),
   address: addressSchema.optional(),
+  ifrsComplianceEnabled: z.boolean().optional(),
   fxTranslationStandard: z.string().optional(),
   fxIncomeExpenseMethod: z.string().optional(),
   fxGainAccountId: z.string().optional(),
@@ -576,6 +582,13 @@ export const invoices = pgTable("invoices", {
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
+  // Multi-currency transaction tracking (IAS 21 compliance)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateSource: varchar("transaction_rate_source", { length: 50 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  transactionTotalAmount: decimal("transaction_total_amount", { precision: 20, scale: 10 }),
+  
   notes: text("notes"),
   
   // Email tracking fields
@@ -633,6 +646,11 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
   
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency transaction tracking
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
   
   // Item-level tax
   taxId: varchar("tax_id").references(() => taxes.id),
@@ -777,6 +795,13 @@ export const bills = pgTable("bills", {
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
+  // Multi-currency transaction tracking (IAS 21 compliance)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateSource: varchar("transaction_rate_source", { length: 50 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  transactionTotalAmount: decimal("transaction_total_amount", { precision: 20, scale: 10 }),
+  
   notes: text("notes"),
   documentUrl: varchar("document_url", { length: 500 }), // uploaded document
   createdAt: timestamp("created_at").defaultNow(),
@@ -812,6 +837,12 @@ export const billLineItems = pgTable("bill_line_items", {
   quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
   unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency transaction tracking
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  
   accountId: varchar("account_id").references(() => accounts.id),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1014,6 +1045,13 @@ export const quotes = pgTable("quotes", {
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
+  // Multi-currency transaction tracking (IAS 21 compliance)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateSource: varchar("transaction_rate_source", { length: 50 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  transactionTotalAmount: decimal("transaction_total_amount", { precision: 20, scale: 10 }),
+  
   notes: text("notes"),
   
   // Conversion tracking
@@ -1056,6 +1094,12 @@ export const quoteLineItems = pgTable("quote_line_items", {
   unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
   discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency transaction tracking
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  
   taxId: varchar("tax_id").references(() => taxes.id),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1095,6 +1139,13 @@ export const salesOrders = pgTable("sales_orders", {
   currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
+  // Multi-currency transaction tracking (IAS 21 compliance)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateSource: varchar("transaction_rate_source", { length: 50 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  transactionTotalAmount: decimal("transaction_total_amount", { precision: 20, scale: 10 }),
   
   notes: text("notes"),
   
@@ -1139,6 +1190,12 @@ export const salesOrderLineItems = pgTable("sales_order_line_items", {
   unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
   discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency transaction tracking
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  
   taxId: varchar("tax_id").references(() => taxes.id),
   createdAt: timestamp("created_at").defaultNow(),
 });

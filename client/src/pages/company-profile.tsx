@@ -23,6 +23,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -43,6 +45,7 @@ const companyProfileFormSchema = z.object({
   email: z.string().optional().or(z.literal("")),
   phone: z.string().optional().or(z.literal("")),
   website: z.string().optional().or(z.literal("")),
+  ifrsComplianceEnabled: z.boolean().optional(),
   fxTranslationStandard: z.string().optional(),
   fxIncomeExpenseMethod: z.string().optional(),
   fxGainAccountId: z.string().optional(),
@@ -76,8 +79,9 @@ export default function CompanyProfile() {
       email: "",
       phone: "",
       website: "",
+      ifrsComplianceEnabled: false,
       fxTranslationStandard: "ifrs-sme",
-      fxIncomeExpenseMethod: "average-rate",
+      fxIncomeExpenseMethod: "transaction-date",
       fxGainAccountId: "",
       fxLossAccountId: "",
     },
@@ -99,8 +103,9 @@ export default function CompanyProfile() {
         email: profile.email ?? "",
         phone: profile.phone ?? "",
         website: profile.website ?? "",
+        ifrsComplianceEnabled: profile.ifrsComplianceEnabled ?? false,
         fxTranslationStandard: profile.fxTranslationStandard ?? "ifrs-sme",
-        fxIncomeExpenseMethod: profile.fxIncomeExpenseMethod ?? "average-rate",
+        fxIncomeExpenseMethod: profile.fxIncomeExpenseMethod ?? "transaction-date",
         fxGainAccountId: profile.fxGainAccountId ?? "",
         fxLossAccountId: profile.fxLossAccountId ?? "",
       });
@@ -357,91 +362,143 @@ export default function CompanyProfile() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Globe className="h-5 w-5" />
-                IFRS Foreign Currency Translation
+                IFRS Compliance
               </CardTitle>
               <CardDescription>
-                Configure how foreign currency transactions are translated for financial reporting
+                Choose your accounting complexity level for multi-currency transactions
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <FormField
-                control={form.control}
-                name="fxTranslationStandard"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>IFRS Translation Standard</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || "ifrs-sme"}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-fx-standard">
-                          <SelectValue placeholder="Select standard" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="full-ifrs">Full IFRS (IAS 21)</SelectItem>
-                        <SelectItem value="ifrs-sme">IFRS for SMEs (Section 30)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      Choose the accounting standard for foreign currency translation
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold">IFRS Compliance</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Enable full International Financial Reporting Standards (IFRS) compliance for your accounting
+                    </p>
+                  </div>
+                  <FormField
+                    control={form.control}
+                    name="ifrsComplianceEnabled"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Switch
+                            checked={field.value || false}
+                            onCheckedChange={field.onChange}
+                            data-testid="switch-ifrs-compliance"
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <Alert>
+                  <AlertTitle>What does this mean?</AlertTitle>
+                  <AlertDescription>
+                    {form.watch("ifrsComplianceEnabled") ? (
+                      <>
+                        <strong>IFRS Mode Enabled:</strong> Your financial statements will comply with IAS 21
+                        and other IFRS standards. This includes:
+                        <ul className="list-disc ml-5 mt-2">
+                          <li>Transaction-date exchange rates as the default</li>
+                          <li>Strict foreign currency translation rules</li>
+                          <li>Detailed exchange difference disclosures</li>
+                        </ul>
+                      </>
+                    ) : (
+                      <>
+                        <strong>Standard Mode:</strong> Simplified multi-currency accounting without strict IFRS
+                        requirements. You can use average rates freely and conversion is more flexible.
+                      </>
+                    )}
+                  </AlertDescription>
+                </Alert>
+
+                {form.watch("ifrsComplianceEnabled") && (
+                  <div className="space-y-4 mt-4 pl-4 border-l-2">
+                    <FormField
+                      control={form.control}
+                      name="fxTranslationStandard"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>IFRS Translation Standard</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value || "ifrs-sme"}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-fx-standard">
+                                <SelectValue placeholder="Select standard" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="full-ifrs">Full IFRS (IAS 21)</SelectItem>
+                              <SelectItem value="ifrs-sme">IFRS for SMEs (Section 30)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Choose the accounting standard for foreign currency translation
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="fxIncomeExpenseMethod"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Income/Expense Translation Method</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value || "transaction-date"}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-fx-method">
+                                <SelectValue placeholder="Select method" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="average-rate">Average Rate</SelectItem>
+                              <SelectItem value="transaction-date">Transaction Date Rate (IFRS Default)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Transaction date rate is the default for IFRS compliance
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="fxGainAccountId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>FX Gain Account (Optional)</FormLabel>
+                            <FormControl>
+                              <Input placeholder="Account ID for FX gains" {...field} data-testid="input-fx-gain-account" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="fxLossAccountId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>FX Loss Account (Optional)</FormLabel>
+                            <FormControl>
+                              <Input placeholder="Account ID for FX losses" {...field} data-testid="input-fx-loss-account" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
                 )}
-              />
-
-              <FormField
-                control={form.control}
-                name="fxIncomeExpenseMethod"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Income/Expense Translation Method</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || "average-rate"}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-fx-method">
-                          <SelectValue placeholder="Select method" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="average-rate">Average Rate (Recommended)</SelectItem>
-                        <SelectItem value="transaction-date">Transaction Date Rate</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      Average rate is recommended for most businesses under IFRS
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="fxGainAccountId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>FX Gain Account (Optional)</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Account ID for FX gains" {...field} data-testid="input-fx-gain-account" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="fxLossAccountId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>FX Loss Account (Optional)</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Account ID for FX losses" {...field} data-testid="input-fx-loss-account" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
               </div>
             </CardContent>
           </Card>

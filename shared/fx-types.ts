@@ -4,7 +4,9 @@ export const fxConfigSchema = z.object({
   tenantId: z.string(),
   autoRefreshEnabled: z.boolean().default(true),
   sourceStrategy: z.enum(['api', 'manual', 'hybrid']).default('api'),
-  cbuaeSource: z.enum(['github', 'ocr', 'both', 'fluentax', 'manual']).default('github'),
+  primaryRateSource: z.enum(['cbuae', 'ecb', 'sama', 'boe', 'fed', 'manual']).default('cbuae'),
+  primarySourceProvider: z.enum(['github', 'api', 'fluentax', 'manual']).default('github'),
+  fallbackRateSource: z.enum(['cbuae', 'ecb', 'sama', 'boe', 'fed']).nullable().optional(),
   lastRefreshAt: z.date().nullable(),
 });
 

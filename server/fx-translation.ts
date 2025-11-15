@@ -1,6 +1,7 @@
 import { eq, and, lte, gte, sql } from "drizzle-orm";
 import { db } from "./db";
 import { exchangeRates } from "@shared/schema";
+import { isIFRSCompliant } from './ifrs-utils';
 
 export interface TranslationConfig {
   standard: "full-ifrs" | "ifrs-sme";
@@ -103,6 +104,7 @@ export async function getHistoricalRate(
  * Translate amount using appropriate method
  * IFRS COMPLIANCE: Returns error information instead of silent failures
  * SECURITY: Includes tenant scoping
+ * DUAL-MODE: In non-IFRS mode, returns the amount unchanged (assumes base currency)
  */
 export async function translateAmount(
   tenantId: string,
@@ -113,6 +115,18 @@ export async function translateAmount(
   method: "closing" | "average" | "historical",
   periodStart?: Date
 ): Promise<{ translatedAmount: number; rate: number | null; error?: string }> {
+  // CRITICAL: Check IFRS compliance first
+  const ifrsCompliant = await isIFRSCompliant(tenantId);
+  
+  if (!ifrsCompliant) {
+    // NON-IFRS MODE: No translation, assume base currency
+    return {
+      translatedAmount: amount,
+      rate: null
+    };
+  }
+  
+  // IFRS MODE: Full IAS 21 translation logic
   if (fromCurrency === toCurrency) {
     return { translatedAmount: amount, rate: 1.0 };
   }

@@ -337,31 +337,88 @@ export default function CurrenciesPage() {
             </p>
           </div>
 
-          {/* CBUAE source selector (only show if sourceStrategy is 'api' or 'hybrid') */}
+          {/* Regional Central Bank and Provider selectors (only show if sourceStrategy is 'api' or 'hybrid') */}
           {(fxConfig?.sourceStrategy === 'api' || fxConfig?.sourceStrategy === 'hybrid') && (
-            <div className="space-y-2">
-              <Label htmlFor="cbuae-source">UAE Central Bank Source</Label>
-              <Select
-                value={fxConfig?.cbuaeSource ?? 'github'}
-                onValueChange={(value) => {
-                  updateConfigMutation.mutate({ cbuaeSource: value as any });
-                }}
-              >
-                <SelectTrigger id="cbuae-source" data-testid="select-cbuae-source">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="github">GitHub Mirror (Reliable)</SelectItem>
-                  <SelectItem value="ocr">Python OCR Extraction</SelectItem>
-                  <SelectItem value="both">Both (Cross-validation)</SelectItem>
-                  <SelectItem value="fluentax">Fluentax API (Commercial)</SelectItem>
-                  <SelectItem value="manual">Manual Entry</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-sm text-muted-foreground">
-                CBUAE has no official API. Choose your preferred data source.
-              </p>
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="primary-rate-source">Primary Rate Source</Label>
+                <Select
+                  value={fxConfig?.primaryRateSource ?? 'cbuae'}
+                  onValueChange={(value) => {
+                    updateConfigMutation.mutate({ primaryRateSource: value as any });
+                  }}
+                >
+                  <SelectTrigger id="primary-rate-source" data-testid="select-primary-rate-source">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cbuae">CBUAE (UAE Central Bank)</SelectItem>
+                    <SelectItem value="ecb">ECB (European Central Bank)</SelectItem>
+                    <SelectItem value="sama">SAMA (Saudi Arabian Monetary Authority)</SelectItem>
+                    <SelectItem value="boe">BOE (Bank of England)</SelectItem>
+                    <SelectItem value="fed">FED (US Federal Reserve)</SelectItem>
+                    <SelectItem value="manual">Manual Entry Only</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Select the regional central bank for your primary currency
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="primary-source-provider">Provider</Label>
+                <Select
+                  value={fxConfig?.primarySourceProvider ?? 'github'}
+                  onValueChange={(value) => {
+                    updateConfigMutation.mutate({ primarySourceProvider: value as any });
+                  }}
+                  disabled={fxConfig?.primaryRateSource === 'manual'}
+                >
+                  <SelectTrigger id="primary-source-provider" data-testid="select-primary-source-provider">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="github">GitHub Mirror</SelectItem>
+                    <SelectItem value="api">Official API</SelectItem>
+                    <SelectItem value="fluentax">Fluentax (Commercial)</SelectItem>
+                    <SelectItem value="manual">Manual Entry</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  {fxConfig?.primaryRateSource === 'cbuae' && 'GitHub mirror recommended for CBUAE (no official API)'}
+                  {fxConfig?.primaryRateSource === 'ecb' && 'ECB provides free official API'}
+                  {fxConfig?.primaryRateSource === 'fed' && 'FED provides free official data via FRED'}
+                  {fxConfig?.primaryRateSource === 'boe' && 'BOE provides official API access'}
+                  {fxConfig?.primaryRateSource === 'sama' && 'SAMA integration coming soon'}
+                  {fxConfig?.primaryRateSource === 'manual' && 'Manual entry only - no automated fetching'}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="fallback-rate-source">Fallback Source (Optional)</Label>
+                <Select
+                  value={fxConfig?.fallbackRateSource ?? ''}
+                  onValueChange={(value) => {
+                    updateConfigMutation.mutate({ fallbackRateSource: value || null as any });
+                  }}
+                >
+                  <SelectTrigger id="fallback-rate-source" data-testid="select-fallback-rate-source">
+                    <SelectValue placeholder="None" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="cbuae">CBUAE (UAE)</SelectItem>
+                    <SelectItem value="ecb">ECB (Europe)</SelectItem>
+                    <SelectItem value="sama">SAMA (Saudi Arabia)</SelectItem>
+                    <SelectItem value="boe">BOE (UK)</SelectItem>
+                    <SelectItem value="fed">FED (USA)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Fallback source to use if primary source fails
+                </p>
+              </div>
+            </>
           )}
 
           <Separator />

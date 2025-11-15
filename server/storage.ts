@@ -5151,7 +5151,9 @@ export class DatabaseStorage implements IStorage {
         tenantId,
         autoRefreshEnabled: true,
         sourceStrategy: 'api',
-        cbuaeSource: 'github',
+        primaryRateSource: 'cbuae',
+        primarySourceProvider: 'github',
+        fallbackRateSource: null,
         lastRefreshAt: null,
         updatedAt: new Date(),
       };

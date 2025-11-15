@@ -3117,19 +3117,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       const baseCurrency = baseCurrencyRecord?.code || "USD";
-      const incomeExpenseMethod = profile?.fxIncomeExpenseMethod || "average-rate";
-      const fxTranslationStandard = profile?.fxTranslationStandard || "ifrs-sme";
+      const ifrsCompliant = profile?.ifrsComplianceEnabled || false;
       
-      // Add FX metadata to response
-      const enrichedReport = {
+      // CRITICAL: Branch based on IFRS compliance
+      if (!ifrsCompliant) {
+        // NON-IFRS MODE: Simple base currency report
+        return res.json({
+          ...report,
+          baseCurrency,
+          ifrsComplianceEnabled: false,
+          fxTranslationApplied: false,
+          // NO FX-related fields at all
+        });
+      }
+      
+      // IFRS MODE: Full IAS 21 compliance with FX metadata
+      return res.json({
         ...report,
         baseCurrency,
-        fxTranslationStandard,
-        incomeExpenseMethod,
+        ifrsComplianceEnabled: true,
+        fxTranslationStandard: profile?.fxTranslationStandard || "ifrs-sme",
+        incomeExpenseMethod: profile?.fxIncomeExpenseMethod || "transaction-date",
         fxTranslationApplied: false, // Will be true when multi-currency transactions are active
-      };
-      
-      res.json(enrichedReport);
+      });
     } catch (error: any) {
       console.error("Error generating profit & loss report:", error);
       res.status(500).json({ message: "Failed to generate profit & loss report" });
@@ -3166,18 +3176,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       const baseCurrency = baseCurrencyRecord?.code || "USD";
-      const fxTranslationStandard = profile?.fxTranslationStandard || "ifrs-sme";
+      const ifrsCompliant = profile?.ifrsComplianceEnabled || false;
       
-      // Add FX metadata to response
-      const enrichedReport = {
+      // CRITICAL: Branch based on IFRS compliance
+      if (!ifrsCompliant) {
+        // NON-IFRS MODE: Simple base currency report
+        return res.json({
+          ...report,
+          baseCurrency,
+          ifrsComplianceEnabled: false,
+          fxTranslationApplied: false,
+        });
+      }
+      
+      // IFRS MODE: Full compliance
+      return res.json({
         ...report,
         baseCurrency,
-        fxTranslationStandard,
-        translationMethod: "closing-rate", // Monetary items use closing rate per IFRS
+        ifrsComplianceEnabled: true,
+        fxTranslationStandard: profile?.fxTranslationStandard || "ifrs-sme",
+        translationMethod: "closing-rate",
         fxTranslationApplied: false, // Will be true when multi-currency transactions are active
-      };
-      
-      res.json(enrichedReport);
+      });
     } catch (error: any) {
       console.error("Error generating balance sheet report:", error);
       res.status(500).json({ message: "Failed to generate balance sheet report" });

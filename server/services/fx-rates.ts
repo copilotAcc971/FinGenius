@@ -91,7 +91,6 @@ function validateRate(rate: number, previousRate?: number): { valid: boolean; re
  *    - Official CBUAE data via paid commercial API
  *    - Daily updates at 18:05 Asia/Dubai timezone
  *    - Supported service with SLA guarantees
- *    - Configuration: Set CBUAE_API_SOURCE=fluentax and FLUENTAX_API_KEY
  * 
  * 2. **Thomson Reuters/Refinitiv** (Enterprise)
  *    - Direct access to the source data provider used by CBUAE
@@ -107,54 +106,30 @@ function validateRate(rate: number, previousRate?: number): { valid: boolean; re
  *    - May provide structured access to CBUAE data
  * 
  * CONFIGURATION:
- * Set environment variable CBUAE_API_SOURCE to:
+ * Provider options:
  * - 'github' (default): Use GitHub mirror
- * - 'fluentax': Use Fluentax commercial API (requires FLUENTAX_API_KEY)
- * - 'ocr': Use embedded Advanced OCR processor for direct website extraction
- * - 'both': Fetch from both GitHub and OCR for comparison/redundancy
+ * - 'fluentax': Use Fluentax commercial API (requires FLUENTAX_API_KEY env var)
+ * - 'api': Use official API (when available)
  * - 'manual': Skip automated fetching, rely on manual rate entry
  * 
  * Note: OCR extraction directly scrapes the CBUAE website and may be fragile.
  * Recommended for development/testing. Use 'github' or 'fluentax' for production.
  */
-// Environment Configuration for UAE Central Bank FX Rates:
-// CBUAE_API_SOURCE: 'github' (default) | 'fluentax' | 'ocr' | 'both' | 'manual'
-// FLUENTAX_API_KEY: Required if CBUAE_API_SOURCE=fluentax
-async function fetchUAECentralBankRates(): Promise<FetchResult> {
-  const source = process.env.CBUAE_API_SOURCE || 'github';
-  
-  switch (source) {
+async function fetchUAECentralBankRates(provider: string = 'github'): Promise<FetchResult> {
+  switch (provider) {
     case 'github':
       return fetchUAEFromGitHub();
     case 'fluentax':
       return fetchUAEFromFluentax();
-    case 'ocr':
-      return fetchUAEFromOCR();
-    case 'both': {
-      // Fetch from both GitHub and OCR for comparison/redundancy
-      const [githubResult, ocrResult] = await Promise.all([
-        fetchUAEFromGitHub(),
-        fetchUAEFromOCR()
-      ]);
-      
-      // Combine rates from both sources
-      const combinedRates = [...githubResult.rates, ...ocrResult.rates];
-      const allSuccess = githubResult.success && ocrResult.success;
-      
-      console.log(`Fetched from both sources - GitHub: ${githubResult.rates.length} rates, OCR: ${ocrResult.rates.length} rates`);
-      
-      return {
-        source: 'uae_central_bank_both',
-        rates: combinedRates,
-        success: allSuccess,
-        error: allSuccess ? undefined : `GitHub: ${githubResult.error || 'ok'}, OCR: ${ocrResult.error || 'ok'}`
-      };
-    }
+    case 'api':
+      // Note: CBUAE doesn't have an official API yet. Falls back to GitHub
+      console.warn('CBUAE official API not available. Using GitHub mirror.');
+      return fetchUAEFromGitHub();
     case 'manual':
       console.log('CBUAE rates: manual mode enabled, skipping automated fetch');
       return { source: 'uae_central_bank', rates: [], success: true };
     default:
-      console.warn(`Unknown CBUAE_API_SOURCE: ${source}, using GitHub mirror`);
+      console.warn(`Unknown provider: ${provider}, using GitHub mirror`);
       return fetchUAEFromGitHub();
   }
 }
@@ -609,6 +584,31 @@ async function fetchBOERates(): Promise<FetchResult> {
 }
 
 /**
+ * Fetch exchange rates from Saudi Arabian Monetary Authority (SAMA)
+ * STUB: To be implemented when official SAMA API access is available
+ * 
+ * Official Source: https://www.sama.gov.sa/en-US/EconomicReports/Pages/ExchangeRate.aspx
+ * Note: SAMA does not currently provide a public API. Implementation may require:
+ * - Web scraping (fragile, not recommended for production)
+ * - Third-party aggregator with SAMA data
+ * - Official licensing agreement with SAMA
+ */
+async function fetchSAMARates(provider: string = 'api'): Promise<FetchResult> {
+  const errorMsg = 'SAMA integration not yet implemented. Contact support to enable SAMA rates.';
+  console.warn(errorMsg);
+  
+  // TODO: Implement SAMA rate fetching when official API becomes available
+  // Expected coverage: Major currencies vs SAR (USD, EUR, GBP, AED, KWD, etc.)
+  
+  return { 
+    source: 'sama', 
+    rates: [], 
+    success: false, 
+    error: errorMsg 
+  };
+}
+
+/**
  * Fallback aggregator using exchangerate-api.com
  * Only used when official Central Bank APIs fail
  */
@@ -783,20 +783,49 @@ export async function getHistoricalRate(
 }
 
 /**
+ * Fetch exchange rates from a specific central bank source
+ */
+async function fetchFromCentralBank(
+  rateSource: string,
+  provider: string = 'api'
+): Promise<FetchResult> {
+  switch (rateSource) {
+    case 'cbuae':
+      return fetchUAECentralBankRates(provider);
+    case 'ecb':
+      return fetchECBRates();
+    case 'fed':
+      return fetchFedRates();
+    case 'boe':
+      return fetchBOERates();
+    case 'sama':
+      return fetchSAMARates(provider);
+    case 'manual':
+      console.log('Manual rate source selected, skipping automated fetch');
+      return { source: 'manual', rates: [], success: true };
+    default:
+      console.warn(`Unknown rate source: ${rateSource}`);
+      return { source: rateSource, rates: [], success: false, error: 'Unknown rate source' };
+  }
+}
+
+/**
  * Fetch exchange rates from a specific source with fallback
  */
 export async function fetchExchangeRates(
   tenantId: string,
-  source: 'uae_central_bank' | 'ecb' | 'fed' | 'boe' | 'all'
+  source: 'uae_central_bank' | 'ecb' | 'fed' | 'boe' | 'sama' | 'all'
 ): Promise<FetchResult[]> {
   const results: FetchResult[] = [];
 
   // Define mapping of sources to their base currencies for fallback
-  const sourceFallbackMap = {
+  const sourceFallbackMap: Record<string, string> = {
     uae_central_bank: 'AED',
+    cbuae: 'AED',
     ecb: 'EUR',
     fed: 'USD',
     boe: 'GBP',
+    sama: 'SAR',
   };
 
   // Fetch UAE Central Bank rates
@@ -841,6 +870,18 @@ export async function fetchExchangeRates(
     if (!result.success) {
       console.warn('Official Bank of England fetch failed, trying fallback aggregator...');
       const fallback = await fetchFromAggregator('GBP', 'boe_fallback');
+      results.push(fallback);
+    } else {
+      results.push(result);
+    }
+  }
+
+  // Fetch SAMA rates
+  if (source === 'all' || source === 'sama') {
+    const result = await fetchSAMARates();
+    if (!result.success) {
+      console.warn('SAMA fetch failed, trying fallback aggregator...');
+      const fallback = await fetchFromAggregator('SAR', 'sama_fallback');
       results.push(fallback);
     } else {
       results.push(result);
@@ -896,6 +937,7 @@ export async function fetchExchangeRates(
 
 /**
  * Update exchange rates for all active currencies for a tenant
+ * Uses the tenant's FX configuration to determine which sources to use
  */
 export async function updateExchangeRatesForTenant(tenantId: string): Promise<void> {
   try {
@@ -911,8 +953,34 @@ export async function updateExchangeRatesForTenant(tenantId: string): Promise<vo
 
     console.log(`Found ${activeCurrencies.length} active currencies for tenant ${tenantId}`);
 
-    // Fetch rates from all sources
-    const results = await fetchExchangeRates(tenantId, 'all');
+    // Get FX configuration for this tenant
+    const fxConfig = await storage.getFXConfig(tenantId);
+    
+    if (!fxConfig) {
+      console.warn(`No FX config found for tenant ${tenantId}, using defaults`);
+    }
+
+    const primarySource = fxConfig?.primaryRateSource || 'cbuae';
+    const primaryProvider = fxConfig?.primarySourceProvider || 'github';
+    const fallbackSource = fxConfig?.fallbackRateSource;
+
+    console.log(`Using primary source: ${primarySource} (provider: ${primaryProvider})`);
+    if (fallbackSource) {
+      console.log(`Fallback source configured: ${fallbackSource}`);
+    }
+
+    const results: FetchResult[] = [];
+
+    // Fetch from primary source
+    const primaryResult = await fetchFromCentralBank(primarySource, primaryProvider);
+    results.push(primaryResult);
+
+    // If primary failed and fallback is configured, try fallback
+    if (!primaryResult.success && fallbackSource) {
+      console.log(`Primary source failed, attempting fallback: ${fallbackSource}`);
+      const fallbackResult = await fetchFromCentralBank(fallbackSource, 'api');
+      results.push(fallbackResult);
+    }
 
     const successfulSources = results.filter(r => r.success);
     const failedSources = results.filter(r => !r.success);
