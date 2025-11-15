@@ -1,4 +1,4 @@
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,14 +11,16 @@ import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { type SalesOrder, type Customer, type Item, type Tax, insertSalesOrderSchema, type SalesOrderLineItem } from "@shared/schema";
+import { type SalesOrder, type Customer, type Item, type Tax, type Currency, insertSalesOrderSchema, type SalesOrderLineItem } from "@shared/schema";
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { formatCurrency } from "@/lib/currency-utils";
 
 const orderFormSchema = insertSalesOrderSchema.extend({
   orderDate: z.string(),
   shipmentDate: z.string().optional(),
   deliveryDate: z.string().optional(),
+  currencyCode: z.string().length(3, "Currency code must be 3 characters").min(1, "Currency is required"),
 });
 
 interface SalesOrderDialogProps {
@@ -48,6 +50,11 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
     enabled: !!currentTenant?.id && open,
   });
 
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
+  });
+
   const { data: existingLineItems } = useQuery<SalesOrderLineItem[]>({
     queryKey: ["/api/sales-orders", order?.id, "line-items", { tenantId: currentTenant?.id }],
     queryFn: async () => {
@@ -61,11 +68,51 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
     enabled: !!order?.id && !!currentTenant?.id && open,
   });
 
+  // Currency variables
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
+  // availableCurrencies with useMemo (seeded pattern)
+  const availableCurrencies = useMemo(() => {
+    // If editing order and currencies not loaded yet, create placeholder
+    if (order?.currencyCode && currencies.length === 0) {
+      return [{
+        code: order.currencyCode,
+        name: order.currencyCode,
+        symbol: order.currencyCode,
+        isActive: false,
+        decimalPlaces: 2,
+        isBaseCurrency: false,
+        tenantId: currentTenant?.id || '',
+        id: 'placeholder'
+      }];
+    }
+    
+    // Start with all active currencies
+    const available = [...activeCurrencies];
+    
+    // Add ALL inactive currencies (not just order's currency)
+    const inactiveCurrencies = currencies.filter(c => !c.isActive);
+    for (const inactive of inactiveCurrencies) {
+      if (!available.find(c => c.code === inactive.code)) {
+        available.push(inactive);
+      }
+    }
+    
+    // Sort: active currencies first (alphabetically), then inactive
+    return available.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [activeCurrencies, currencies, order?.currencyCode, currentTenant?.id]);
+
   const form = useForm<z.infer<typeof orderFormSchema>>({
     resolver: zodResolver(orderFormSchema),
     defaultValues: {
       tenantId: currentTenant?.id || "",
       customerId: "",
+      currencyCode: "USD",
       orderDate: new Date().toISOString().split('T')[0],
       shipmentDate: "",
       deliveryDate: "",
@@ -78,11 +125,16 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
     },
   });
 
+  // Watch currency for totals display
+  const selectedCurrencyCode = useWatch({ control: form.control, name: "currencyCode" });
+  const safeCurrencyCode = selectedCurrencyCode || baseCurrency?.code || 'USD';
+
   useEffect(() => {
     if (order) {
       form.reset({
         tenantId: order.tenantId,
         customerId: order.customerId,
+        currencyCode: order.currencyCode,
         orderDate: new Date(order.orderDate).toISOString().split('T')[0],
         shipmentDate: order.shipmentDate ? new Date(order.shipmentDate).toISOString().split('T')[0] : "",
         deliveryDate: order.deliveryDate ? new Date(order.deliveryDate).toISOString().split('T')[0] : "",
@@ -97,6 +149,7 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
       form.reset({
         tenantId: currentTenant?.id || "",
         customerId: "",
+        currencyCode: baseCurrency?.code || "USD",
         orderDate: new Date().toISOString().split('T')[0],
         shipmentDate: "",
         deliveryDate: "",
@@ -122,7 +175,21 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
     } else if (!order) {
       setLineItems([]);
     }
-  }, [order, existingLineItems, currentTenant, form]);
+  }, [order, existingLineItems, currentTenant, baseCurrency, form]);
+
+  // CRITICAL: Guarded form reset (prevents data corruption)
+  // Only runs for NEW orders, NEVER when editing
+  useEffect(() => {
+    if (!open || order) return; // Only for new orders - prevents corruption
+    if (currenciesLoading) return; // Wait for currencies to load
+    
+    // Reset form with loaded data while preserving any user edits
+    const currentValues = form.getValues();
+    form.reset({
+      ...currentValues,
+      currencyCode: baseCurrency?.code || "USD",
+    });
+  }, [open, order, currenciesLoading, baseCurrency, form]);
 
   const calculateTotals = (items: any[]) => {
     const subtotal = items.reduce((sum, item) => {
@@ -268,30 +335,62 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <FormField
-              control={form.control}
-              name="customerId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Customer *</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger data-testid="select-customer">
-                        <SelectValue placeholder="Select customer" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent position="popper">
-                      {customers?.map((customer) => (
-                        <SelectItem key={customer.id} value={customer.id} data-testid={`option-customer-${customer.id}`}>
-                          {customer.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="customerId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Customer *</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-customer">
+                          <SelectValue placeholder="Select customer" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent position="popper">
+                        {customers?.map((customer) => (
+                          <SelectItem key={customer.id} value={customer.id} data-testid={`option-customer-${customer.id}`}>
+                            {customer.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="currencyCode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Currency</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-currency" disabled={currenciesLoading}>
+                          <SelectValue placeholder="Loading currencies..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {availableCurrencies.map(currency => (
+                          <SelectItem 
+                            key={currency.code} 
+                            value={currency.code}
+                            data-testid={`option-currency-${currency.code}`}
+                          >
+                            {currency.code} - {currency.name} ({currency.symbol})
+                            {!currency.isActive && ' (Inactive)'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             <div className="grid grid-cols-3 gap-4">
               <FormField
@@ -447,9 +546,27 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
 
             <div className="flex justify-end space-x-4 pt-4 border-t">
               <div className="text-right">
-                <p className="text-sm text-muted-foreground">Subtotal: ${form.watch("subtotal")}</p>
-                <p className="text-sm text-muted-foreground">Tax: ${form.watch("taxAmount")}</p>
-                <p className="text-lg font-semibold" data-testid="text-order-total">Total: ${form.watch("total")}</p>
+                <p className="text-sm text-muted-foreground">
+                  Subtotal: {formatCurrency(
+                    parseFloat(form.watch("subtotal") || "0"),
+                    safeCurrencyCode,
+                    currenciesLoading ? [] : currencies
+                  )}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Tax: {formatCurrency(
+                    parseFloat(form.watch("taxAmount") || "0"),
+                    safeCurrencyCode,
+                    currenciesLoading ? [] : currencies
+                  )}
+                </p>
+                <p className="text-lg font-semibold" data-testid="text-order-total">
+                  Total: {formatCurrency(
+                    parseFloat(form.watch("total") || "0"),
+                    safeCurrencyCode,
+                    currenciesLoading ? [] : currencies
+                  )}
+                </p>
               </div>
             </div>
 
@@ -471,7 +588,7 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting} data-testid="button-submit">
+              <Button type="submit" disabled={currenciesLoading || isSubmitting} data-testid="button-submit">
                 {isSubmitting ? "Saving..." : order ? "Update Sales Order" : "Create Sales Order"}
               </Button>
             </div>

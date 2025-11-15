@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
-import { type SalesOrder } from "@shared/schema";
+import { type SalesOrder, type Currency } from "@shared/schema";
 import { SalesOrderDialog } from "@/components/sales-order-dialog";
 import { useState } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { formatCurrency } from "@/lib/currency-utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +32,11 @@ export default function SalesOrdersPage() {
 
   const { data: orders, isLoading } = useQuery<SalesOrder[]>({
     queryKey: ["/api/sales-orders", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
     enabled: !!currentTenant?.id,
   });
 
@@ -155,7 +161,10 @@ export default function SalesOrdersPage() {
                   <div className="flex items-center gap-2">
                     {getStatusBadge(order.status)}
                     <span className="text-lg font-semibold" data-testid={`text-order-total-${order.id}`}>
-                      ${parseFloat(order.total).toFixed(2)}
+                      {currenciesLoading 
+                        ? '...' 
+                        : formatCurrency(parseFloat(order.total), order.currencyCode, currencies)
+                      }
                     </span>
                   </div>
                 </div>
