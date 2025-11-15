@@ -25,6 +25,7 @@ import {
 } from './services/fx-rates';
 import { triggerManualFXRatesUpdate } from './jobs/fx-rates-update';
 import { getClosingRate, getAverageRate, getHistoricalRate, translateAmount } from './fx-translation';
+import { assessRateVolatility } from './fx-volatility';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -182,28 +183,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Company Profile routes
   app.get('/api/company-profile', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
+      console.log('[GET /api/company-profile] Fetching profile for tenant:', req.tenantId);
       const profile = await storage.getCompanyProfile(req.tenantId);
+      console.log('[GET /api/company-profile] Profile found:', !!profile, profile ? `ID: ${profile.id}` : 'null');
       res.json(profile);
     } catch (error) {
-      console.error("Error fetching company profile:", error);
+      console.error("[GET /api/company-profile] Error fetching company profile:", error);
       res.status(500).json({ message: "Failed to fetch company profile" });
     }
   });
 
   app.post('/api/company-profile', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
+      console.log('[POST /api/company-profile] Creating profile for tenant:', req.tenantId);
       const parsed = insertTenantCompanyProfileSchema.parse({ ...req.body, tenantId: req.tenantId });
       const profile = await storage.createCompanyProfile(parsed);
+      console.log('[POST /api/company-profile] Profile created successfully:', profile.id);
       res.json(profile);
     } catch (error: any) {
-      console.error("Error creating company profile:", error);
+      console.error("[POST /api/company-profile] Error creating company profile:", error);
       res.status(400).json({ message: error.message || "Failed to create company profile" });
     }
   });
 
   app.patch('/api/company-profile', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('company_profile.update'), async (req: any, res) => {
     try {
+      console.log('[PATCH /api/company-profile] Updating profile for tenant:', req.tenantId);
+      
       if (!req.tenantId) {
+        console.error('[PATCH /api/company-profile] No tenant ID in request');
         return res.status(403).json({ message: "Forbidden" });
       }
       
@@ -211,9 +219,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parsed = updateTenantCompanyProfileSchema.parse(req.body);
       
       const updated = await storage.updateCompanyProfile(req.tenantId, parsed);
+      console.log('[PATCH /api/company-profile] Profile updated successfully:', updated.id);
       res.json(updated);
     } catch (error: any) {
-      console.error("Error updating company profile:", error);
+      console.error("[PATCH /api/company-profile] Error updating company profile:", error);
       res.status(400).json({ message: error.message || "Failed to update company profile" });
     }
   });
@@ -3927,6 +3936,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error creating manual exchange rate:", error);
       res.status(400).json({ 
         message: error.message || "Failed to create manual exchange rate" 
+      });
+    }
+  });
+
+  // GET /api/fx/volatility - Assess exchange rate volatility for a period
+  app.get('/api/fx/volatility', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { fromCurrency, toCurrency, startDate, endDate } = req.query;
+      
+      if (!fromCurrency || !toCurrency || !startDate || !endDate) {
+        return res.status(400).json({ 
+          message: "Missing required parameters: fromCurrency, toCurrency, startDate, endDate" 
+        });
+      }
+      
+      const periodStart = new Date(startDate as string);
+      const periodEnd = new Date(endDate as string);
+      
+      const volatility = await assessRateVolatility(
+        req.tenantId,
+        fromCurrency as string,
+        toCurrency as string,
+        periodStart,
+        periodEnd
+      );
+      
+      res.json(volatility);
+    } catch (error: any) {
+      console.error("Error assessing exchange rate volatility:", error);
+      res.status(500).json({ 
+        message: "Failed to assess volatility",
+        error: error.message 
       });
     }
   });

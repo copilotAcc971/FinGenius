@@ -2,6 +2,7 @@ import { eq, and, lte, gte, sql } from "drizzle-orm";
 import { db } from "./db";
 import { exchangeRates } from "@shared/schema";
 import { isIFRSCompliant } from './ifrs-utils';
+import { assessRateVolatility, VolatilityResult } from './fx-volatility';
 
 export interface TranslationConfig {
   standard: "full-ifrs" | "ifrs-sme";
@@ -54,34 +55,73 @@ export async function getClosingRate(
  * Get average rate for a period (for P&L translation)
  * IFRS COMPLIANCE: Averages rates ONLY within the reporting period per IAS 21
  * SECURITY: Includes tenant scoping to prevent cross-tenant data leakage
+ * VOLATILITY CHECK: Optionally assesses volatility to ensure average rate is appropriate
  */
 export async function getAverageRate(
   tenantId: string,
   fromCurrency: string,
   toCurrency: string,
-  periodStart: Date,  // Start of reporting period
-  periodEnd: Date     // End of reporting period
-): Promise<number | null> {
-  if (fromCurrency === toCurrency) return 1.0;
+  periodStart: Date,
+  periodEnd: Date,
+  enforceVolatilityCheck: boolean = true
+): Promise<{ 
+  rate: number; 
+  error: string | null; 
+  volatility?: VolatilityResult 
+}> {
+  if (fromCurrency === toCurrency) {
+    return { rate: 1.0, error: null };
+  }
 
-  // Get rates ONLY within the reporting period (IAS 21 compliant)
   const rates = await db.query.exchangeRates.findMany({
     where: and(
       eq(exchangeRates.tenantId, tenantId),
       eq(exchangeRates.fromCurrencyCode, fromCurrency),
       eq(exchangeRates.toCurrencyCode, toCurrency),
-      gte(exchangeRates.effectiveDate, periodStart),  // Only rates from period start
-      lte(exchangeRates.effectiveDate, periodEnd)     // Only rates up to period end
+      gte(exchangeRates.effectiveDate, periodStart),
+      lte(exchangeRates.effectiveDate, periodEnd)
     ),
   });
 
   if (rates.length === 0) {
-    // Fallback to closing rate if no period rates available
-    return await getClosingRate(tenantId, fromCurrency, toCurrency, periodEnd);
+    const closingRate = await getClosingRate(tenantId, fromCurrency, toCurrency, periodEnd);
+    if (closingRate === null) {
+      return {
+        rate: 0,
+        error: `No exchange rate found for ${fromCurrency} to ${toCurrency}`
+      };
+    }
+    return { rate: closingRate, error: null };
   }
 
   const sum = rates.reduce((acc, rate) => acc + parseFloat(rate.rate), 0);
-  return sum / rates.length;
+  const averageRate = sum / rates.length;
+
+  if (enforceVolatilityCheck) {
+    const volatility = await assessRateVolatility(
+      tenantId,
+      fromCurrency,
+      toCurrency,
+      periodStart,
+      periodEnd
+    );
+
+    if (volatility.blockAverageRate) {
+      return {
+        rate: 0,
+        error: volatility.warningMessage || 'Cannot use average rate due to extreme volatility',
+        volatility
+      };
+    }
+
+    return {
+      rate: averageRate,
+      error: null,
+      volatility
+    };
+  }
+
+  return { rate: averageRate, error: null };
 }
 
 /**
@@ -145,7 +185,15 @@ export async function translateAmount(
           error: "Period start date required for average rate method" 
         };
       }
-      rate = await getAverageRate(tenantId, fromCurrency, toCurrency, periodStart, date);
+      const avgResult = await getAverageRate(tenantId, fromCurrency, toCurrency, periodStart, date);
+      if (avgResult.error) {
+        return {
+          translatedAmount: amount,
+          rate: null,
+          error: avgResult.error
+        };
+      }
+      rate = avgResult.rate;
       break;
     case "historical":
       rate = await getHistoricalRate(tenantId, fromCurrency, toCurrency, date);

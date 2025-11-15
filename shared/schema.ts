@@ -316,7 +316,8 @@ export const insertTenantCompanyProfileSchema = createInsertSchema(tenantCompany
   legalName: z.string().min(1, "Legal name is required"),
   taxRegistrationNumber: z.string().min(1, "Tax registration number is required"),
   address: addressSchema.optional(),
-  ifrsComplianceEnabled: z.boolean().optional(),
+  // CRITICAL: Default to false so value is always present in payload (not stripped as undefined)
+  ifrsComplianceEnabled: z.boolean().default(false),
   fxTranslationStandard: z.string().optional(),
   fxIncomeExpenseMethod: z.string().optional(),
   fxGainAccountId: z.string().optional(),
@@ -886,6 +887,14 @@ export const expenses = pgTable("expenses", {
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   category: varchar("category", { length: 100 }).notNull(),
   accountId: varchar("account_id").references(() => accounts.id),
+  
+  // Multi-currency transaction tracking
+  currencyCode: varchar("currency_code", { length: 3 }).default('USD'),
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  
   description: text("description"),
   status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, approved, paid, rejected
   documentUrl: varchar("document_url", { length: 500 }), // uploaded receipt
@@ -896,6 +905,8 @@ export const expenses = pgTable("expenses", {
 
 export const insertExpenseSchema = createInsertSchema(expenses, {
   amount: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionAmount: decimalString.optional(),
 }).omit({
   id: true,
   createdAt: true,
@@ -919,6 +930,13 @@ export const payments = pgTable("payments", {
   currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
+  
+  // Multi-currency transaction tracking (Payment-specific)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  baseAmount: decimal("base_amount", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
   
   status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, scheduled, processing, completed, failed
   scheduledDate: timestamp("scheduled_date"),
@@ -964,6 +982,9 @@ export const payments = pgTable("payments", {
 
 export const insertPaymentSchema = createInsertSchema(payments, {
   amount: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionAmount: decimalString.optional(),
+  baseAmount: decimalString.optional(),
 }).omit({
   id: true,
   createdAt: true,
@@ -1236,6 +1257,13 @@ export const creditNotes = pgTable("credit_notes", {
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
+  // Multi-currency transaction tracking (IAS 21 compliance)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateSource: varchar("transaction_rate_source", { length: 50 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  transactionTotalAmount: decimal("transaction_total_amount", { precision: 20, scale: 10 }),
+  
   notes: text("notes"),
   
   deletedAt: timestamp("deleted_at"),
@@ -1250,6 +1278,8 @@ export const insertCreditNoteSchema = createInsertSchema(creditNotes, {
   taxAmount: decimalString,
   total: decimalString,
   balanceRemaining: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionTotalAmount: decimalString.optional(),
 }).omit({
   id: true,
   deletedAt: true,
@@ -1273,6 +1303,12 @@ export const creditNoteLineItems = pgTable("credit_note_line_items", {
   unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
   discount: decimal("discount", { precision: 12, scale: 2 }).default("0"),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency transaction tracking
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  
   taxId: varchar("tax_id").references(() => taxes.id),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1282,6 +1318,8 @@ export const insertCreditNoteLineItemSchema = createInsertSchema(creditNoteLineI
   unitPrice: decimalString,
   discount: decimalString,
   amount: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionAmount: decimalString.optional(),
 }).omit({
   id: true,
   createdAt: true,
@@ -1326,6 +1364,13 @@ export const customerPayments = pgTable("customer_payments", {
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
+  // Multi-currency transaction tracking (Payment-specific)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  baseAmount: decimal("base_amount", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  
   notes: text("notes"),
   
   deletedAt: timestamp("deleted_at"),
@@ -1337,6 +1382,9 @@ export const customerPayments = pgTable("customer_payments", {
 
 export const insertCustomerPaymentSchema = createInsertSchema(customerPayments, {
   amount: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionAmount: decimalString.optional(),
+  baseAmount: decimalString.optional(),
 }).omit({
   id: true,
   deletedAt: true,
@@ -1694,6 +1742,9 @@ export const journalEntries = pgTable("journal_entries", {
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
+  // Multi-currency transaction tracking (for foreign currency journals)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  
   // Source document tracking for automatic journal entries
   sourceDocumentType: varchar("source_document_type", { length: 50 }), // 'invoice', 'bill', 'payment', 'credit_note', 'debit_note', 'expense', 'fixed_asset'
   sourceDocumentId: varchar("source_document_id"), // ID of source document
@@ -1737,7 +1788,14 @@ export const journalEntryLegs = pgTable("journal_entry_legs", {
   journalEntryId: varchar("journal_entry_id").notNull().references(() => journalEntries.id),
   accountId: varchar("account_id").notNull().references(() => accounts.id),
   type: varchar("type", { length: 10 }).notNull(), // 'Debit' or 'Credit'
-  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(), // Base currency amount
+  
+  // CRITICAL: Multi-currency transaction tracking (dual currency for debits/credits)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmountDebit: decimal("transaction_amount_debit", { precision: 20, scale: 10 }),
+  transactionAmountCredit: decimal("transaction_amount_credit", { precision: 20, scale: 10 }),
+  
   description: text("description"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
@@ -1747,6 +1805,9 @@ export const journalEntryLegs = pgTable("journal_entry_legs", {
 
 export const insertJournalEntryLegSchema = createInsertSchema(journalEntryLegs, {
   amount: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionAmountDebit: decimalString.optional(),
+  transactionAmountCredit: decimalString.optional(),
   type: z.enum(['Debit', 'Credit']), // Enforce at Zod level too
 }).omit({
   id: true,
@@ -1831,6 +1892,13 @@ export const purchaseOrders = pgTable("purchase_orders", {
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
+  // Multi-currency transaction tracking (IAS 21 compliance)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateSource: varchar("transaction_rate_source", { length: 50 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  transactionTotalAmount: decimal("transaction_total_amount", { precision: 20, scale: 10 }),
+  
   notes: text("notes"),
   terms: text("terms"),
   
@@ -1853,6 +1921,8 @@ export const insertPurchaseOrderSchema = createInsertSchema(purchaseOrders, {
   subtotal: decimalString,
   taxAmount: decimalString,
   total: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionTotalAmount: decimalString.optional(),
 }).omit({
   id: true,
   deletedAt: true,
@@ -1879,6 +1949,12 @@ export const purchaseOrderLineItems = pgTable("purchase_order_line_items", {
   quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
   unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency transaction tracking
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  
   taxId: varchar("tax_id").references(() => taxes.id),
   receivedQuantity: decimal("received_quantity", { precision: 10, scale: 2 }).default("0"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -1889,6 +1965,8 @@ export const insertPurchaseOrderLineItemSchema = createInsertSchema(purchaseOrde
   unitPrice: decimalString,
   amount: decimalString,
   receivedQuantity: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionAmount: decimalString.optional(),
 }).omit({
   id: true,
   tenantId: true,
@@ -2603,6 +2681,12 @@ export const bankTransactions = pgTable("bank_transactions", {
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   currency: varchar("currency", { length: 3 }).notNull().default("AED"),
   
+  // Multi-currency transaction tracking
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  
   // Transaction metadata
   type: varchar("type", { length: 50 }).notNull(), // 'debit', 'credit'
   pending: boolean("pending").default(false), // Is transaction still pending?
@@ -2672,6 +2756,8 @@ export const insertBankTransactionSchema = createInsertSchema(bankTransactions, 
   vatAmount: decimalString.optional(),
   vatRate: decimalString.optional(),
   matchConfidence: decimalString.optional(),
+  transactionRateValue: decimalString.optional(),
+  transactionAmount: decimalString.optional(),
   type: z.enum(['debit', 'credit']),
   reconciliationStatus: z.enum(['unmatched', 'suggested', 'matched', 'ignored', 'manual_entry_created']),
   vatStatus: z.enum(['standard', 'exempt', 'zero-rated', 'out-of-scope', 'unknown']).optional(),
@@ -3073,6 +3159,13 @@ export const debitNotes = pgTable("debit_notes", {
   exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
   baseCurrencyAmount: decimal("base_currency_amount", { precision: 15, scale: 2 }),
   
+  // Multi-currency transaction tracking (IAS 21 compliance)
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateSource: varchar("transaction_rate_source", { length: 50 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  exchangeRateId: varchar("exchange_rate_id").references(() => exchangeRates.id),
+  transactionTotalAmount: decimal("transaction_total_amount", { precision: 20, scale: 10 }),
+  
   notes: text("notes"),
   createdBy: varchar("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
@@ -3089,6 +3182,8 @@ export const insertDebitNoteSchema = createInsertSchema(debitNotes, {
   taxAmount: decimalString,
   total: decimalString,
   appliedAmount: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionTotalAmount: decimalString.optional(),
 }).omit({
   id: true,
   createdAt: true,
@@ -3111,6 +3206,12 @@ export const debitNoteLineItems = pgTable("debit_note_line_items", {
   quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
   unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  
+  // Multi-currency transaction tracking
+  transactionCurrencyCode: varchar("transaction_currency_code", { length: 3 }),
+  transactionRateValue: decimal("transaction_rate_value", { precision: 20, scale: 10 }),
+  transactionAmount: decimal("transaction_amount", { precision: 20, scale: 10 }),
+  
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -3118,6 +3219,8 @@ export const insertDebitNoteLineItemSchema = createInsertSchema(debitNoteLineIte
   quantity: decimalString,
   unitPrice: decimalString,
   amount: decimalString,
+  transactionRateValue: decimalString.optional(),
+  transactionAmount: decimalString.optional(),
 }).omit({
   id: true,
   tenantId: true,

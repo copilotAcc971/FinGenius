@@ -46,6 +46,13 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
     - **System Accounts:** Code 4910 (Foreign Exchange Gain), Code 5900 (Foreign Exchange Loss) for realized/unrealized FX differences
     - **Security:** All rate queries are tenant-scoped to prevent cross-tenant data leakage
     - **Proper Error Handling:** Returns null for missing rates instead of silent 1.0 fallback, with explicit error messages in API responses
+    - **Dual-Mode Architecture (November 2025):** IFRS compliance is fully optional, controlled by `ifrsComplianceEnabled` toggle in Company Profile
+        - **Non-IFRS Mode (Default):** FX disclosures hidden, no compliance overhead
+        - **IFRS Mode (Opt-in):** Full IAS 21 compliance with FX disclosures in financial reports
+        - **FX Disclosure Component:** Shows preparatory message when IFRS enabled but no multi-currency transactions exist yet
+        - **Cache Management:** Report cache auto-invalidates when IFRS toggle changes using `exact: false` to match parameterized queries
+        - **Storage Layer Validation:** All company profile CRUD operations validate database results and throw errors instead of returning undefined/null
+        - **Security:** Removed PII logging from company profile endpoints (no tax ID or sensitive data in logs)
     - **Known Limitation:** Exchange difference calculation requires historical balance tracking infrastructure (opening balances, transaction-level currency tracking, period-over-period comparison). Per IAS 21 compliance, incomplete data is NOT disclosed rather than showing misleading zeros. Implementation deferred until multi-currency transaction tracking is active.
 - **Role-Based Access Control (RBAC):** Complete enterprise-grade RBAC system with:
     - **Permission Catalog:** 70+ granular permissions across 12 modules (customers, vendors, items, taxes, invoices, bills, quotes, sales_orders, purchase_orders, reports, users, billing)

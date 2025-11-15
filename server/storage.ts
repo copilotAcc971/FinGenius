@@ -2,6 +2,8 @@ import {
   users,
   tenants,
   tenantMembers,
+  tenantMemberRoles,
+  roles,
   tenantCompanyProfiles,
   customers,
   vendors,
@@ -133,6 +135,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
+import { seedPermissions, seedRolesForTenant } from "./scripts/seed-rbac";
 
 export interface IStorage {
   // User operations
@@ -429,11 +432,32 @@ export class DatabaseStorage implements IStorage {
       .values(tenantData)
       .returning();
     
-    await db.insert(tenantMembers).values({
+    const [tenantMember] = await db.insert(tenantMembers).values({
       tenantId: tenant.id,
       userId: tenantData.ownerId,
       role: "owner",
-    });
+    }).returning();
+    
+    await seedPermissions();
+    
+    await seedRolesForTenant(tenant.id);
+    
+    const [ownerRole] = await db
+      .select()
+      .from(roles)
+      .where(
+        and(
+          eq(roles.tenantId, tenant.id),
+          eq(roles.name, 'Owner')
+        )
+      );
+    
+    if (ownerRole) {
+      await db.insert(tenantMemberRoles).values({
+        tenantMemberId: tenantMember.id,
+        roleId: ownerRole.id,
+      });
+    }
     
     return tenant;
   }
@@ -512,10 +536,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCompanyProfile(profileData: InsertTenantCompanyProfile): Promise<TenantCompanyProfile> {
+    console.log('[createCompanyProfile] Creating profile for tenant:', profileData.tenantId);
     const [profile] = await db
       .insert(tenantCompanyProfiles)
       .values(profileData)
       .returning();
+    
+    if (!profile) {
+      console.error('[createCompanyProfile] Failed to create profile - no data returned from database');
+      throw new Error("Failed to create company profile - database did not return the created record");
+    }
+    
+    console.log('[createCompanyProfile] Successfully created profile:', profile.id);
     return profile;
   }
 
@@ -523,8 +555,10 @@ export class DatabaseStorage implements IStorage {
     tenantId: string,
     data: Partial<Omit<InsertTenantCompanyProfile, 'tenantId'>>
   ): Promise<TenantCompanyProfile> {
+    console.log('[updateCompanyProfile] Updating profile for tenant:', tenantId);
     const existing = await this.getCompanyProfile(tenantId);
     if (!existing) {
+      console.error('[updateCompanyProfile] Profile not found for tenant:', tenantId);
       throw new Error("Company profile not found");
     }
     
@@ -540,9 +574,11 @@ export class DatabaseStorage implements IStorage {
       .returning();
     
     if (!updatedProfile) {
-      throw new Error("Company profile not found");
+      console.error('[updateCompanyProfile] Update failed - no data returned from database');
+      throw new Error("Failed to update company profile - database did not return the updated record");
     }
     
+    console.log('[updateCompanyProfile] Successfully updated profile:', updatedProfile.id);
     return updatedProfile;
   }
 
@@ -5267,6 +5303,7 @@ export class MemStorage implements IStorage {
   }
 
   async createCompanyProfile(profile: InsertTenantCompanyProfile): Promise<TenantCompanyProfile> {
+    console.log('[MemStorage.createCompanyProfile] Creating profile for tenant:', profile.tenantId);
     const now = new Date();
     const id = `profile-${Date.now()}-${Math.random()}`;
     const newProfile: TenantCompanyProfile = { 
@@ -5278,19 +5315,30 @@ export class MemStorage implements IStorage {
       phone: profile.phone ?? null,
       website: profile.website ?? null,
       taxRegistrationNumber: profile.taxRegistrationNumber ?? null,
-      address: profile.address ?? null
+      address: profile.address ?? null,
+      ifrsComplianceEnabled: profile.ifrsComplianceEnabled ?? false,
+      fxTranslationStandard: profile.fxTranslationStandard ?? null,
+      fxIncomeExpenseMethod: profile.fxIncomeExpenseMethod ?? null,
+      fxGainAccountId: profile.fxGainAccountId ?? null,
+      fxLossAccountId: profile.fxLossAccountId ?? null
     };
     this.tenantCompanyProfiles.push(newProfile);
+    console.log('[MemStorage.createCompanyProfile] Successfully created profile:', id);
     return newProfile;
   }
 
   async updateCompanyProfile(tenantId: string, data: Partial<Omit<InsertTenantCompanyProfile, 'tenantId'>>): Promise<TenantCompanyProfile> {
+    console.log('[MemStorage.updateCompanyProfile] Updating profile for tenant:', tenantId);
     const existing = this.tenantCompanyProfiles.find(p => p.tenantId === tenantId);
-    if (!existing) throw new Error("Company profile not found");
+    if (!existing) {
+      console.error('[MemStorage.updateCompanyProfile] Profile not found for tenant:', tenantId);
+      throw new Error("Company profile not found");
+    }
     
     const updated = { ...existing, ...data, updatedAt: new Date() };
     const index = this.tenantCompanyProfiles.findIndex(p => p.tenantId === tenantId);
     this.tenantCompanyProfiles[index] = updated;
+    console.log('[MemStorage.updateCompanyProfile] Successfully updated profile:', updated.id);
     return updated;
   }
 

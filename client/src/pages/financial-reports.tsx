@@ -89,21 +89,29 @@ function FxDisclosure({
   baseCurrency: string; 
   applied: boolean;
 }) {
-  if (!applied) return null;
-
   const standardLabel = standard === "full-ifrs" ? "Full IFRS (IAS 21)" : "IFRS for SMEs (Section 30)";
   const methodLabel = method === "average-rate" ? "Average Rate" : "Transaction Date Rate";
 
   return (
     <div className="text-xs text-muted-foreground space-y-1 mt-2 p-3 bg-muted/50 rounded-md" data-testid="fx-disclosure">
-      <p className="font-medium">Foreign Currency Translation Applied:</p>
+      <p className="font-medium">
+        {applied ? "Foreign Currency Translation Applied" : "IFRS Compliance Enabled"}
+      </p>
       <p>Standard: {standardLabel}</p>
       {method && <p>Income/Expense Method: {methodLabel}</p>}
       <p>Presentation Currency: {baseCurrency}</p>
-      <p className="text-xs italic mt-2">
-        Note: Exchange difference tracking requires historical balance data. 
-        Differences will be displayed once multi-currency transactions are fully integrated.
-      </p>
+      {!applied && (
+        <p className="text-xs italic mt-2">
+          Note: FX translation is configured but not yet applied. 
+          Translation will be active once multi-currency transactions are recorded.
+        </p>
+      )}
+      {applied && (
+        <p className="text-xs italic mt-2">
+          Note: Exchange difference tracking requires historical balance data. 
+          Differences will be displayed once multi-currency transactions are fully integrated.
+        </p>
+      )}
     </div>
   );
 }
@@ -331,7 +339,7 @@ export default function FinancialReports() {
                     <CardTitle>Revenue Breakdown</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {profitLossData.revenue.length === 0 ? (
+                    {!profitLossData?.revenue || profitLossData.revenue.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No revenue accounts</p>
                     ) : (
                       <Table>
@@ -367,7 +375,7 @@ export default function FinancialReports() {
                     <CardTitle>Expense Breakdown</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {profitLossData.expenses.length === 0 ? (
+                    {!profitLossData?.expenses || profitLossData.expenses.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No expense accounts</p>
                     ) : (
                       <Table>

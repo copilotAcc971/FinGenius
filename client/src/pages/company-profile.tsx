@@ -126,8 +126,27 @@ export default function CompanyProfile() {
       }
     },
     onSuccess: () => {
+      // Invalidate company profile cache
       queryClient.invalidateQueries({ 
         queryKey: ['/api/company-profile', { tenantId: tenantId || '' }] 
+      });
+      // Invalidate all report caches to ensure they refetch with updated IFRS settings
+      // Use exact: false to match queries with parameters (e.g., startDate, endDate)
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/reports/profit-loss'],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/reports/balance-sheet'],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/reports/trial-balance'],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/reports/cash-flow'],
+        exact: false
       });
       toast({
         title: profile ? "Profile updated" : "Profile created",
