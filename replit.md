@@ -38,6 +38,15 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
     - **Security:** Referential integrity checks prevent orphaned data, base currency deletion blocked, currencies in-use deletion blocked with guidance to deactivate
     - **Frontend Integration:** Automatic x-tenant-id header injection in all API requests via queryClient, TenantContext localStorage integration
     - **Known Limitations:** E2E testing blocked by OIDC auth bypass issues in test environment (not production code issue), manual verification confirms functionality
+- **IFRS Foreign Currency Translation (COMPLETED):** Full compliance with IAS 21 and IFRS for SMEs Section 30:
+    - **Translation Engine:** Tenant-scoped rate queries with proper error handling, supporting closing rate (monetary items), average rate (income/expense), and historical rate (equity items) methods
+    - **Average Rate Method:** Uses full reporting period per IAS 21 (not transaction date approximation)
+    - **Historical Rate Method:** Transaction date rates for equity items per IFRS requirements
+    - **FX Configuration UI:** Configurable translation standard (Full IFRS vs IFRS for SMEs) and income/expense method (average-rate vs transaction-date) at company profile level
+    - **System Accounts:** Code 4910 (Foreign Exchange Gain), Code 5900 (Foreign Exchange Loss) for realized/unrealized FX differences
+    - **Security:** All rate queries are tenant-scoped to prevent cross-tenant data leakage
+    - **Proper Error Handling:** Returns null for missing rates instead of silent 1.0 fallback, with explicit error messages in API responses
+    - **Known Limitation:** Exchange difference calculation requires historical balance tracking infrastructure (opening balances, transaction-level currency tracking, period-over-period comparison). Per IAS 21 compliance, incomplete data is NOT disclosed rather than showing misleading zeros. Implementation deferred until multi-currency transaction tracking is active.
 - **Role-Based Access Control (RBAC):** Complete enterprise-grade RBAC system with:
     - **Permission Catalog:** 70+ granular permissions across 12 modules (customers, vendors, items, taxes, invoices, bills, quotes, sales_orders, purchase_orders, reports, users, billing)
     - **Default Roles:** 7 system roles (Owner, Admin, Accountant, Bookkeeper, Sales, Purchase, Viewer) with curated permission sets

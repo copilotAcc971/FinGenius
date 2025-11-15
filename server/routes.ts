@@ -122,63 +122,6 @@ async function verifyTenantAccess(req: any, res: any, next: any) {
   }
 }
 
-// Helper function for IFRS-compliant FX translation in reports
-// SECURITY FIX: Added tenantId parameter to prevent cross-tenant data leakage
-// IFRS FIX: Now uses translateAmount with proper error handling and historical rates for equity
-async function translateReportAmount(
-  tenantId: string,  // SECURITY FIX: Added tenant scoping
-  amount: number,
-  fromCurrency: string,
-  baseCurrency: string,
-  accountType: "asset" | "liability" | "equity" | "revenue" | "expense" | "income",
-  reportDate: Date,
-  periodStart: Date,
-  incomeExpenseMethod: string
-): Promise<{ translatedAmount: number; exchangeDifference: number; error?: string }> {
-  
-  // IFRS FIX: Only calculate exchange differences for foreign currency transactions
-  if (fromCurrency === baseCurrency) {
-    return { translatedAmount: amount, exchangeDifference: 0 };
-  }
-
-  let method: "closing" | "average" | "historical";
-  
-  // Determine translation method based on account type and IFRS config
-  if (accountType === "asset" || accountType === "liability") {
-    // Monetary items: closing rate
-    method = "closing";
-  } else if (accountType === "equity") {
-    // IFRS FIX: Equity uses historical rate, not closing rate
-    method = "historical";
-  } else {
-    // Revenue/Expense/Income: based on configuration
-    method = incomeExpenseMethod === "average-rate" ? "average" : "historical";
-  }
-
-  const result = await translateAmount(
-    tenantId,
-    amount,
-    fromCurrency,
-    baseCurrency,
-    reportDate,
-    method,
-    periodStart
-  );
-
-  if (result.error) {
-    return { 
-      translatedAmount: amount, 
-      exchangeDifference: 0,
-      error: result.error
-    };
-  }
-
-  // Exchange difference set to 0 per IAS 21 interpretation
-  // Proper calculation requires tracking period-over-period balance changes
-  const exchangeDifference = 0;
-  
-  return { translatedAmount: result.translatedAmount, exchangeDifference };
-}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
@@ -3177,22 +3120,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const incomeExpenseMethod = profile?.fxIncomeExpenseMethod || "average-rate";
       const fxTranslationStandard = profile?.fxTranslationStandard || "ifrs-sme";
       
-      // For now, assume all amounts are already in base currency
-      // Future enhancement: Track currency per transaction and apply translation
-      const exchangeDifferences = {
-        totalRevenueExchangeDifference: 0,
-        totalExpenseExchangeDifference: 0,
-        netExchangeDifference: 0
-      };
-      
       // Add FX metadata to response
       const enrichedReport = {
         ...report,
         baseCurrency,
         fxTranslationStandard,
         incomeExpenseMethod,
-        exchangeDifferences,
-        fxTranslationApplied: false, // Will be true when we track currencies at transaction level
+        fxTranslationApplied: false, // Will be true when multi-currency transactions are active
       };
       
       res.json(enrichedReport);
@@ -3234,22 +3168,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const baseCurrency = baseCurrencyRecord?.code || "USD";
       const fxTranslationStandard = profile?.fxTranslationStandard || "ifrs-sme";
       
-      // For now, assume all amounts are already in base currency
-      // Future enhancement: Track currency per transaction and apply closing rate translation
-      const exchangeDifferences = {
-        unrealizedAssetExchangeDifference: 0,
-        unrealizedLiabilityExchangeDifference: 0,
-        netUnrealizedExchangeDifference: 0
-      };
-      
       // Add FX metadata to response
       const enrichedReport = {
         ...report,
         baseCurrency,
         fxTranslationStandard,
         translationMethod: "closing-rate", // Monetary items use closing rate per IFRS
-        exchangeDifferences,
-        fxTranslationApplied: false, // Will be true when we track currencies at transaction level
+        fxTranslationApplied: false, // Will be true when multi-currency transactions are active
       };
       
       res.json(enrichedReport);

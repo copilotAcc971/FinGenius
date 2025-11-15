@@ -39,11 +39,6 @@ interface ProfitLossResponse {
   fxTranslationStandard: string;
   incomeExpenseMethod: string;
   fxTranslationApplied: boolean;
-  exchangeDifferences: {
-    totalRevenueExchangeDifference: number;
-    totalExpenseExchangeDifference: number;
-    netExchangeDifference: number;
-  };
 }
 
 interface BalanceSheetResponse {
@@ -57,11 +52,6 @@ interface BalanceSheetResponse {
   fxTranslationStandard: string;
   translationMethod: string;
   fxTranslationApplied: boolean;
-  exchangeDifferences: {
-    totalAssetExchangeDifference: number;
-    totalLiabilityExchangeDifference: number;
-    netExchangeDifference: number;
-  };
 }
 
 interface TrialBalanceReport {
@@ -116,89 +106,6 @@ function FxDisclosure({
   );
 }
 
-function ExchangeDifferencesSummary({
-  differences,
-  reportType,
-  currencies,
-  baseCurrencyCode
-}: {
-  differences: {
-    totalRevenueExchangeDifference?: number;
-    totalExpenseExchangeDifference?: number;
-    totalAssetExchangeDifference?: number;
-    totalLiabilityExchangeDifference?: number;
-    netExchangeDifference: number;
-  };
-  reportType: "P&L" | "Balance Sheet";
-  currencies: Currency[];
-  baseCurrencyCode: string;
-}) {
-  // Check if ANY difference is non-zero
-  const hasSignificantDifferences = 
-    Math.abs(differences.netExchangeDifference) > 0.01 ||
-    (differences.totalRevenueExchangeDifference !== undefined && Math.abs(differences.totalRevenueExchangeDifference) > 0.01) ||
-    (differences.totalExpenseExchangeDifference !== undefined && Math.abs(differences.totalExpenseExchangeDifference) > 0.01) ||
-    (differences.totalAssetExchangeDifference !== undefined && Math.abs(differences.totalAssetExchangeDifference) > 0.01) ||
-    (differences.totalLiabilityExchangeDifference !== undefined && Math.abs(differences.totalLiabilityExchangeDifference) > 0.01);
-  
-  // Hide component entirely if no significant differences
-  // This prevents showing misleading "0" exchange differences
-  if (!hasSignificantDifferences) return null;
-
-  return (
-    <div className="mt-4 p-4 border rounded-md bg-card" data-testid="exchange-differences">
-      <h4 className="font-semibold mb-2 text-sm">Exchange Differences</h4>
-      <div className="space-y-1 text-sm">
-        {reportType === "P&L" && (
-          <>
-            {differences.totalRevenueExchangeDifference !== undefined && Math.abs(differences.totalRevenueExchangeDifference) > 0.01 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Revenue Translation:</span>
-                <span data-testid="text-revenue-fx-diff">
-                  {formatCurrency(differences.totalRevenueExchangeDifference, baseCurrencyCode, currencies)}
-                </span>
-              </div>
-            )}
-            {differences.totalExpenseExchangeDifference !== undefined && Math.abs(differences.totalExpenseExchangeDifference) > 0.01 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Expense Translation:</span>
-                <span data-testid="text-expense-fx-diff">
-                  {formatCurrency(differences.totalExpenseExchangeDifference, baseCurrencyCode, currencies)}
-                </span>
-              </div>
-            )}
-          </>
-        )}
-        {reportType === "Balance Sheet" && (
-          <>
-            {differences.totalAssetExchangeDifference !== undefined && Math.abs(differences.totalAssetExchangeDifference) > 0.01 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Asset Translation:</span>
-                <span data-testid="text-asset-fx-diff">
-                  {formatCurrency(differences.totalAssetExchangeDifference, baseCurrencyCode, currencies)}
-                </span>
-              </div>
-            )}
-            {differences.totalLiabilityExchangeDifference !== undefined && Math.abs(differences.totalLiabilityExchangeDifference) > 0.01 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Liability Translation:</span>
-                <span data-testid="text-liability-fx-diff">
-                  {formatCurrency(differences.totalLiabilityExchangeDifference, baseCurrencyCode, currencies)}
-                </span>
-              </div>
-            )}
-          </>
-        )}
-        <div className="flex justify-between font-semibold pt-2 border-t">
-          <span>Net Exchange Difference:</span>
-          <span data-testid="text-net-fx-diff">
-            {formatCurrency(differences.netExchangeDifference, baseCurrencyCode, currencies)}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function FinancialReports() {
   const { currentTenant } = useTenant();
@@ -496,12 +403,6 @@ export default function FinancialReports() {
                 baseCurrency={profitLossData.baseCurrency}
                 applied={profitLossData.fxTranslationApplied}
               />
-              <ExchangeDifferencesSummary
-                differences={profitLossData.exchangeDifferences}
-                reportType="P&L"
-                currencies={currencies}
-                baseCurrencyCode={baseCurrency?.code || "USD"}
-              />
             </>
           )}
         </TabsContent>
@@ -728,12 +629,6 @@ export default function FinancialReports() {
                 method={balanceSheetData.translationMethod}
                 baseCurrency={balanceSheetData.baseCurrency}
                 applied={balanceSheetData.fxTranslationApplied}
-              />
-              <ExchangeDifferencesSummary
-                differences={balanceSheetData.exchangeDifferences}
-                reportType="Balance Sheet"
-                currencies={currencies}
-                baseCurrencyCode={baseCurrency?.code || "USD"}
               />
             </>
           )}

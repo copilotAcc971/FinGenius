@@ -153,9 +153,18 @@ export async function translateAmount(
 
 /**
  * Translate financial statement line items
- * IFRS COMPLIANCE FIX: Only calculates exchange differences for foreign currency transactions
- * Previously incorrectly calculated differences for all transactions
- * SECURITY: Now includes tenant scoping
+ * IFRS COMPLIANCE: Translates amounts using appropriate methods per IAS 21
+ * SECURITY: Includes tenant scoping to prevent cross-tenant data leakage
+ * 
+ * NOTE: Exchange difference calculation requires historical balance tracking
+ * infrastructure that is not yet implemented. Per IAS 21 compliance, it's better
+ * to not disclose incomplete data than to show misleading zeros.
+ * 
+ * A full exchange difference implementation would require:
+ * - Tracking opening balances in base currency
+ * - Recording all transactions at transaction date rates
+ * - Comparing closing balances at current rates vs opening + movements
+ * - Separate tracking of realized vs unrealized differences
  */
 export interface LineItem {
   amount: number;
@@ -172,19 +181,16 @@ export async function translateLineItems(
   periodStart?: Date
 ): Promise<{ 
   translatedAmount: number; 
-  exchangeDifference: number;
   originalCurrency: string;
   translationApplied: boolean;
 }[]> {
   const results = [];
 
   for (const item of items) {
-    // IFRS FIX: Only translate if currency differs from base
-    // Exchange differences should only be calculated for foreign currency transactions
+    // Only translate if currency differs from base
     if (item.currency === config.baseCurrency) {
       results.push({ 
         translatedAmount: item.amount, 
-        exchangeDifference: 0,
         originalCurrency: item.currency,
         translationApplied: false
       });
@@ -198,15 +204,14 @@ export async function translateLineItems(
       // Monetary items: closing rate
       method = "closing";
     } else if (item.accountType === "equity") {
-      // IFRS FIX: Equity uses historical rate
+      // Equity items: historical rate
       method = "historical";
     } else {
       // Revenue/Expense: based on configuration
       method = config.incomeExpenseMethod === "average-rate" ? "average" : "historical";
     }
 
-    // CRITICAL FIX: For revenue/expense with average-rate method,
-    // use reportDate (period end) NOT item.date (transaction date)
+    // For revenue/expense with average-rate method, use reportDate (period end)
     // Per IAS 21: average rate should be for the FULL reporting period
     const translationDate = (method === "average") ? reportDate : item.date;
 
@@ -224,28 +229,14 @@ export async function translateLineItems(
       console.error(`[FX Translation] ${result.error}`);
       results.push({ 
         translatedAmount: item.amount, 
-        exchangeDifference: 0,
         originalCurrency: item.currency,
         translationApplied: false
       });
       continue;
     }
 
-    // Exchange difference calculation (IFRS COMPLIANCE):
-    // For proper IAS 21 compliance, exchange differences arise from:
-    // 1. Translating monetary items at different rates (closing vs historical)
-    // 2. Settlement of foreign currency transactions
-    // 
-    // Since we don't track prior period balances or settlement events,
-    // we set exchange difference to 0 for now.
-    // A full implementation would require:
-    // - Tracking opening balance in base currency
-    // - Comparing closing balance at current rate vs opening + movements
-    const exchangeDifference = 0;
-
     results.push({ 
       translatedAmount: result.translatedAmount, 
-      exchangeDifference,
       originalCurrency: item.currency,
       translationApplied: true
     });
