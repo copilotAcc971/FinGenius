@@ -25,9 +25,30 @@ export function WorkspaceSwitcher() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const { currentTenant, setCurrentTenant } = useTenant();
 
-  const { data: tenants = [] } = useQuery<Tenant[]>({
+  const { data: tenants = [], isLoading } = useQuery<Tenant[]>({
     queryKey: ["/api/tenants"],
   });
+
+  const hasNoTenants = !isLoading && tenants.length === 0;
+
+  if (hasNoTenants && !currentTenant) {
+    return (
+      <>
+        <Button
+          variant="default"
+          onClick={() => setShowCreateDialog(true)}
+          data-testid="button-create-first-workspace"
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          Create Your First Workspace
+        </Button>
+        <CreateWorkspaceDialog
+          open={showCreateDialog}
+          onOpenChange={setShowCreateDialog}
+        />
+      </>
+    );
+  }
 
   return (
     <>

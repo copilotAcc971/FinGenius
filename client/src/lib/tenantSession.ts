@@ -49,7 +49,7 @@ class TenantSession {
     });
   }
 
-  async initialize(): Promise<void> {
+  initialize(): void {
     if (this._ready) {
       console.log("[TenantSession] Already initialized");
       return;

@@ -1,35 +1,50 @@
 import { useEffect, useState, ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { tenantSession } from "@/lib/tenantSession";
 import { useTenant } from "@/hooks/useTenant";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, Building2 } from "lucide-react";
 import { WorkspaceSwitcher } from "./workspace-switcher";
+import type { Tenant } from "@shared/schema";
 
 interface TenantGateProps {
   children: ReactNode;
 }
 
 export function TenantGate({ children }: TenantGateProps) {
-  const [isReady, setIsReady] = useState(false);
+  const [isReady, setIsReady] = useState(() => tenantSession.isReady());
   const { currentTenant } = useTenant();
+  
+  const { isLoading: tenantsLoading, isError: tenantsError } = useQuery<Tenant[]>({
+    queryKey: ["/api/tenants"],
+  });
 
   useEffect(() => {
-    async function waitForReady() {
-      try {
-        await tenantSession.waitForReady(10000);
-        setIsReady(true);
-        console.log("[TenantGate] TenantSession ready");
-      } catch (error) {
-        console.error("[TenantGate] TenantSession ready timeout:", error);
-        setIsReady(true);
-      }
+    if (isReady) {
+      console.log("[TenantGate] Already ready on mount");
+      return;
     }
 
-    waitForReady();
-  }, []);
+    console.log("[TenantGate] Waiting for ready state...");
+    
+    const handleReady = () => {
+      console.log("[TenantGate] TenantSession ready");
+      setIsReady(true);
+    };
 
-  if (!isReady) {
+    tenantSession.on("ready", handleReady);
+
+    if (tenantSession.isReady()) {
+      setIsReady(true);
+    }
+
+    return () => {
+      tenantSession.off("ready", handleReady);
+    };
+  }, [isReady]);
+
+  if (!isReady || (tenantsLoading && !tenantsError)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-muted/20">
         <Card className="w-[400px]">

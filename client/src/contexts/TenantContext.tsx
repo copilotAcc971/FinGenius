@@ -15,18 +15,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    async function initializeTenant() {
-      console.log("[TenantProvider] Initializing TenantSession...");
-      await tenantSession.initialize();
-      
-      if (!mounted) return;
-
-      const tenant = tenantSession.getTenant();
-      console.log("[TenantProvider] Initial tenant from TenantSession:", tenant?.name || "none");
-      setCurrentTenantState(tenant);
-    }
-
-    initializeTenant();
+    console.log("[TenantProvider] Initializing TenantSession...");
+    tenantSession.initialize();
+    
+    const tenant = tenantSession.getTenant();
+    console.log("[TenantProvider] Initial tenant from TenantSession:", tenant?.name || "none");
+    setCurrentTenantState(tenant);
 
     const handleTenantChanged = (tenant: Tenant | null) => {
       console.log("[TenantProvider] Tenant changed event:", tenant?.name || "none");
