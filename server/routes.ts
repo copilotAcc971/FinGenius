@@ -5189,16 +5189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       );
       
-      // Serialize dates for frontend
-      res.json({
-        ...expense,
-        date: expense.date?.toISOString() || null,
-        submittedAt: expense.submittedAt?.toISOString() || null,
-        approvedAt: expense.approvedAt?.toISOString() || null,
-        rejectedAt: expense.rejectedAt?.toISOString() || null,
-        reimbursedAt: expense.reimbursedAt?.toISOString() || null,
-        createdAt: expense.createdAt?.toISOString() || null,
-      });
+      res.json(serializeExpense(expense));
     } catch (error: any) {
       console.error("Error reimbursing expense:", error);
       if (error instanceof z.ZodError) {

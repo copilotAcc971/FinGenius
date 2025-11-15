@@ -259,7 +259,13 @@ export interface IStorage {
   updateExpense(id: string, tenantId: string, expense: Partial<InsertExpense>): Promise<Expense>;
 
   // Employee Expense Management operations
-  getEmployeeExpenses(tenantId: string, filters?: { employeeId?: string; reimbursementStatus?: string; startDate?: Date; endDate?: Date }): Promise<Expense[]>;
+  getEmployeeExpenses(tenantId: string, filters?: {
+    userId?: string;
+    employeeId?: string;
+    reimbursementStatus?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<Expense[]>;
   submitEmployeeExpense(data: InsertExpense & { tenantId: string; employeeId: string; submittedBy: string }): Promise<Expense>;
   approveExpense(expenseId: string, tenantId: string, approvedBy: string): Promise<Expense>;
   rejectExpense(expenseId: string, tenantId: string, rejectedBy: string, reason: string): Promise<Expense>;
@@ -1742,10 +1748,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Employee Expense Management operations
-  async getEmployeeExpenses(tenantId: string, filters?: { employeeId?: string; reimbursementStatus?: string; startDate?: Date; endDate?: Date }): Promise<Expense[]> {
+  async getEmployeeExpenses(tenantId: string, filters?: {
+    userId?: string;
+    employeeId?: string;
+    reimbursementStatus?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<Expense[]> {
     const conditions: any[] = [eq(expenses.tenantId, tenantId)];
     
-    if (filters?.employeeId) {
+    // If userId provided (non-view_all users), show expenses where:
+    // - They are the employee (their own), OR
+    // - They submitted it (on behalf of others)
+    if (filters?.userId) {
+      conditions.push(
+        or(
+          eq(expenses.employeeId, filters.userId),
+          eq(expenses.submittedBy, filters.userId)
+        )
+      );
+    } else if (filters?.employeeId) {
+      // Explicit employeeId filter (for view_all users)
       conditions.push(eq(expenses.employeeId, filters.employeeId));
     }
     

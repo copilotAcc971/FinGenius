@@ -206,6 +206,15 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
     name: "bill.currencyCode",
   });
 
+  const selectedVendorId = useWatch({
+    control: form.control,
+    name: "bill.vendorId",
+  });
+
+  const selectedVendor = useMemo(() => {
+    return vendors.find(v => v.id === selectedVendorId);
+  }, [vendors, selectedVendorId]);
+
   // Calculate amounts and totals using useMemo
   const calculatedValues = useMemo(() => {
     const lineItems = watchedLineItems || [];
@@ -607,6 +616,11 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
                       </SelectContent>
                     </Select>
                     <FormMessage />
+                    {selectedVendor && selectedVendor.taxRegistrationNumber && (
+                      <div className="text-sm text-muted-foreground mt-1" data-testid="text-vendor-tax-registration">
+                        Tax Registration: {selectedVendor.taxRegistrationNumber}
+                      </div>
+                    )}
                   </FormItem>
                 )}
               />
