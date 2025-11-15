@@ -297,6 +297,12 @@ export const tenantCompanyProfiles = pgTable("tenant_company_profiles", {
   phone: varchar("phone", { length: 50 }),
   website: varchar("website", { length: 255 }),
   
+  // IFRS Foreign Currency Translation Configuration
+  fxTranslationStandard: varchar("fx_translation_standard", { length: 20 }).default("ifrs-sme"),
+  fxIncomeExpenseMethod: varchar("fx_income_expense_method", { length: 20 }).default("average-rate"),
+  fxGainAccountId: varchar("fx_gain_account_id", { length: 255 }),
+  fxLossAccountId: varchar("fx_loss_account_id", { length: 255 }),
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -305,6 +311,10 @@ export const insertTenantCompanyProfileSchema = createInsertSchema(tenantCompany
   legalName: z.string().min(1, "Legal name is required"),
   taxRegistrationNumber: z.string().min(1, "Tax registration number is required"),
   address: addressSchema.optional(),
+  fxTranslationStandard: z.string().optional(),
+  fxIncomeExpenseMethod: z.string().optional(),
+  fxGainAccountId: z.string().optional(),
+  fxLossAccountId: z.string().optional(),
 }).omit({
   id: true,
   createdAt: true,

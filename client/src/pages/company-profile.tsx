@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import { Save, Building2 } from "lucide-react";
+import { Save, Building2, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -16,6 +16,13 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -36,6 +43,10 @@ const companyProfileFormSchema = z.object({
   email: z.string().optional().or(z.literal("")),
   phone: z.string().optional().or(z.literal("")),
   website: z.string().optional().or(z.literal("")),
+  fxTranslationStandard: z.string().optional(),
+  fxIncomeExpenseMethod: z.string().optional(),
+  fxGainAccountId: z.string().optional(),
+  fxLossAccountId: z.string().optional(),
 });
 
 type CompanyProfileFormValues = z.infer<typeof companyProfileFormSchema>;
@@ -65,6 +76,10 @@ export default function CompanyProfile() {
       email: "",
       phone: "",
       website: "",
+      fxTranslationStandard: "ifrs-sme",
+      fxIncomeExpenseMethod: "average-rate",
+      fxGainAccountId: "",
+      fxLossAccountId: "",
     },
   });
 
@@ -84,6 +99,10 @@ export default function CompanyProfile() {
         email: profile.email ?? "",
         phone: profile.phone ?? "",
         website: profile.website ?? "",
+        fxTranslationStandard: profile.fxTranslationStandard ?? "ifrs-sme",
+        fxIncomeExpenseMethod: profile.fxIncomeExpenseMethod ?? "average-rate",
+        fxGainAccountId: profile.fxGainAccountId ?? "",
+        fxLossAccountId: profile.fxLossAccountId ?? "",
       });
     }
   }, [profile, form]);
@@ -325,6 +344,99 @@ export default function CompanyProfile() {
                       <FormLabel>Country</FormLabel>
                       <FormControl>
                         <Input placeholder="Country" {...field} data-testid="input-address-country" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="h-5 w-5" />
+                IFRS Foreign Currency Translation
+              </CardTitle>
+              <CardDescription>
+                Configure how foreign currency transactions are translated for financial reporting
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField
+                control={form.control}
+                name="fxTranslationStandard"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>IFRS Translation Standard</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || "ifrs-sme"}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-fx-standard">
+                          <SelectValue placeholder="Select standard" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="full-ifrs">Full IFRS (IAS 21)</SelectItem>
+                        <SelectItem value="ifrs-sme">IFRS for SMEs (Section 30)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Choose the accounting standard for foreign currency translation
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="fxIncomeExpenseMethod"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Income/Expense Translation Method</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || "average-rate"}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-fx-method">
+                          <SelectValue placeholder="Select method" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="average-rate">Average Rate (Recommended)</SelectItem>
+                        <SelectItem value="transaction-date">Transaction Date Rate</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Average rate is recommended for most businesses under IFRS
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="fxGainAccountId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>FX Gain Account (Optional)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Account ID for FX gains" {...field} data-testid="input-fx-gain-account" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="fxLossAccountId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>FX Loss Account (Optional)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Account ID for FX losses" {...field} data-testid="input-fx-loss-account" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
