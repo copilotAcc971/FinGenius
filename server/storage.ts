@@ -126,6 +126,9 @@ import {
   type BankReconciliationPayload,
   type ProfitLossReport,
   type BalanceSheetReport,
+  type EnhancedBalanceSheetReport,
+  type BalanceSheetCategory,
+  type BalanceSheetAccountLine,
   type TrialBalanceReport,
   type CashFlowReport,
   type ARAgingReport,
@@ -349,6 +352,7 @@ export interface IStorage {
   // Financial Reports (READ-ONLY)
   getProfitLossReport(tenantId: string, startDate: Date, endDate: Date): Promise<ProfitLossReport>;
   getBalanceSheetReport(tenantId: string, asOfDate: Date): Promise<BalanceSheetReport>;
+  getEnhancedBalanceSheetReport(tenantId: string, asOfDate: Date, comparisonDate?: Date): Promise<EnhancedBalanceSheetReport>;
   getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport>;
   getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport>;
   getARAgingReport(tenantId: string, groupBy?: 'customer' | 'invoice' | 'project'): Promise<ARAgingReport>;
@@ -4409,6 +4413,181 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  async getEnhancedBalanceSheetReport(
+    tenantId: string, 
+    asOfDate: Date, 
+    comparisonDate?: Date
+  ): Promise<EnhancedBalanceSheetReport> {
+    // Helper function to calculate variance percentage
+    const calculateVariancePercentage = (current: number, previous: number): number | "Infinity" | "-Infinity" => {
+      if (previous === 0 && current === 0) return 0;
+      if (previous === 0 && current > 0) return "Infinity";
+      if (previous === 0 && current < 0) return "-Infinity";
+      if (current === 0 && previous !== 0) return -100;
+      return ((current - previous) / Math.abs(previous)) * 100;
+    };
+
+    // Helper function to get balance at a specific date
+    const getBalanceAtDate = async (accountId: string, date: Date): Promise<number> => {
+      const result = await db
+        .select({
+          balance: accountTransactionHistory.runningBalance
+        })
+        .from(accountTransactionHistory)
+        .where(
+          and(
+            eq(accountTransactionHistory.tenantId, tenantId),
+            eq(accountTransactionHistory.accountId, accountId),
+            lte(accountTransactionHistory.transactionDate, date)
+          )
+        )
+        .orderBy(desc(accountTransactionHistory.transactionDate))
+        .limit(1);
+
+      return result[0]?.balance ? parseFloat(result[0].balance) : 0;
+    };
+
+    // Helper function to process accounts by type
+    const processAccountsByType = async (
+      accountType: 'asset' | 'liability' | 'equity',
+      fallbackCategory: string
+    ): Promise<BalanceSheetCategory[]> => {
+      const accountsList = await db
+        .select()
+        .from(accounts)
+        .where(
+          and(
+            eq(accounts.tenantId, tenantId),
+            eq(accounts.type, accountType),
+            eq(accounts.isActive, true)
+          )
+        );
+
+      // Group accounts by category
+      const accountsByCategory = new Map<string, typeof accountsList>();
+      for (const account of accountsList) {
+        const category = account.accountCategory || fallbackCategory;
+        if (!accountsByCategory.has(category)) {
+          accountsByCategory.set(category, []);
+        }
+        accountsByCategory.get(category)!.push(account);
+      }
+
+      // Process each category
+      const categories: BalanceSheetCategory[] = [];
+      for (const [category, categoryAccounts] of accountsByCategory) {
+        const accountLines: BalanceSheetAccountLine[] = await Promise.all(
+          categoryAccounts.map(async (account) => {
+            const currentAmount = await getBalanceAtDate(account.id, asOfDate);
+            const accountLine: BalanceSheetAccountLine = {
+              accountId: account.id,
+              accountCode: account.code,
+              accountName: account.name,
+              accountCategory: category,
+              currentAmount: currentAmount.toFixed(2),
+            };
+
+            if (comparisonDate) {
+              const comparisonAmount = await getBalanceAtDate(account.id, comparisonDate);
+              const variance = currentAmount - comparisonAmount;
+              const variancePercentage = calculateVariancePercentage(currentAmount, comparisonAmount);
+
+              accountLine.comparisonAmount = comparisonAmount.toFixed(2);
+              accountLine.variance = variance.toFixed(2);
+              accountLine.variancePercentage = variancePercentage;
+            }
+
+            return accountLine;
+          })
+        );
+
+        // Calculate category subtotals
+        const subtotal = accountLines.reduce((sum, line) => sum + parseFloat(line.currentAmount), 0);
+        const categoryData: BalanceSheetCategory = {
+          category,
+          accounts: accountLines,
+          subtotal: subtotal.toFixed(2),
+        };
+
+        if (comparisonDate) {
+          const comparisonSubtotal = accountLines.reduce(
+            (sum, line) => sum + parseFloat(line.comparisonAmount || '0'), 
+            0
+          );
+          const variance = subtotal - comparisonSubtotal;
+          const variancePercentage = calculateVariancePercentage(subtotal, comparisonSubtotal);
+
+          categoryData.comparisonSubtotal = comparisonSubtotal.toFixed(2);
+          categoryData.variance = variance.toFixed(2);
+          categoryData.variancePercentage = variancePercentage;
+        }
+
+        categories.push(categoryData);
+      }
+
+      return categories;
+    };
+
+    // Process all account types
+    const assetCategories = await processAccountsByType('asset', 'Other Assets');
+    const liabilityCategories = await processAccountsByType('liability', 'Other Liabilities');
+    const equityCategories = await processAccountsByType('equity', 'Equity');
+
+    // Calculate totals
+    const totalAssets = assetCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotal), 0);
+    const totalLiabilities = liabilityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotal), 0);
+    const totalEquity = equityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotal), 0);
+    const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
+    const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01;
+
+    const report: EnhancedBalanceSheetReport = {
+      tenantId,
+      asOfDate,
+      assetCategories,
+      liabilityCategories,
+      equityCategories,
+      totalAssets: totalAssets.toFixed(2),
+      totalLiabilities: totalLiabilities.toFixed(2),
+      totalEquity: totalEquity.toFixed(2),
+      isBalanced,
+    };
+
+    if (comparisonDate) {
+      report.comparisonDate = comparisonDate;
+
+      const comparisonTotalAssets = assetCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotal || '0'), 
+        0
+      );
+      const comparisonTotalLiabilities = liabilityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotal || '0'), 
+        0
+      );
+      const comparisonTotalEquity = equityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotal || '0'), 
+        0
+      );
+      const comparisonTotalLiabilitiesAndEquity = comparisonTotalLiabilities + comparisonTotalEquity;
+      const comparisonIsBalanced = Math.abs(comparisonTotalAssets - comparisonTotalLiabilitiesAndEquity) < 0.01;
+
+      report.comparisonTotalAssets = comparisonTotalAssets.toFixed(2);
+      report.comparisonTotalLiabilities = comparisonTotalLiabilities.toFixed(2);
+      report.comparisonTotalEquity = comparisonTotalEquity.toFixed(2);
+      report.comparisonIsBalanced = comparisonIsBalanced;
+
+      report.assetVariance = (totalAssets - comparisonTotalAssets).toFixed(2);
+      report.assetVariancePercentage = calculateVariancePercentage(totalAssets, comparisonTotalAssets);
+      
+      report.liabilityVariance = (totalLiabilities - comparisonTotalLiabilities).toFixed(2);
+      report.liabilityVariancePercentage = calculateVariancePercentage(totalLiabilities, comparisonTotalLiabilities);
+      
+      report.equityVariance = (totalEquity - comparisonTotalEquity).toFixed(2);
+      report.equityVariancePercentage = calculateVariancePercentage(totalEquity, comparisonTotalEquity);
+    }
+
+    return report;
+  }
+
   async getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport> {
     // Get all active accounts for tenant
     const allAccounts = await db
@@ -6183,6 +6362,10 @@ export class MemStorage implements IStorage {
 
   async getBalanceSheetReport(tenantId: string, asOfDate: Date): Promise<BalanceSheetReport> {
     throw new Error('Reports not implemented in MemStorage');
+  }
+
+  async getEnhancedBalanceSheetReport(tenantId: string, asOfDate: Date, comparisonDate?: Date): Promise<EnhancedBalanceSheetReport> {
+    throw new Error('Enhanced Balance Sheet Report not implemented in MemStorage');
   }
 
   async getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport> {

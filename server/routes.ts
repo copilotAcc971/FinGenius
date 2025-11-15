@@ -5727,7 +5727,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/reports/balance-sheet', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
-      const { asOfDate } = req.query;
+      const { asOfDate, comparisonDate } = req.query;
 
       if (!asOfDate) {
         return res.status(400).json({ message: "asOfDate is required" });
@@ -5739,8 +5739,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid date format" });
       }
 
-      // Get base report data
-      const report = await storage.getBalanceSheetReport(tenantId, asOf);
+      let comparison: Date | undefined;
+      if (comparisonDate) {
+        comparison = new Date(comparisonDate as string);
+        if (isNaN(comparison.getTime())) {
+          return res.status(400).json({ message: "Invalid comparison date format" });
+        }
+      }
+
+      // Get enhanced report data
+      const report = await storage.getEnhancedBalanceSheetReport(tenantId, asOf, comparison);
       
       // Fetch company profile for IFRS FX config
       const profile = await storage.getCompanyProfile(tenantId);

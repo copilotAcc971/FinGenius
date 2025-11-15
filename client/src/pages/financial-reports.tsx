@@ -115,6 +115,54 @@ interface BalanceSheetResponse {
   fxTranslationApplied: boolean;
 }
 
+interface BalanceSheetAccountLine {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  accountCategory: string;
+  currentAmount: string;
+  comparisonAmount?: string;
+  variance?: string;
+  variancePercentage?: number | "Infinity" | "-Infinity";
+}
+
+interface BalanceSheetCategory {
+  category: string;
+  accounts: BalanceSheetAccountLine[];
+  subtotal: string;
+  comparisonSubtotal?: string;
+  variance?: string;
+  variancePercentage?: number | "Infinity" | "-Infinity";
+}
+
+interface EnhancedBalanceSheetResponse {
+  tenantId: string;
+  asOfDate: string;
+  comparisonDate?: string;
+  assetCategories: BalanceSheetCategory[];
+  liabilityCategories: BalanceSheetCategory[];
+  equityCategories: BalanceSheetCategory[];
+  totalAssets: string;
+  totalLiabilities: string;
+  totalEquity: string;
+  comparisonTotalAssets?: string;
+  comparisonTotalLiabilities?: string;
+  comparisonTotalEquity?: string;
+  assetVariance?: string;
+  assetVariancePercentage?: number | "Infinity" | "-Infinity";
+  liabilityVariance?: string;
+  liabilityVariancePercentage?: number | "Infinity" | "-Infinity";
+  equityVariance?: string;
+  equityVariancePercentage?: number | "Infinity" | "-Infinity";
+  isBalanced: boolean;
+  comparisonIsBalanced?: boolean;
+  baseCurrency: string;
+  ifrsComplianceEnabled: boolean;
+  fxTranslationStandard: string | null;
+  translationMethod?: string;
+  fxTranslationApplied: boolean;
+}
+
 interface TrialBalanceReport {
   accounts: Array<{ 
     accountName: string; 
@@ -227,6 +275,115 @@ function renderVariancePercentage(acc: AccountComparison) {
   return <span className="text-muted-foreground">N/A</span>;
 }
 
+function renderBSVariancePercentage(variancePercentage?: number | "Infinity" | "-Infinity") {
+  if (variancePercentage === "Infinity") {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-help text-muted-foreground" data-testid="variance-infinity">
+              ∞%
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Previous period was $0</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  if (variancePercentage === "-Infinity") {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-help text-muted-foreground" data-testid="variance-negative-infinity">
+              −∞%
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Previous period was $0</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  if (typeof variancePercentage === "number") {
+    return <span>{variancePercentage.toFixed(1)}%</span>;
+  }
+
+  return <span className="text-muted-foreground">N/A</span>;
+}
+
+function exportBalanceSheetCSV(
+  report: EnhancedBalanceSheetResponse,
+  baseCurrency: string,
+  hasComparison: boolean
+) {
+  const rows: string[] = [];
+  
+  rows.push(hasComparison 
+    ? `Balance Sheet Comparison,As of ${report.asOfDate},As of ${report.comparisonDate},Variance,Variance %`
+    : `Balance Sheet,As of ${report.asOfDate}`
+  );
+  rows.push('');
+
+  const processCategories = (categories: BalanceSheetCategory[], sectionName: string) => {
+    rows.push(sectionName);
+    categories.forEach((category) => {
+      if (hasComparison) {
+        rows.push(`"${category.category}","${baseCurrency} ${category.subtotal}","${baseCurrency} ${category.comparisonSubtotal || '0.00'}","${baseCurrency} ${category.variance || '0.00'}","${category.variancePercentage === 'Infinity' ? 'Infinity' : category.variancePercentage === '-Infinity' ? '-Infinity' : category.variancePercentage?.toFixed(1) || '0'}%"`);
+      } else {
+        rows.push(`"${category.category}","${baseCurrency} ${category.subtotal}"`);
+      }
+      
+      category.accounts.forEach((account) => {
+        if (hasComparison) {
+          rows.push(`"  ${account.accountName}","${baseCurrency} ${account.currentAmount}","${baseCurrency} ${account.comparisonAmount || '0.00'}","${baseCurrency} ${account.variance || '0.00'}","${account.variancePercentage === 'Infinity' ? 'Infinity' : account.variancePercentage === '-Infinity' ? '-Infinity' : account.variancePercentage?.toFixed(1) || '0'}%"`);
+        } else {
+          rows.push(`"  ${account.accountName}","${baseCurrency} ${account.currentAmount}"`);
+        }
+      });
+    });
+  };
+
+  processCategories(report.assetCategories, 'ASSETS');
+  if (hasComparison) {
+    rows.push(`"Total Assets","${baseCurrency} ${report.totalAssets}","${baseCurrency} ${report.comparisonTotalAssets || '0.00'}","${baseCurrency} ${report.assetVariance || '0.00'}","${report.assetVariancePercentage === 'Infinity' ? 'Infinity' : report.assetVariancePercentage === '-Infinity' ? '-Infinity' : report.assetVariancePercentage?.toFixed(1) || '0'}%"`);
+  } else {
+    rows.push(`"Total Assets","${baseCurrency} ${report.totalAssets}"`);
+  }
+  rows.push('');
+
+  processCategories(report.liabilityCategories, 'LIABILITIES');
+  if (hasComparison) {
+    rows.push(`"Total Liabilities","${baseCurrency} ${report.totalLiabilities}","${baseCurrency} ${report.comparisonTotalLiabilities || '0.00'}","${baseCurrency} ${report.liabilityVariance || '0.00'}","${report.liabilityVariancePercentage === 'Infinity' ? 'Infinity' : report.liabilityVariancePercentage === '-Infinity' ? '-Infinity' : report.liabilityVariancePercentage?.toFixed(1) || '0'}%"`);
+  } else {
+    rows.push(`"Total Liabilities","${baseCurrency} ${report.totalLiabilities}"`);
+  }
+  rows.push('');
+
+  processCategories(report.equityCategories, 'EQUITY');
+  if (hasComparison) {
+    rows.push(`"Total Equity","${baseCurrency} ${report.totalEquity}","${baseCurrency} ${report.comparisonTotalEquity || '0.00'}","${baseCurrency} ${report.equityVariance || '0.00'}","${report.equityVariancePercentage === 'Infinity' ? 'Infinity' : report.equityVariancePercentage === '-Infinity' ? '-Infinity' : report.equityVariancePercentage?.toFixed(1) || '0'}%"`);
+  } else {
+    rows.push(`"Total Equity","${baseCurrency} ${report.totalEquity}"`);
+  }
+
+  const csvContent = rows.join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `balance-sheet-${report.asOfDate}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 export default function FinancialReports() {
   const { currentTenant } = useTenant();
   const { toast } = useToast();
@@ -244,6 +401,8 @@ export default function FinancialReports() {
 
   // Date states for other reports
   const [bsAsOfDate, setBsAsOfDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [bsComparisonDate, setBsComparisonDate] = useState("");
+  const [bsShowComparison, setBsShowComparison] = useState(false);
   const [tbAsOfDate, setTbAsOfDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [cfStartDate, setCfStartDate] = useState(
     format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd")
@@ -295,8 +454,12 @@ export default function FinancialReports() {
   });
 
   // Balance Sheet Query
-  const { data: balanceSheetData, isLoading: bsLoading } = useQuery<BalanceSheetResponse>({
-    queryKey: ["/api/reports/balance-sheet", { tenantId: currentTenant?.id, asOfDate: bsAsOfDate }],
+  const { data: balanceSheetData, isLoading: bsLoading } = useQuery<EnhancedBalanceSheetResponse>({
+    queryKey: ["/api/reports/balance-sheet", { 
+      tenantId: currentTenant?.id, 
+      asOfDate: bsAsOfDate,
+      ...(bsShowComparison && bsComparisonDate ? { comparisonDate: bsComparisonDate } : {})
+    }],
     enabled: !!currentTenant?.id && fetchBS,
   });
 
@@ -1058,10 +1221,10 @@ export default function FinancialReports() {
           <Card>
             <CardHeader>
               <CardTitle>Balance Sheet</CardTitle>
-              <CardDescription>Financial position as of a specific date</CardDescription>
+              <CardDescription>Financial position as of a specific date with optional period comparison</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 md:grid-cols-3">
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">As of Date</label>
                   <input
@@ -1070,6 +1233,28 @@ export default function FinancialReports() {
                     onChange={(e) => setBsAsOfDate(e.target.value)}
                     className="w-full h-10 px-3 py-2 border rounded-md"
                     data-testid="input-bs-as-of-date"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <input
+                      type="checkbox"
+                      id="bs-show-comparison"
+                      checked={bsShowComparison}
+                      onChange={(e) => setBsShowComparison(e.target.checked)}
+                      data-testid="checkbox-bs-show-comparison"
+                    />
+                    <label htmlFor="bs-show-comparison" className="text-sm font-medium">
+                      Compare with
+                    </label>
+                  </div>
+                  <input
+                    type="date"
+                    value={bsComparisonDate}
+                    onChange={(e) => setBsComparisonDate(e.target.value)}
+                    disabled={!bsShowComparison}
+                    className="w-full h-10 px-3 py-2 border rounded-md disabled:opacity-50"
+                    data-testid="input-bs-comparison-date"
                   />
                 </div>
                 <div className="flex items-end">
@@ -1093,146 +1278,323 @@ export default function FinancialReports() {
 
           {balanceSheetData && !bsLoading && (
             <>
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => exportBalanceSheetCSV(balanceSheetData, baseCurrency?.code || "USD", bsShowComparison && !!bsComparisonDate)}
+                  data-testid="button-export-bs-csv"
+                >
+                  Export CSV
+                </Button>
+              </div>
+
               <Card>
                 <CardHeader>
-                  <CardTitle>Financial Position Overview</CardTitle>
+                  <CardTitle>Balance Sheet Detail</CardTitle>
+                  <CardDescription>As of {balanceSheetData.asOfDate}{bsShowComparison && balanceSheetData.comparisonDate ? ` vs ${balanceSheetData.comparisonDate}` : ''}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <Pie
-                        data={[
-                          { name: 'Assets', value: balanceSheetData.totalAssets },
-                          { name: 'Liabilities', value: balanceSheetData.totalLiabilities },
-                          { name: 'Equity', value: balanceSheetData.totalEquity },
-                        ]}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={(entry) => `${entry.name}: ${formatCurrency(entry.value, baseCurrency?.code || "USD", currencies)}`}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {[0, 1, 2].map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[40%]">Account</TableHead>
+                          <TableHead className="text-right">Current</TableHead>
+                          {bsShowComparison && balanceSheetData.comparisonDate && (
+                            <>
+                              <TableHead className="text-right">Previous</TableHead>
+                              <TableHead className="text-right">Variance</TableHead>
+                              <TableHead className="text-right">Variance %</TableHead>
+                            </>
+                          )}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        <TableRow className="bg-muted/30">
+                          <TableCell colSpan={bsShowComparison && balanceSheetData.comparisonDate ? 5 : 2} className="font-bold">
+                            ASSETS
+                          </TableCell>
+                        </TableRow>
+                        {balanceSheetData.assetCategories.map((category, catIdx) => (
+                          <>
+                            <TableRow key={`asset-cat-${catIdx}`} className="bg-muted/10">
+                              <TableCell className="font-semibold pl-4">{category.category}</TableCell>
+                              <TableCell className="text-right font-semibold font-mono">
+                                {formatCurrency(category.subtotal, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              {bsShowComparison && balanceSheetData.comparisonDate && (
+                                <>
+                                  <TableCell className="text-right font-semibold font-mono">
+                                    {formatCurrency(category.comparisonSubtotal || 0, baseCurrency?.code || "USD", currencies)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold font-mono">
+                                    {formatCurrency(category.variance || 0, baseCurrency?.code || "USD", currencies)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold">
+                                    {renderBSVariancePercentage(category.variancePercentage)}
+                                  </TableCell>
+                                </>
+                              )}
+                            </TableRow>
+                            {category.accounts.map((account, accIdx) => (
+                              <TableRow key={`asset-acc-${catIdx}-${accIdx}`} data-testid={`row-asset-${catIdx}-${accIdx}`}>
+                                <TableCell className="pl-8 text-sm">{account.accountName}</TableCell>
+                                <TableCell className="text-right font-mono text-sm">
+                                  {formatCurrency(account.currentAmount, baseCurrency?.code || "USD", currencies)}
+                                </TableCell>
+                                {bsShowComparison && balanceSheetData.comparisonDate && (
+                                  <>
+                                    <TableCell className="text-right font-mono text-sm">
+                                      {formatCurrency(account.comparisonAmount || 0, baseCurrency?.code || "USD", currencies)}
+                                    </TableCell>
+                                    <TableCell className="text-right font-mono text-sm">
+                                      {formatCurrency(account.variance || 0, baseCurrency?.code || "USD", currencies)}
+                                    </TableCell>
+                                    <TableCell className="text-right text-sm">
+                                      {renderBSVariancePercentage(account.variancePercentage)}
+                                    </TableCell>
+                                  </>
+                                )}
+                              </TableRow>
+                            ))}
+                          </>
                         ))}
-                      </Pie>
-                      <RechartsTooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
+                        <TableRow className="font-bold bg-muted/20">
+                          <TableCell>Total Assets</TableCell>
+                          <TableCell className="text-right font-mono" data-testid="cell-total-assets">
+                            {formatCurrency(balanceSheetData.totalAssets, baseCurrency?.code || "USD", currencies)}
+                          </TableCell>
+                          {bsShowComparison && balanceSheetData.comparisonDate && (
+                            <>
+                              <TableCell className="text-right font-mono">
+                                {formatCurrency(balanceSheetData.comparisonTotalAssets || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {formatCurrency(balanceSheetData.assetVariance || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {renderBSVariancePercentage(balanceSheetData.assetVariancePercentage)}
+                              </TableCell>
+                            </>
+                          )}
+                        </TableRow>
+
+                        <TableRow className="bg-muted/30">
+                          <TableCell colSpan={bsShowComparison && balanceSheetData.comparisonDate ? 5 : 2} className="font-bold pt-4">
+                            LIABILITIES
+                          </TableCell>
+                        </TableRow>
+                        {balanceSheetData.liabilityCategories.map((category, catIdx) => (
+                          <>
+                            <TableRow key={`liability-cat-${catIdx}`} className="bg-muted/10">
+                              <TableCell className="font-semibold pl-4">{category.category}</TableCell>
+                              <TableCell className="text-right font-semibold font-mono">
+                                {formatCurrency(category.subtotal, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              {bsShowComparison && balanceSheetData.comparisonDate && (
+                                <>
+                                  <TableCell className="text-right font-semibold font-mono">
+                                    {formatCurrency(category.comparisonSubtotal || 0, baseCurrency?.code || "USD", currencies)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold font-mono">
+                                    {formatCurrency(category.variance || 0, baseCurrency?.code || "USD", currencies)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold">
+                                    {renderBSVariancePercentage(category.variancePercentage)}
+                                  </TableCell>
+                                </>
+                              )}
+                            </TableRow>
+                            {category.accounts.map((account, accIdx) => (
+                              <TableRow key={`liability-acc-${catIdx}-${accIdx}`} data-testid={`row-liability-${catIdx}-${accIdx}`}>
+                                <TableCell className="pl-8 text-sm">{account.accountName}</TableCell>
+                                <TableCell className="text-right font-mono text-sm">
+                                  {formatCurrency(account.currentAmount, baseCurrency?.code || "USD", currencies)}
+                                </TableCell>
+                                {bsShowComparison && balanceSheetData.comparisonDate && (
+                                  <>
+                                    <TableCell className="text-right font-mono text-sm">
+                                      {formatCurrency(account.comparisonAmount || 0, baseCurrency?.code || "USD", currencies)}
+                                    </TableCell>
+                                    <TableCell className="text-right font-mono text-sm">
+                                      {formatCurrency(account.variance || 0, baseCurrency?.code || "USD", currencies)}
+                                    </TableCell>
+                                    <TableCell className="text-right text-sm">
+                                      {renderBSVariancePercentage(account.variancePercentage)}
+                                    </TableCell>
+                                  </>
+                                )}
+                              </TableRow>
+                            ))}
+                          </>
+                        ))}
+                        <TableRow className="font-bold bg-muted/20">
+                          <TableCell>Total Liabilities</TableCell>
+                          <TableCell className="text-right font-mono" data-testid="cell-total-liabilities">
+                            {formatCurrency(balanceSheetData.totalLiabilities, baseCurrency?.code || "USD", currencies)}
+                          </TableCell>
+                          {bsShowComparison && balanceSheetData.comparisonDate && (
+                            <>
+                              <TableCell className="text-right font-mono">
+                                {formatCurrency(balanceSheetData.comparisonTotalLiabilities || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {formatCurrency(balanceSheetData.liabilityVariance || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {renderBSVariancePercentage(balanceSheetData.liabilityVariancePercentage)}
+                              </TableCell>
+                            </>
+                          )}
+                        </TableRow>
+
+                        <TableRow className="bg-muted/30">
+                          <TableCell colSpan={bsShowComparison && balanceSheetData.comparisonDate ? 5 : 2} className="font-bold pt-4">
+                            EQUITY
+                          </TableCell>
+                        </TableRow>
+                        {balanceSheetData.equityCategories.map((category, catIdx) => (
+                          <>
+                            <TableRow key={`equity-cat-${catIdx}`} className="bg-muted/10">
+                              <TableCell className="font-semibold pl-4">{category.category}</TableCell>
+                              <TableCell className="text-right font-semibold font-mono">
+                                {formatCurrency(category.subtotal, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              {bsShowComparison && balanceSheetData.comparisonDate && (
+                                <>
+                                  <TableCell className="text-right font-semibold font-mono">
+                                    {formatCurrency(category.comparisonSubtotal || 0, baseCurrency?.code || "USD", currencies)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold font-mono">
+                                    {formatCurrency(category.variance || 0, baseCurrency?.code || "USD", currencies)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold">
+                                    {renderBSVariancePercentage(category.variancePercentage)}
+                                  </TableCell>
+                                </>
+                              )}
+                            </TableRow>
+                            {category.accounts.map((account, accIdx) => (
+                              <TableRow key={`equity-acc-${catIdx}-${accIdx}`} data-testid={`row-equity-${catIdx}-${accIdx}`}>
+                                <TableCell className="pl-8 text-sm">{account.accountName}</TableCell>
+                                <TableCell className="text-right font-mono text-sm">
+                                  {formatCurrency(account.currentAmount, baseCurrency?.code || "USD", currencies)}
+                                </TableCell>
+                                {bsShowComparison && balanceSheetData.comparisonDate && (
+                                  <>
+                                    <TableCell className="text-right font-mono text-sm">
+                                      {formatCurrency(account.comparisonAmount || 0, baseCurrency?.code || "USD", currencies)}
+                                    </TableCell>
+                                    <TableCell className="text-right font-mono text-sm">
+                                      {formatCurrency(account.variance || 0, baseCurrency?.code || "USD", currencies)}
+                                    </TableCell>
+                                    <TableCell className="text-right text-sm">
+                                      {renderBSVariancePercentage(account.variancePercentage)}
+                                    </TableCell>
+                                  </>
+                                )}
+                              </TableRow>
+                            ))}
+                          </>
+                        ))}
+                        <TableRow className="font-bold bg-muted/20">
+                          <TableCell>Total Equity</TableCell>
+                          <TableCell className="text-right font-mono" data-testid="cell-total-equity">
+                            {formatCurrency(balanceSheetData.totalEquity, baseCurrency?.code || "USD", currencies)}
+                          </TableCell>
+                          {bsShowComparison && balanceSheetData.comparisonDate && (
+                            <>
+                              <TableCell className="text-right font-mono">
+                                {formatCurrency(balanceSheetData.comparisonTotalEquity || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {formatCurrency(balanceSheetData.equityVariance || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {renderBSVariancePercentage(balanceSheetData.equityVariancePercentage)}
+                              </TableCell>
+                            </>
+                          )}
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
                 </CardContent>
               </Card>
 
-              <div className="grid gap-6 md:grid-cols-3">
+              <div className="grid gap-6 md:grid-cols-2">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Assets</CardTitle>
+                    <CardTitle>Financial Position Overview</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {balanceSheetData.assets.length === 0 ? (
-                      <p className="text-muted-foreground text-sm">No asset accounts</p>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Account</TableHead>
-                            <TableHead className="text-right">Amount</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {balanceSheetData.assets.map((item, idx) => (
-                            <TableRow key={idx} data-testid={`row-asset-${idx}`}>
-                              <TableCell className="text-sm">{item.accountName}</TableCell>
-                              <TableCell className="text-right font-mono text-sm">
-                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
-                              </TableCell>
-                            </TableRow>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: 'Assets', value: balanceSheetData.totalAssets },
+                            { name: 'Liabilities', value: balanceSheetData.totalLiabilities },
+                            { name: 'Equity', value: balanceSheetData.totalEquity },
+                          ]}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={(entry) => `${entry.name}: ${formatCurrency(entry.value, baseCurrency?.code || "USD", currencies)}`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {[0, 1, 2].map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
-                          <TableRow className="font-semibold bg-muted/50">
-                            <TableCell>Total Assets</TableCell>
-                            <TableCell className="text-right font-mono" data-testid="cell-total-assets">
-                              {formatCurrency(balanceSheetData.totalAssets, baseCurrency?.code || "USD", currencies)}
-                            </TableCell>
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    )}
+                        </Pie>
+                        <RechartsTooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Liabilities</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {balanceSheetData.liabilities.length === 0 ? (
-                      <p className="text-muted-foreground text-sm">No liability accounts</p>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Account</TableHead>
-                            <TableHead className="text-right">Amount</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {balanceSheetData.liabilities.map((item, idx) => (
-                            <TableRow key={idx} data-testid={`row-liability-${idx}`}>
-                              <TableCell className="text-sm">{item.accountName}</TableCell>
-                              <TableCell className="text-right font-mono text-sm">
-                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                          <TableRow className="font-semibold bg-muted/50">
-                            <TableCell>Total Liabilities</TableCell>
-                            <TableCell className="text-right font-mono" data-testid="cell-total-liabilities">
-                              {formatCurrency(balanceSheetData.totalLiabilities, baseCurrency?.code || "USD", currencies)}
-                            </TableCell>
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Equity</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {balanceSheetData.equity.length === 0 ? (
-                      <p className="text-muted-foreground text-sm">No equity accounts</p>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Account</TableHead>
-                            <TableHead className="text-right">Amount</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {balanceSheetData.equity.map((item, idx) => (
-                            <TableRow key={idx} data-testid={`row-equity-${idx}`}>
-                              <TableCell className="text-sm">{item.accountName}</TableCell>
-                              <TableCell className="text-right font-mono text-sm">
-                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                          <TableRow className="font-semibold bg-muted/50">
-                            <TableCell>Total Equity</TableCell>
-                            <TableCell className="text-right font-mono" data-testid="cell-total-equity">
-                              {formatCurrency(balanceSheetData.totalEquity, baseCurrency?.code || "USD", currencies)}
-                            </TableCell>
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    )}
-                  </CardContent>
-                </Card>
+                {bsShowComparison && balanceSheetData.comparisonDate && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Period Comparison</CardTitle>
+                      <CardDescription>Current vs Previous Period</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <ComposedChart
+                          data={[
+                            {
+                              category: 'Assets',
+                              current: balanceSheetData.totalAssets,
+                              previous: balanceSheetData.comparisonTotalAssets || 0
+                            },
+                            {
+                              category: 'Liabilities',
+                              current: balanceSheetData.totalLiabilities,
+                              previous: balanceSheetData.comparisonTotalLiabilities || 0
+                            },
+                            {
+                              category: 'Equity',
+                              current: balanceSheetData.totalEquity,
+                              previous: balanceSheetData.comparisonTotalEquity || 0
+                            }
+                          ]}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="category" />
+                          <YAxis />
+                          <RechartsTooltip />
+                          <Legend />
+                          <Bar dataKey="current" fill="hsl(var(--chart-1))" name="Current Period" />
+                          <Bar dataKey="previous" fill="hsl(var(--chart-2))" name="Previous Period" />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
 
               <Card>
@@ -1254,13 +1616,13 @@ export default function FinancialReports() {
                     <div className="flex justify-between items-center pt-2 border-t font-semibold">
                       <span>Balance:</span>
                       <span 
-                        className={Math.abs(balanceSheetData.totalAssets - (balanceSheetData.totalLiabilities + balanceSheetData.totalEquity)) < 0.01 
+                        className={balanceSheetData.isBalanced
                           ? 'text-green-600' 
                           : 'text-red-600'
                         }
                         data-testid="text-balance-check"
                       >
-                        {Math.abs(balanceSheetData.totalAssets - (balanceSheetData.totalLiabilities + balanceSheetData.totalEquity)) < 0.01 
+                        {balanceSheetData.isBalanced 
                           ? 'Balanced ✓' 
                           : 'Not Balanced ✗'
                         }
@@ -1281,6 +1643,7 @@ export default function FinancialReports() {
             </>
           )}
         </TabsContent>
+
 
         {/* Trial Balance Tab */}
         <TabsContent value="trial-balance" className="space-y-6" data-testid="content-trial-balance">

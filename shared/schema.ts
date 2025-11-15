@@ -2457,6 +2457,65 @@ export const balanceSheetReportSchema = z.object({
 
 export type BalanceSheetReport = z.infer<typeof balanceSheetReportSchema>;
 
+// Enhanced Balance Sheet Report with hierarchical breakdown and period comparison
+export const balanceSheetAccountLineSchema = z.object({
+  accountId: z.string(),
+  accountCode: z.string(),
+  accountName: z.string(),
+  accountCategory: z.string(),
+  currentAmount: z.string(),
+  comparisonAmount: z.string().optional(),
+  variance: z.string().optional(),
+  variancePercentage: z.union([z.number(), z.literal("Infinity"), z.literal("-Infinity")]).optional(),
+});
+
+export type BalanceSheetAccountLine = z.infer<typeof balanceSheetAccountLineSchema>;
+
+export const balanceSheetCategorySchema = z.object({
+  category: z.string(),
+  accounts: z.array(balanceSheetAccountLineSchema),
+  subtotal: z.string(),
+  comparisonSubtotal: z.string().optional(),
+  variance: z.string().optional(),
+  variancePercentage: z.union([z.number(), z.literal("Infinity"), z.literal("-Infinity")]).optional(),
+});
+
+export type BalanceSheetCategory = z.infer<typeof balanceSheetCategorySchema>;
+
+export const enhancedBalanceSheetReportSchema = z.object({
+  tenantId: z.string(),
+  asOfDate: z.date(),
+  comparisonDate: z.date().optional(),
+  
+  // Hierarchical structure
+  assetCategories: z.array(balanceSheetCategorySchema),
+  liabilityCategories: z.array(balanceSheetCategorySchema),
+  equityCategories: z.array(balanceSheetCategorySchema),
+  
+  // Totals
+  totalAssets: z.string(),
+  totalLiabilities: z.string(),
+  totalEquity: z.string(),
+  
+  // Comparison totals (if comparison date provided)
+  comparisonTotalAssets: z.string().optional(),
+  comparisonTotalLiabilities: z.string().optional(),
+  comparisonTotalEquity: z.string().optional(),
+  
+  // Variance
+  assetVariance: z.string().optional(),
+  assetVariancePercentage: z.union([z.number(), z.literal("Infinity"), z.literal("-Infinity")]).optional(),
+  liabilityVariance: z.string().optional(),
+  liabilityVariancePercentage: z.union([z.number(), z.literal("Infinity"), z.literal("-Infinity")]).optional(),
+  equityVariance: z.string().optional(),
+  equityVariancePercentage: z.union([z.number(), z.literal("Infinity"), z.literal("-Infinity")]).optional(),
+  
+  isBalanced: z.boolean(),
+  comparisonIsBalanced: z.boolean().optional(),
+});
+
+export type EnhancedBalanceSheetReport = z.infer<typeof enhancedBalanceSheetReportSchema>;
+
 // Trial Balance Report (All accounts with debit/credit balances)
 export const trialBalanceAccountLineSchema = z.object({
   accountId: z.string(),
