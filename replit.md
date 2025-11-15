@@ -50,6 +50,17 @@ The application uses a multi-tenant architecture with a "verified-tenant pattern
   - **Workflow Form:** Dynamic approval step configuration with role/user selection, amount thresholds, and validation.
   - **Account Balance Views:** Historical balance timeline with charts, transaction history with pagination, date range filtering.
   - **Cache Architecture:** Tenant-scoped query keys pattern `["/api/resource", { tenantId }]` prevents cross-tenant data leakage. GlobalTenantEvents component centralizes tenant-switch cache hygiene.
+- **Enhanced Financial Reporting & Analytics (Phase 2 - COMPLETED):**
+  - **Phase 2.1 - Chart of Accounts Report:** Interactive report with drill-down to transactions, account balance history, and CSV export.
+  - **Phase 2.2 - P&L Statement:** Comparative Profit & Loss with period comparison, variance analysis (amount and percentage), side-by-side bar charts, expense breakdown pie charts, and CSV/Excel export.
+  - **Phase 2.3 - Balance Sheet:** Enhanced Balance Sheet with hierarchical asset/liability/equity breakdown, period comparison, variance metrics, stacked bar charts, and CSV/Excel export.
+  - **Phase 2.4 - Cash Flow Statement:** Indirect Method per IAS 7 with operating/investing/financing activities, working capital adjustments, period comparison, variance analysis, and CSV/Excel export.
+  - **Phase 2.7 - Export Functionality:** Comprehensive CSV and Excel export for all financial reports (P&L, Balance Sheet, Cash Flow, Trial Balance) with professional formatting, numeric values for Excel formulas, and proper handling of comparison periods.
+- **IFRS Compliance (Phase 2 Enhancements):**
+  - **IAS 1 (Presentation of Financial Statements):** P&L and Balance Sheet meet all minimum line items, expense classification, current/non-current classification, and comparative period requirements. Comprehensive compliance documentation in codebase.
+  - **IAS 7 (Statement of Cash Flows):** Cash Flow Statement using Indirect Method with proper classification of activities and comparative information.
+  - **IAS 21 (Foreign Currency Translation):** FX disclosure components in all financial reports showing IFRS compliance standard, translation method, and presentation currency.
+  - **Comparative Period Support:** All major reports (P&L, Balance Sheet, Cash Flow) support at least one comparative period with side-by-side presentation and variance analysis as required by IAS 1.38.
 
 ## External Dependencies
 - **OpenAI GPT-5:** For AI-powered document data extraction and categorization.
