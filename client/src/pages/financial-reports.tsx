@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Calendar as CalendarIcon, TrendingUp, DollarSign, FileBarChart, Activity, Download, ChevronDown, ChevronRight, ArrowUp, ArrowDown } from "lucide-react";
+import { Calendar as CalendarIcon, TrendingUp, DollarSign, FileBarChart, Activity, Download, ChevronDown, ChevronRight, ArrowUp, ArrowDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import {
   comparisonModeOptions,
   getPeriodComparison
 } from "@/lib/date-range-presets";
+import { downloadCSV, downloadExcel, formatPercentage } from "@/lib/reportExports";
 import {
   BarChart,
   Bar,
@@ -358,18 +359,25 @@ function exportBalanceSheetCSV(
   );
   rows.push('');
 
+  const formatVariancePercentage = (vp?: number | "Infinity" | "-Infinity") => {
+    if (vp === undefined || vp === null) return "";
+    if (vp === "Infinity") return "Infinity";
+    if (vp === "-Infinity") return "-Infinity";
+    return vp.toFixed(1) + "%";
+  };
+
   const processCategories = (categories: BalanceSheetCategory[], sectionName: string) => {
     rows.push(sectionName);
     categories.forEach((category) => {
       if (hasComparison) {
-        rows.push(`"${category.category}","${baseCurrency} ${category.subtotal}","${baseCurrency} ${category.comparisonSubtotal || '0.00'}","${baseCurrency} ${category.variance || '0.00'}","${category.variancePercentage === 'Infinity' ? 'Infinity' : category.variancePercentage === '-Infinity' ? '-Infinity' : category.variancePercentage?.toFixed(1) || '0'}%"`);
+        rows.push(`"${category.category}","${baseCurrency} ${category.subtotal}","${baseCurrency} ${category.comparisonSubtotal || '0.00'}","${baseCurrency} ${category.variance || '0.00'}","${formatVariancePercentage(category.variancePercentage)}"`);
       } else {
         rows.push(`"${category.category}","${baseCurrency} ${category.subtotal}"`);
       }
       
       category.accounts.forEach((account) => {
         if (hasComparison) {
-          rows.push(`"  ${account.accountName}","${baseCurrency} ${account.currentAmount}","${baseCurrency} ${account.comparisonAmount || '0.00'}","${baseCurrency} ${account.variance || '0.00'}","${account.variancePercentage === 'Infinity' ? 'Infinity' : account.variancePercentage === '-Infinity' ? '-Infinity' : account.variancePercentage?.toFixed(1) || '0'}%"`);
+          rows.push(`"  ${account.accountName}","${baseCurrency} ${account.currentAmount}","${baseCurrency} ${account.comparisonAmount || '0.00'}","${baseCurrency} ${account.variance || '0.00'}","${formatVariancePercentage(account.variancePercentage)}"`);
         } else {
           rows.push(`"  ${account.accountName}","${baseCurrency} ${account.currentAmount}"`);
         }
@@ -379,7 +387,7 @@ function exportBalanceSheetCSV(
 
   processCategories(report.assetCategories, 'ASSETS');
   if (hasComparison) {
-    rows.push(`"Total Assets","${baseCurrency} ${report.totalAssets}","${baseCurrency} ${report.comparisonTotalAssets || '0.00'}","${baseCurrency} ${report.assetVariance || '0.00'}","${report.assetVariancePercentage === 'Infinity' ? 'Infinity' : report.assetVariancePercentage === '-Infinity' ? '-Infinity' : report.assetVariancePercentage?.toFixed(1) || '0'}%"`);
+    rows.push(`"Total Assets","${baseCurrency} ${report.totalAssets}","${baseCurrency} ${report.comparisonTotalAssets || '0.00'}","${baseCurrency} ${report.assetVariance || '0.00'}","${formatVariancePercentage(report.assetVariancePercentage)}"`);
   } else {
     rows.push(`"Total Assets","${baseCurrency} ${report.totalAssets}"`);
   }
@@ -387,7 +395,7 @@ function exportBalanceSheetCSV(
 
   processCategories(report.liabilityCategories, 'LIABILITIES');
   if (hasComparison) {
-    rows.push(`"Total Liabilities","${baseCurrency} ${report.totalLiabilities}","${baseCurrency} ${report.comparisonTotalLiabilities || '0.00'}","${baseCurrency} ${report.liabilityVariance || '0.00'}","${report.liabilityVariancePercentage === 'Infinity' ? 'Infinity' : report.liabilityVariancePercentage === '-Infinity' ? '-Infinity' : report.liabilityVariancePercentage?.toFixed(1) || '0'}%"`);
+    rows.push(`"Total Liabilities","${baseCurrency} ${report.totalLiabilities}","${baseCurrency} ${report.comparisonTotalLiabilities || '0.00'}","${baseCurrency} ${report.liabilityVariance || '0.00'}","${formatVariancePercentage(report.liabilityVariancePercentage)}"`);
   } else {
     rows.push(`"Total Liabilities","${baseCurrency} ${report.totalLiabilities}"`);
   }
@@ -395,21 +403,360 @@ function exportBalanceSheetCSV(
 
   processCategories(report.equityCategories, 'EQUITY');
   if (hasComparison) {
-    rows.push(`"Total Equity","${baseCurrency} ${report.totalEquity}","${baseCurrency} ${report.comparisonTotalEquity || '0.00'}","${baseCurrency} ${report.equityVariance || '0.00'}","${report.equityVariancePercentage === 'Infinity' ? 'Infinity' : report.equityVariancePercentage === '-Infinity' ? '-Infinity' : report.equityVariancePercentage?.toFixed(1) || '0'}%"`);
+    rows.push(`"Total Equity","${baseCurrency} ${report.totalEquity}","${baseCurrency} ${report.comparisonTotalEquity || '0.00'}","${baseCurrency} ${report.equityVariance || '0.00'}","${formatVariancePercentage(report.equityVariancePercentage)}"`);
   } else {
     rows.push(`"Total Equity","${baseCurrency} ${report.totalEquity}"`);
   }
 
   const csvContent = rows.join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
-  link.setAttribute('href', url);
-  link.setAttribute('download', `balance-sheet-${report.asOfDate}.csv`);
-  link.style.visibility = 'hidden';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  downloadCSV(csvContent, `balance-sheet-${report.asOfDate}.csv`);
+}
+
+function exportCashFlowCSV(
+  report: EnhancedCashFlowReport,
+  baseCurrency: string,
+  hasComparison: boolean
+) {
+  const rows: string[] = [];
+  
+  if (hasComparison && report.comparisonData) {
+    rows.push(`Cash Flow Statement,${report.startDate} to ${report.endDate},Comparison: ${report.comparisonStartDate} to ${report.comparisonEndDate},Variance`);
+  } else {
+    rows.push(`Cash Flow Statement,${report.startDate} to ${report.endDate}`);
+  }
+  rows.push('');
+  
+  rows.push('OPERATING ACTIVITIES');
+  report.operating.forEach(activity => {
+    if (hasComparison && report.comparisonData) {
+      const compActivity = report.comparisonData.operating.find(a => a.activity === activity.activity);
+      const variance = activity.amount - (compActivity?.amount || 0);
+      rows.push(`"${activity.activity}","${baseCurrency} ${activity.amount.toFixed(2)}","${baseCurrency} ${(compActivity?.amount || 0).toFixed(2)}","${baseCurrency} ${variance.toFixed(2)}"`);
+    } else {
+      rows.push(`"${activity.activity}","${baseCurrency} ${activity.amount.toFixed(2)}"`);
+    }
+  });
+  if (hasComparison && report.comparisonData) {
+    rows.push(`"Net Cash from Operating","${baseCurrency} ${report.netOperating.toFixed(2)}","${baseCurrency} ${report.comparisonData.netOperating.toFixed(2)}","${baseCurrency} ${(report.operatingVariance || 0).toFixed(2)}"`);
+  } else {
+    rows.push(`"Net Cash from Operating","${baseCurrency} ${report.netOperating.toFixed(2)}"`);
+  }
+  rows.push('');
+  
+  rows.push('INVESTING ACTIVITIES');
+  report.investing.forEach(activity => {
+    if (hasComparison && report.comparisonData) {
+      const compActivity = report.comparisonData.investing.find(a => a.activity === activity.activity);
+      const variance = activity.amount - (compActivity?.amount || 0);
+      rows.push(`"${activity.activity}","${baseCurrency} ${activity.amount.toFixed(2)}","${baseCurrency} ${(compActivity?.amount || 0).toFixed(2)}","${baseCurrency} ${variance.toFixed(2)}"`);
+    } else {
+      rows.push(`"${activity.activity}","${baseCurrency} ${activity.amount.toFixed(2)}"`);
+    }
+  });
+  if (hasComparison && report.comparisonData) {
+    rows.push(`"Net Cash from Investing","${baseCurrency} ${report.netInvesting.toFixed(2)}","${baseCurrency} ${report.comparisonData.netInvesting.toFixed(2)}","${baseCurrency} ${(report.investingVariance || 0).toFixed(2)}"`);
+  } else {
+    rows.push(`"Net Cash from Investing","${baseCurrency} ${report.netInvesting.toFixed(2)}"`);
+  }
+  rows.push('');
+  
+  rows.push('FINANCING ACTIVITIES');
+  report.financing.forEach(activity => {
+    if (hasComparison && report.comparisonData) {
+      const compActivity = report.comparisonData.financing.find(a => a.activity === activity.activity);
+      const variance = activity.amount - (compActivity?.amount || 0);
+      rows.push(`"${activity.activity}","${baseCurrency} ${activity.amount.toFixed(2)}","${baseCurrency} ${(compActivity?.amount || 0).toFixed(2)}","${baseCurrency} ${variance.toFixed(2)}"`);
+    } else {
+      rows.push(`"${activity.activity}","${baseCurrency} ${activity.amount.toFixed(2)}"`);
+    }
+  });
+  if (hasComparison && report.comparisonData) {
+    rows.push(`"Net Cash from Financing","${baseCurrency} ${report.netFinancing.toFixed(2)}","${baseCurrency} ${report.comparisonData.netFinancing.toFixed(2)}","${baseCurrency} ${(report.financingVariance || 0).toFixed(2)}"`);
+  } else {
+    rows.push(`"Net Cash from Financing","${baseCurrency} ${report.netFinancing.toFixed(2)}"`);
+  }
+  rows.push('');
+  
+  if (hasComparison && report.comparisonData) {
+    rows.push(`"NET CHANGE IN CASH","${baseCurrency} ${report.netCashFlow.toFixed(2)}","${baseCurrency} ${report.comparisonData.netCashFlow.toFixed(2)}","${baseCurrency} ${(report.netVariance || 0).toFixed(2)}"`);
+  } else {
+    rows.push(`"NET CHANGE IN CASH","${baseCurrency} ${report.netCashFlow.toFixed(2)}"`);
+  }
+  
+  downloadCSV(rows.join('\n'), `cash-flow-${report.startDate}-${report.endDate}.csv`);
+}
+
+function exportTrialBalanceCSV(
+  report: TrialBalanceReport,
+  baseCurrency: string,
+  asOfDate: string
+) {
+  const rows: string[] = [];
+  
+  rows.push(`Trial Balance,As of ${asOfDate}`);
+  rows.push('');
+  rows.push('Account Code,Account Name,Debit,Credit');
+  
+  report.accounts.forEach(account => {
+    rows.push(`"${account.accountCode}","${account.accountName}","${baseCurrency} ${account.debit.toFixed(2)}","${baseCurrency} ${account.credit.toFixed(2)}"`);
+  });
+  
+  rows.push('');
+  rows.push(`"Total","","${baseCurrency} ${report.totalDebits.toFixed(2)}","${baseCurrency} ${report.totalCredits.toFixed(2)}"`);
+  rows.push(`"Balanced","${report.isBalanced ? 'Yes' : 'No'}"`);
+  
+  downloadCSV(rows.join('\n'), `trial-balance-${asOfDate}.csv`);
+}
+
+function exportPLComparisonExcel(
+  report: ProfitLossComparisonResponse,
+  baseCurrency: string
+) {
+  const data: any[][] = [];
+  
+  data.push(['Profit & Loss Comparison', '', '', '', `Currency: ${baseCurrency}`]);
+  data.push([`Current Period: ${new Date(report.current.startDate).toLocaleDateString()} to ${new Date(report.current.endDate).toLocaleDateString()}`]);
+  data.push([`Previous Period: ${new Date(report.previous.startDate).toLocaleDateString()} to ${new Date(report.previous.endDate).toLocaleDateString()}`]);
+  data.push([]);
+  data.push(['Account', 'Current Period', 'Previous Period', '$ Variance', '% Variance']);
+  
+  data.push(['REVENUE']);
+  report.current.revenue.forEach(acc => {
+    data.push([
+      acc.accountName,
+      parseFloat(acc.currentAmount.toFixed(2)),
+      parseFloat(acc.previousAmount.toFixed(2)),
+      parseFloat(acc.variance.toFixed(2)),
+      formatPercentage(acc.percentageChange)
+    ]);
+  });
+  data.push([
+    'Total Revenue',
+    parseFloat(report.current.totalRevenue.toFixed(2)),
+    parseFloat(report.previous.totalRevenue.toFixed(2)),
+    parseFloat(report.variances.revenue.amount.toFixed(2)),
+    formatPercentage(report.variances.revenue.percentage)
+  ]);
+  
+  data.push([]);
+  data.push(['EXPENSES']);
+  report.current.expenses.forEach(acc => {
+    data.push([
+      acc.accountName,
+      parseFloat(acc.currentAmount.toFixed(2)),
+      parseFloat(acc.previousAmount.toFixed(2)),
+      parseFloat(acc.variance.toFixed(2)),
+      formatPercentage(acc.percentageChange)
+    ]);
+  });
+  data.push([
+    'Total Expenses',
+    parseFloat(report.current.totalExpenses.toFixed(2)),
+    parseFloat(report.previous.totalExpenses.toFixed(2)),
+    parseFloat(report.variances.expenses.amount.toFixed(2)),
+    formatPercentage(report.variances.expenses.percentage)
+  ]);
+  
+  data.push([]);
+  data.push([
+    'NET PROFIT',
+    parseFloat(report.current.netProfit.toFixed(2)),
+    parseFloat(report.previous.netProfit.toFixed(2)),
+    parseFloat(report.variances.netProfit.amount.toFixed(2)),
+    formatPercentage(report.variances.netProfit.percentage)
+  ]);
+  
+  downloadExcel(data, `PL-Comparison-${format(new Date(), 'yyyy-MM-dd')}.xlsx`, 'P&L Comparison');
+}
+
+function exportBalanceSheetExcel(
+  report: EnhancedBalanceSheetResponse,
+  baseCurrency: string,
+  hasComparison: boolean
+) {
+  const data: any[][] = [];
+  
+  if (hasComparison) {
+    data.push(['Balance Sheet Comparison', `As of ${report.asOfDate}`, `As of ${report.comparisonDate}`, 'Variance', 'Variance %', `Currency: ${baseCurrency}`]);
+  } else {
+    data.push(['Balance Sheet', `As of ${report.asOfDate}`, '', '', `Currency: ${baseCurrency}`]);
+  }
+  data.push([]);
+  
+  const processCategories = (categories: BalanceSheetCategory[], sectionName: string) => {
+    data.push([sectionName]);
+    categories.forEach((category) => {
+      if (hasComparison) {
+        data.push([
+          category.category,
+          parseFloat(category.subtotal),
+          parseFloat(category.comparisonSubtotal || '0'),
+          parseFloat(category.variance || '0'),
+          formatPercentage(category.variancePercentage)
+        ]);
+      } else {
+        data.push([category.category, parseFloat(category.subtotal)]);
+      }
+      
+      category.accounts.forEach((account) => {
+        if (hasComparison) {
+          data.push([
+            `  ${account.accountName}`,
+            parseFloat(account.currentAmount),
+            parseFloat(account.comparisonAmount || '0'),
+            parseFloat(account.variance || '0'),
+            formatPercentage(account.variancePercentage)
+          ]);
+        } else {
+          data.push([`  ${account.accountName}`, parseFloat(account.currentAmount)]);
+        }
+      });
+    });
+  };
+  
+  processCategories(report.assetCategories, 'ASSETS');
+  if (hasComparison) {
+    data.push([
+      'Total Assets',
+      parseFloat(report.totalAssets),
+      parseFloat(report.comparisonTotalAssets || '0'),
+      parseFloat(report.assetVariance || '0'),
+      formatPercentage(report.assetVariancePercentage)
+    ]);
+  } else {
+    data.push(['Total Assets', parseFloat(report.totalAssets)]);
+  }
+  data.push([]);
+  
+  processCategories(report.liabilityCategories, 'LIABILITIES');
+  if (hasComparison) {
+    data.push([
+      'Total Liabilities',
+      parseFloat(report.totalLiabilities),
+      parseFloat(report.comparisonTotalLiabilities || '0'),
+      parseFloat(report.liabilityVariance || '0'),
+      formatPercentage(report.liabilityVariancePercentage)
+    ]);
+  } else {
+    data.push(['Total Liabilities', parseFloat(report.totalLiabilities)]);
+  }
+  data.push([]);
+  
+  processCategories(report.equityCategories, 'EQUITY');
+  if (hasComparison) {
+    data.push([
+      'Total Equity',
+      parseFloat(report.totalEquity),
+      parseFloat(report.comparisonTotalEquity || '0'),
+      parseFloat(report.equityVariance || '0'),
+      formatPercentage(report.equityVariancePercentage)
+    ]);
+  } else {
+    data.push(['Total Equity', parseFloat(report.totalEquity)]);
+  }
+  
+  downloadExcel(data, `balance-sheet-${report.asOfDate}.xlsx`, 'Balance Sheet');
+}
+
+function exportCashFlowExcel(
+  report: EnhancedCashFlowReport,
+  baseCurrency: string,
+  hasComparison: boolean
+) {
+  const data: any[][] = [];
+  
+  if (hasComparison && report.comparisonData) {
+    data.push(['Cash Flow Statement', `${report.startDate} to ${report.endDate}`, `Comparison: ${report.comparisonStartDate} to ${report.comparisonEndDate}`, 'Variance', `Currency: ${baseCurrency}`]);
+  } else {
+    data.push(['Cash Flow Statement', `${report.startDate} to ${report.endDate}`, '', '', `Currency: ${baseCurrency}`]);
+  }
+  data.push([]);
+  
+  data.push(['OPERATING ACTIVITIES']);
+  report.operating.forEach(activity => {
+    if (hasComparison && report.comparisonData) {
+      const compActivity = report.comparisonData.operating.find(a => a.activity === activity.activity);
+      const variance = activity.amount - (compActivity?.amount || 0);
+      data.push([activity.activity, parseFloat(activity.amount.toFixed(2)), parseFloat((compActivity?.amount || 0).toFixed(2)), parseFloat(variance.toFixed(2))]);
+    } else {
+      data.push([activity.activity, parseFloat(activity.amount.toFixed(2))]);
+    }
+  });
+  if (hasComparison && report.comparisonData) {
+    data.push(['Net Cash from Operating', parseFloat(report.netOperating.toFixed(2)), parseFloat(report.comparisonData.netOperating.toFixed(2)), parseFloat((report.operatingVariance || 0).toFixed(2))]);
+  } else {
+    data.push(['Net Cash from Operating', parseFloat(report.netOperating.toFixed(2))]);
+  }
+  data.push([]);
+  
+  data.push(['INVESTING ACTIVITIES']);
+  report.investing.forEach(activity => {
+    if (hasComparison && report.comparisonData) {
+      const compActivity = report.comparisonData.investing.find(a => a.activity === activity.activity);
+      const variance = activity.amount - (compActivity?.amount || 0);
+      data.push([activity.activity, parseFloat(activity.amount.toFixed(2)), parseFloat((compActivity?.amount || 0).toFixed(2)), parseFloat(variance.toFixed(2))]);
+    } else {
+      data.push([activity.activity, parseFloat(activity.amount.toFixed(2))]);
+    }
+  });
+  if (hasComparison && report.comparisonData) {
+    data.push(['Net Cash from Investing', parseFloat(report.netInvesting.toFixed(2)), parseFloat(report.comparisonData.netInvesting.toFixed(2)), parseFloat((report.investingVariance || 0).toFixed(2))]);
+  } else {
+    data.push(['Net Cash from Investing', parseFloat(report.netInvesting.toFixed(2))]);
+  }
+  data.push([]);
+  
+  data.push(['FINANCING ACTIVITIES']);
+  report.financing.forEach(activity => {
+    if (hasComparison && report.comparisonData) {
+      const compActivity = report.comparisonData.financing.find(a => a.activity === activity.activity);
+      const variance = activity.amount - (compActivity?.amount || 0);
+      data.push([activity.activity, parseFloat(activity.amount.toFixed(2)), parseFloat((compActivity?.amount || 0).toFixed(2)), parseFloat(variance.toFixed(2))]);
+    } else {
+      data.push([activity.activity, parseFloat(activity.amount.toFixed(2))]);
+    }
+  });
+  if (hasComparison && report.comparisonData) {
+    data.push(['Net Cash from Financing', parseFloat(report.netFinancing.toFixed(2)), parseFloat(report.comparisonData.netFinancing.toFixed(2)), parseFloat((report.financingVariance || 0).toFixed(2))]);
+  } else {
+    data.push(['Net Cash from Financing', parseFloat(report.netFinancing.toFixed(2))]);
+  }
+  data.push([]);
+  
+  if (hasComparison && report.comparisonData) {
+    data.push(['NET CHANGE IN CASH', parseFloat(report.netCashFlow.toFixed(2)), parseFloat(report.comparisonData.netCashFlow.toFixed(2)), parseFloat((report.netVariance || 0).toFixed(2))]);
+  } else {
+    data.push(['NET CHANGE IN CASH', parseFloat(report.netCashFlow.toFixed(2))]);
+  }
+  
+  downloadExcel(data, `cash-flow-${report.startDate}-${report.endDate}.xlsx`, 'Cash Flow');
+}
+
+function exportTrialBalanceExcel(
+  report: TrialBalanceReport,
+  baseCurrency: string,
+  asOfDate: string
+) {
+  const data: any[][] = [];
+  
+  data.push(['Trial Balance', `As of ${asOfDate}`, '', `Currency: ${baseCurrency}`]);
+  data.push([]);
+  data.push(['Account Code', 'Account Name', 'Debit', 'Credit']);
+  
+  report.accounts.forEach(account => {
+    data.push([
+      account.accountCode,
+      account.accountName,
+      parseFloat(account.debit.toFixed(2)),
+      parseFloat(account.credit.toFixed(2))
+    ]);
+  });
+  
+  data.push([]);
+  data.push(['Total', '', parseFloat(report.totalDebits.toFixed(2)), parseFloat(report.totalCredits.toFixed(2))]);
+  data.push(['Balanced', report.isBalanced ? 'Yes' : 'No']);
+  
+  downloadExcel(data, `trial-balance-${asOfDate}.xlsx`, 'Trial Balance');
 }
 
 export default function FinancialReports() {
@@ -570,101 +917,67 @@ export default function FinancialReports() {
                   <CardDescription>Period-over-period comparison with variance analysis</CardDescription>
                 </div>
                 {plComparisonData && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const headers = ["Account", "Current Period", "Previous Period", "$ Variance", "% Variance"];
-                      const rows: string[][] = [];
-                      
-                      rows.push(["REVENUE", "", "", "", ""]);
-                      plComparisonData.current.revenue.forEach(acc => {
-                        let percentageText: string;
-                        if (acc.percentageChange === "Infinity") {
-                          percentageText = "Infinity";
-                        } else if (acc.percentageChange === "-Infinity") {
-                          percentageText = "-Infinity";
-                        } else if (typeof acc.percentageChange === "number") {
-                          percentageText = acc.percentageChange.toFixed(1) + "%";
-                        } else {
-                          percentageText = "N/A";
-                        }
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const formatPct = (value: number | "Infinity" | "-Infinity") => {
+                          if (value === "Infinity") return "Infinity";
+                          if (value === "-Infinity") return "-Infinity";
+                          if (typeof value === "number") return value.toFixed(1) + "%";
+                          return "";
+                        };
                         
-                        rows.push([
-                          acc.accountName,
-                          acc.currentAmount.toString(),
-                          acc.previousAmount.toString(),
-                          acc.variance.toString(),
-                          percentageText
-                        ]);
-                      });
-                      
-                      const revenuePercentageText = plComparisonData.variances.revenue.percentage === "Infinity" 
-                        ? "Infinity" 
-                        : plComparisonData.variances.revenue.percentage === "-Infinity"
-                        ? "-Infinity"
-                        : typeof plComparisonData.variances.revenue.percentage === "number"
-                        ? plComparisonData.variances.revenue.percentage.toFixed(1) + "%"
-                        : "N/A";
-                      rows.push(["Total Revenue", plComparisonData.current.totalRevenue.toString(), plComparisonData.previous.totalRevenue.toString(), plComparisonData.variances.revenue.amount.toString(), revenuePercentageText]);
-                      
-                      rows.push(["", "", "", "", ""]);
-                      rows.push(["EXPENSES", "", "", "", ""]);
-                      plComparisonData.current.expenses.forEach(acc => {
-                        let percentageText: string;
-                        if (acc.percentageChange === "Infinity") {
-                          percentageText = "Infinity";
-                        } else if (acc.percentageChange === "-Infinity") {
-                          percentageText = "-Infinity";
-                        } else if (typeof acc.percentageChange === "number") {
-                          percentageText = acc.percentageChange.toFixed(1) + "%";
-                        } else {
-                          percentageText = "N/A";
-                        }
+                        const headers = ["Account", "Current Period", "Previous Period", "$ Variance", "% Variance"];
+                        const rows: string[][] = [];
                         
-                        rows.push([
-                          acc.accountName,
-                          acc.currentAmount.toString(),
-                          acc.previousAmount.toString(),
-                          acc.variance.toString(),
-                          percentageText
-                        ]);
-                      });
-                      
-                      const expensesPercentageText = plComparisonData.variances.expenses.percentage === "Infinity"
-                        ? "Infinity"
-                        : plComparisonData.variances.expenses.percentage === "-Infinity"
-                        ? "-Infinity"
-                        : typeof plComparisonData.variances.expenses.percentage === "number"
-                        ? plComparisonData.variances.expenses.percentage.toFixed(1) + "%"
-                        : "N/A";
-                      rows.push(["Total Expenses", plComparisonData.current.totalExpenses.toString(), plComparisonData.previous.totalExpenses.toString(), plComparisonData.variances.expenses.amount.toString(), expensesPercentageText]);
-                      
-                      rows.push(["", "", "", "", ""]);
-                      
-                      const netProfitPercentageText = plComparisonData.variances.netProfit.percentage === "Infinity"
-                        ? "Infinity"
-                        : plComparisonData.variances.netProfit.percentage === "-Infinity"
-                        ? "-Infinity"
-                        : typeof plComparisonData.variances.netProfit.percentage === "number"
-                        ? plComparisonData.variances.netProfit.percentage.toFixed(1) + "%"
-                        : "N/A";
-                      rows.push(["NET PROFIT", plComparisonData.current.netProfit.toString(), plComparisonData.previous.netProfit.toString(), plComparisonData.variances.netProfit.amount.toString(), netProfitPercentageText]);
-                      
-                      const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-                      const blob = new Blob([csv], { type: "text/csv" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = `PL-Comparison-${format(new Date(), "yyyy-MM-dd")}.csv`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    }}
-                    data-testid="button-export-csv"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Export CSV
-                  </Button>
+                        rows.push(["REVENUE", "", "", "", ""]);
+                        plComparisonData.current.revenue.forEach(acc => {
+                          rows.push([
+                            acc.accountName,
+                            acc.currentAmount.toString(),
+                            acc.previousAmount.toString(),
+                            acc.variance.toString(),
+                            formatPct(acc.percentageChange)
+                          ]);
+                        });
+                        rows.push(["Total Revenue", plComparisonData.current.totalRevenue.toString(), plComparisonData.previous.totalRevenue.toString(), plComparisonData.variances.revenue.amount.toString(), formatPct(plComparisonData.variances.revenue.percentage)]);
+                        
+                        rows.push(["", "", "", "", ""]);
+                        rows.push(["EXPENSES", "", "", "", ""]);
+                        plComparisonData.current.expenses.forEach(acc => {
+                          rows.push([
+                            acc.accountName,
+                            acc.currentAmount.toString(),
+                            acc.previousAmount.toString(),
+                            acc.variance.toString(),
+                            formatPct(acc.percentageChange)
+                          ]);
+                        });
+                        rows.push(["Total Expenses", plComparisonData.current.totalExpenses.toString(), plComparisonData.previous.totalExpenses.toString(), plComparisonData.variances.expenses.amount.toString(), formatPct(plComparisonData.variances.expenses.percentage)]);
+                        
+                        rows.push(["", "", "", "", ""]);
+                        rows.push(["NET PROFIT", plComparisonData.current.netProfit.toString(), plComparisonData.previous.netProfit.toString(), plComparisonData.variances.netProfit.amount.toString(), formatPct(plComparisonData.variances.netProfit.percentage)]);
+                        
+                        const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+                        downloadCSV(csv, `PL-Comparison-${format(new Date(), "yyyy-MM-dd")}.csv`);
+                      }}
+                      data-testid="button-export-csv"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      CSV
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => exportPLComparisonExcel(plComparisonData, baseCurrency?.code || "USD")}
+                      data-testid="button-export-excel"
+                    >
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Excel
+                    </Button>
+                  </div>
                 )}
               </div>
             </CardHeader>
@@ -1318,14 +1631,26 @@ export default function FinancialReports() {
           {balanceSheetData && !bsLoading && (
             <>
               <div className="flex justify-end">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => exportBalanceSheetCSV(balanceSheetData, baseCurrency?.code || "USD", bsShowComparison && !!bsComparisonDate)}
-                  data-testid="button-export-bs-csv"
-                >
-                  Export CSV
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportBalanceSheetCSV(balanceSheetData, baseCurrency?.code || "USD", bsShowComparison && !!bsComparisonDate)}
+                    data-testid="button-export-bs-csv"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportBalanceSheetExcel(balanceSheetData, baseCurrency?.code || "USD", bsShowComparison && !!bsComparisonDate)}
+                    data-testid="button-export-bs-excel"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    Excel
+                  </Button>
+                </div>
               </div>
 
               <Card>
@@ -1724,6 +2049,29 @@ export default function FinancialReports() {
 
           {tbReport && !tbLoading && (
             <>
+              <div className="flex justify-end mb-4">
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportTrialBalanceCSV(tbReport, baseCurrency?.code || "USD", tbAsOfDate)}
+                    data-testid="button-export-tb-csv"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportTrialBalanceExcel(tbReport, baseCurrency?.code || "USD", tbAsOfDate)}
+                    data-testid="button-export-tb-excel"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    Excel
+                  </Button>
+                </div>
+              </div>
+
               <Card>
                 <CardHeader>
                   <CardTitle>Trial Balance Summary</CardTitle>
@@ -1903,6 +2251,29 @@ export default function FinancialReports() {
 
           {cfReport && !cfLoading && (
             <>
+              <div className="flex justify-end mb-4">
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportCashFlowCSV(cfReport, baseCurrency?.code || "USD", cfShowComparison && !!cfReport.comparisonData)}
+                    data-testid="button-export-cf-csv"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportCashFlowExcel(cfReport, baseCurrency?.code || "USD", cfShowComparison && !!cfReport.comparisonData)}
+                    data-testid="button-export-cf-excel"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    Excel
+                  </Button>
+                </div>
+              </div>
+
               <Card>
                 <CardHeader>
                   <CardTitle>Cash Flow Visualization</CardTitle>
