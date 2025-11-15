@@ -117,15 +117,27 @@ async function verifyTenantAccess(req: any, res: any, next: any) {
     const userId = req.user.claims.sub;
     const tenantId = req.query.tenantId || req.headers['x-tenant-id'] || req.body.tenantId;
     
+    console.log('[verifyTenantAccess] Checking tenant access:', {
+      userId,
+      tenantId,
+      fromQuery: !!req.query.tenantId,
+      fromHeader: !!req.headers['x-tenant-id'],
+      fromBody: !!req.body.tenantId,
+      path: req.path
+    });
+    
     if (!tenantId) {
+      console.error('[verifyTenantAccess] No tenant ID provided');
       return res.status(400).json({ message: "Tenant ID required" });
     }
 
     // Check if user is a member or owner of this tenant
     const tenant = await storage.getTenant(tenantId);
     if (!tenant) {
+      console.error('[verifyTenantAccess] Tenant not found:', { tenantId, userId });
       return res.status(404).json({ message: "Tenant not found" });
     }
+    console.log('[verifyTenantAccess] Tenant found:', { tenantId, tenantName: tenant.name });
 
     // Check if user is owner
     if (tenant.ownerId === userId) {
