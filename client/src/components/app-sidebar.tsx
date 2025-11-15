@@ -22,6 +22,8 @@ import {
   UserCog,
   Coins,
   CheckCircle,
+  Workflow,
+  PieChart,
 } from "lucide-react";
 import {
   Sidebar,
@@ -67,6 +69,8 @@ const accountingItems = [
   { title: "Chart of Accounts", url: "/accounts", icon: BookOpen },
   { title: "Journal Entries", url: "/journal-entries", icon: FileText },
   { title: "Approvals", url: "/approvals", icon: CheckCircle },
+  { title: "Approval Workflows", url: "/workflows", icon: Workflow },
+  { title: "Account Balances", url: "/account-balances", icon: PieChart },
   { title: "Fixed Assets", url: "/assets", icon: Package },
   { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
   { title: "Bank Connections", url: "/bank-connections", icon: Landmark },

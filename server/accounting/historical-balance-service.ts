@@ -1129,3 +1129,165 @@ export async function calculateExchangeDifference(
     throw error;
   }
 }
+
+/**
+ * Get account balance history with transaction details for a date range
+ * 
+ * **Purpose:** Retrieve historical balance information and transaction details
+ * for an account over a specified date range to support balance analysis,
+ * reporting, and audit trails.
+ * 
+ * **Logic:**
+ * 1. Validate account existence
+ * 2. Calculate opening balance at startDate
+ * 3. Calculate current balance at endDate (or now if not specified)
+ * 4. Retrieve all transactions in date range with running balances
+ * 5. Return structured data with account info, balances, and transaction history
+ * 
+ * **Transaction History:**
+ * - Each transaction includes:
+ *   - Transaction date
+ *   - Debit/credit amounts
+ *   - Running balance after transaction
+ *   - Source document type and ID
+ *   - Description
+ * - Sorted chronologically (oldest to newest)
+ * - Running balance tracks cumulative account balance
+ * 
+ * **Date Range Handling:**
+ * - If endDate not specified: defaults to current date
+ * - Opening balance calculated as of startDate
+ * - Current balance calculated as of endDate
+ * - Transactions filtered to date range inclusive
+ * 
+ * @param tenantId - Tenant identifier for multi-tenant isolation
+ * @param accountId - Account to retrieve history for
+ * @param startDate - Start date of the period
+ * @param endDate - End date of the period (optional, defaults to now)
+ * @param tx - Optional database transaction for consistent reads
+ * @returns Object containing account info, balances, and transaction history
+ * 
+ * @throws {NotFoundError} If account doesn't exist
+ * 
+ * @example
+ * ```typescript
+ * const history = await getAccountBalanceHistory(
+ *   'tenant-123',
+ *   'account-456',
+ *   new Date('2024-01-01'),
+ *   new Date('2024-01-31')
+ * );
+ * 
+ * console.log(`Account: ${history.account.name}`);
+ * console.log(`Opening Balance: ${history.openingBalance}`);
+ * console.log(`Current Balance: ${history.currentBalance}`);
+ * console.log(`Transactions: ${history.balanceHistory.length}`);
+ * ```
+ */
+export async function getAccountBalanceHistory(
+  tenantId: string,
+  accountId: string,
+  startDate: Date,
+  endDate?: Date,
+  tx?: DBTransaction
+): Promise<{
+  account: Account;
+  openingBalance: string;
+  currentBalance: string;
+  balanceHistory: Array<{
+    date: string;
+    balance: string;
+    debit: string;
+    credit: string;
+    entryType: string | null;
+    entryId: string | null;
+    description: string | null;
+  }>;
+}> {
+  const database = tx || db;
+  const actualEndDate = endDate || new Date();
+  
+  try {
+    // Fetch account
+    const [account] = await database
+      .select()
+      .from(accounts)
+      .where(and(
+        eq(accounts.id, accountId),
+        eq(accounts.tenantId, tenantId)
+      ))
+      .limit(1);
+    
+    if (!account) {
+      throw new NotFoundError(
+        `Account not found: ${accountId}`,
+        { tenantId, accountId }
+      );
+    }
+    
+    // Calculate opening balance at startDate
+    const openingBalance = await getAccountBalance(
+      tenantId,
+      accountId,
+      startDate,
+      database
+    );
+    
+    // Calculate current balance at endDate
+    const currentBalance = await getAccountBalance(
+      tenantId,
+      accountId,
+      actualEndDate,
+      database
+    );
+    
+    // Fetch all transactions in date range
+    const transactions = await database
+      .select({
+        id: accountTransactionHistory.id,
+        transactionDate: accountTransactionHistory.transactionDate,
+        debitAmount: accountTransactionHistory.debitAmount,
+        creditAmount: accountTransactionHistory.creditAmount,
+        runningBalance: accountTransactionHistory.runningBalance,
+        sourceDocumentType: accountTransactionHistory.sourceDocumentType,
+        sourceDocumentId: accountTransactionHistory.sourceDocumentId,
+        description: accountTransactionHistory.description,
+        journalEntryId: accountTransactionHistory.journalEntryId,
+      })
+      .from(accountTransactionHistory)
+      .where(and(
+        eq(accountTransactionHistory.tenantId, tenantId),
+        eq(accountTransactionHistory.accountId, accountId),
+        gte(accountTransactionHistory.transactionDate, startDate),
+        lte(accountTransactionHistory.transactionDate, actualEndDate)
+      ))
+      .orderBy(asc(accountTransactionHistory.transactionDate));
+    
+    // Format transaction history
+    const balanceHistory = transactions.map(trans => ({
+      date: trans.transactionDate.toISOString().split('T')[0],
+      balance: trans.runningBalance || '0.00',
+      debit: trans.debitAmount || '0.00',
+      credit: trans.creditAmount || '0.00',
+      entryType: trans.sourceDocumentType || 'journal_entry',
+      entryId: trans.sourceDocumentId || trans.journalEntryId || null,
+      description: trans.description || null,
+    }));
+    
+    return {
+      account,
+      openingBalance,
+      currentBalance,
+      balanceHistory,
+    };
+  } catch (error) {
+    logError(error as Error, {
+      function: 'getAccountBalanceHistory',
+      tenantId,
+      accountId,
+      startDate: startDate.toISOString(),
+      endDate: actualEndDate.toISOString(),
+    });
+    throw error;
+  }
+}

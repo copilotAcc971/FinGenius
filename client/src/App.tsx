@@ -22,6 +22,7 @@ import Vendors from "@/pages/vendors";
 import Items from "@/pages/items";
 import Taxes from "@/pages/taxes";
 import Accounts from "@/pages/accounts";
+import AccountBalances from "@/pages/account-balances";
 import Invoices from "@/pages/invoices";
 import Quotes from "@/pages/quotes";
 import SalesOrders from "@/pages/sales-orders";
@@ -49,6 +50,8 @@ import RoleManagement from "@/pages/role-management";
 import UserManagement from "@/pages/user-management";
 import CurrenciesPage from "@/pages/settings/currencies";
 import PendingApprovals from "@/pages/pending-approvals";
+import Workflows from "@/pages/workflows";
+import WorkflowForm from "@/pages/workflow-form";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -65,9 +68,12 @@ function Router() {
           <Route path="/items" component={Items} />
           <Route path="/taxes" component={Taxes} />
           <Route path="/accounts" component={Accounts} />
+          <Route path="/account-balances" component={AccountBalances} />
           <Route path="/journal-entries/:id" component={JournalEntryDetailPage} />
           <Route path="/journal-entries" component={JournalEntries} />
           <Route path="/approvals" component={PendingApprovals} />
+          <Route path="/workflows/:id" component={WorkflowForm} />
+          <Route path="/workflows" component={Workflows} />
           <Route path="/assets" component={Assets} />
           <Route path="/bank-reconciliations" component={BankReconciliations} />
           <Route path="/bank-connections" component={BankConnections} />

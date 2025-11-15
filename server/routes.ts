@@ -909,6 +909,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * GET /api/accounts/:accountId/balances
+   * Get account balance history with transaction details for a date range
+   * 
+   * @param accountId - Account ID to get balance history for
+   * @query startDate - Start date for balance history (ISO date string)
+   * @query endDate - Optional end date for balance history (ISO date string, defaults to now)
+   * @returns Account info, opening/current balances, and transaction history
+   * 
+   * @example
+   * GET /api/accounts/acc-123/balances?tenantId=tenant-456&startDate=2024-01-01&endDate=2024-01-31
+   * 
+   * @testid API endpoint for account balance history page
+   */
+  app.get('/api/accounts/:accountId/balances', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.read'), async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const tenantId = req.tenantId!;
+      const { startDate, endDate } = req.query;
+
+      // Validate required startDate parameter
+      if (!startDate) {
+        return res.status(400).json({ message: "startDate query parameter is required" });
+      }
+
+      // Parse and validate startDate
+      let startDateParsed: Date;
+      try {
+        startDateParsed = new Date(startDate as string);
+        if (isNaN(startDateParsed.getTime())) {
+          return res.status(400).json({ message: "Invalid startDate format. Use ISO date string (e.g., 2024-01-01)" });
+        }
+      } catch (error) {
+        return res.status(400).json({ message: "Invalid startDate format. Use ISO date string (e.g., 2024-01-01)" });
+      }
+
+      // Parse and validate endDate if provided
+      let endDateParsed: Date | undefined;
+      if (endDate) {
+        try {
+          endDateParsed = new Date(endDate as string);
+          if (isNaN(endDateParsed.getTime())) {
+            return res.status(400).json({ message: "Invalid endDate format. Use ISO date string (e.g., 2024-12-31)" });
+          }
+        } catch (error) {
+          return res.status(400).json({ message: "Invalid endDate format. Use ISO date string (e.g., 2024-12-31)" });
+        }
+      }
+
+      // Use the historicalBalanceService to get account balance history
+      const { getAccountBalanceHistory } = await import('./accounting/historical-balance-service');
+      
+      const history = await getAccountBalanceHistory(
+        tenantId,
+        accountId,
+        startDateParsed,
+        endDateParsed
+      );
+
+      res.json(history);
+    } catch (error: any) {
+      console.error("Error fetching account balance history:", error);
+      
+      if (error.name === 'NotFoundError') {
+        return res.status(404).json({ message: error.message || "Account not found" });
+      }
+      
+      res.status(500).json({ message: error.message || "Failed to fetch account balance history" });
+    }
+  });
+
   // Item routes
   app.get('/api/items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('items.read'), async (req: any, res) => {
     try {
@@ -3136,6 +3207,381 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error fetching pending approvals:', error);
       res.status(500).json({ message: error.message || 'Failed to fetch pending approvals' });
+    }
+  });
+
+  /**
+   * Get all approval workflows for current tenant
+   * 
+   * @route GET /api/workflows
+   * @testid workflows-list
+   */
+  app.get("/api/workflows", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+
+      // Fetch workflows with creator info
+      const workflows = await db
+        .select({
+          id: approvalWorkflows.id,
+          tenantId: approvalWorkflows.tenantId,
+          name: approvalWorkflows.name,
+          entityType: approvalWorkflows.entityType,
+          conditions: approvalWorkflows.conditions,
+          isActive: approvalWorkflows.isActive,
+          createdBy: approvalWorkflows.createdBy,
+          createdAt: approvalWorkflows.createdAt,
+          updatedAt: approvalWorkflows.updatedAt,
+          creatorFirstName: users.firstName,
+          creatorLastName: users.lastName,
+          creatorEmail: users.email,
+        })
+        .from(approvalWorkflows)
+        .leftJoin(users, eq(users.id, approvalWorkflows.createdBy))
+        .where(eq(approvalWorkflows.tenantId, tenantId))
+        .orderBy(desc(approvalWorkflows.createdAt));
+
+      // Get step counts for each workflow
+      const workflowIds = workflows.map(w => w.id);
+      const stepCounts = workflowIds.length > 0
+        ? await db
+            .select({
+              workflowId: approvalSteps.workflowId,
+              totalSteps: sql<number>`count(*)`.as('total_steps'),
+            })
+            .from(approvalSteps)
+            .where(
+              and(
+                eq(approvalSteps.tenantId, tenantId),
+                inArray(approvalSteps.workflowId, workflowIds)
+              )
+            )
+            .groupBy(approvalSteps.workflowId)
+        : [];
+
+      // Create map of workflow ID to step count
+      const stepCountMap = new Map(
+        stepCounts.map(s => [s.workflowId, s.totalSteps])
+      );
+
+      // Format response
+      const formattedWorkflows = workflows.map(workflow => ({
+        id: workflow.id,
+        tenantId: workflow.tenantId,
+        name: workflow.name,
+        entityType: workflow.entityType,
+        conditions: workflow.conditions,
+        isActive: workflow.isActive,
+        totalSteps: stepCountMap.get(workflow.id) || 0,
+        createdBy: workflow.createdBy,
+        createdAt: workflow.createdAt,
+        updatedAt: workflow.updatedAt,
+        creator: workflow.createdBy ? {
+          id: workflow.createdBy,
+          firstName: workflow.creatorFirstName,
+          lastName: workflow.creatorLastName,
+          email: workflow.creatorEmail,
+        } : null,
+      }));
+
+      res.json(formattedWorkflows);
+    } catch (error: any) {
+      console.error('Error fetching workflows:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch workflows' });
+    }
+  });
+
+  /**
+   * Get single workflow by ID with steps
+   * 
+   * @route GET /api/workflows/:id
+   * @testid get-workflow
+   */
+  app.get("/api/workflows/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const workflowId = req.params.id;
+
+      // Fetch workflow
+      const [workflow] = await db
+        .select()
+        .from(approvalWorkflows)
+        .where(
+          and(
+            eq(approvalWorkflows.id, workflowId),
+            eq(approvalWorkflows.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!workflow) {
+        return res.status(404).json({ message: "Workflow not found" });
+      }
+
+      // Fetch steps for this workflow
+      const steps = await db
+        .select()
+        .from(approvalSteps)
+        .where(
+          and(
+            eq(approvalSteps.workflowId, workflowId),
+            eq(approvalSteps.tenantId, tenantId)
+          )
+        )
+        .orderBy(asc(approvalSteps.stepOrder));
+
+      res.json({ ...workflow, steps });
+    } catch (error: any) {
+      console.error('Error fetching workflow:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch workflow' });
+    }
+  });
+
+  /**
+   * Create new approval workflow
+   * 
+   * @route POST /api/workflows
+   * @testid create-workflow
+   */
+  app.post("/api/workflows", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      const { name, entityType, conditions, isActive, steps } = req.body;
+
+      // Validate required fields
+      if (!name || !entityType) {
+        return res.status(400).json({ message: "Name and entity type are required" });
+      }
+
+      if (!steps || !Array.isArray(steps) || steps.length === 0) {
+        return res.status(400).json({ message: "At least one approval step is required" });
+      }
+
+      // Validate steps
+      for (const step of steps) {
+        if (!step.approverRole && !step.approverUserId) {
+          return res.status(400).json({ 
+            message: `Step ${step.stepOrder}: Either approver role or user must be specified` 
+          });
+        }
+      }
+
+      // Create workflow
+      const [newWorkflow] = await db
+        .insert(approvalWorkflows)
+        .values({
+          tenantId,
+          name,
+          entityType,
+          conditions: conditions || {},
+          isActive: isActive !== undefined ? isActive : true,
+          createdBy: userId,
+        })
+        .returning();
+
+      // Create approval steps
+      const stepValues = steps.map((step: any) => ({
+        tenantId,
+        workflowId: newWorkflow.id,
+        stepOrder: step.stepOrder,
+        approverRole: step.approverRole || null,
+        approverUserId: step.approverUserId || null,
+        requiresAll: step.requiresAll || false,
+      }));
+
+      await db.insert(approvalSteps).values(stepValues);
+
+      res.status(201).json({ ...newWorkflow, steps: stepValues });
+    } catch (error: any) {
+      console.error('Error creating workflow:', error);
+      res.status(500).json({ message: error.message || 'Failed to create workflow' });
+    }
+  });
+
+  /**
+   * Update approval workflow
+   * 
+   * @route PUT /api/workflows/:id
+   * @testid update-full-workflow
+   */
+  app.put("/api/workflows/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const workflowId = req.params.id;
+      const { name, entityType, conditions, isActive, steps } = req.body;
+
+      // Verify workflow exists
+      const [existingWorkflow] = await db
+        .select()
+        .from(approvalWorkflows)
+        .where(
+          and(
+            eq(approvalWorkflows.id, workflowId),
+            eq(approvalWorkflows.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!existingWorkflow) {
+        return res.status(404).json({ message: "Workflow not found" });
+      }
+
+      // Validate required fields
+      if (!name || !entityType) {
+        return res.status(400).json({ message: "Name and entity type are required" });
+      }
+
+      if (!steps || !Array.isArray(steps) || steps.length === 0) {
+        return res.status(400).json({ message: "At least one approval step is required" });
+      }
+
+      // Validate steps
+      for (const step of steps) {
+        if (!step.approverRole && !step.approverUserId) {
+          return res.status(400).json({ 
+            message: `Step ${step.stepOrder}: Either approver role or user must be specified` 
+          });
+        }
+      }
+
+      // Update workflow
+      const [updatedWorkflow] = await db
+        .update(approvalWorkflows)
+        .set({
+          name,
+          entityType,
+          conditions: conditions || {},
+          isActive: isActive !== undefined ? isActive : true,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(approvalWorkflows.id, workflowId),
+            eq(approvalWorkflows.tenantId, tenantId)
+          )
+        )
+        .returning();
+
+      // Delete existing steps
+      await db
+        .delete(approvalSteps)
+        .where(
+          and(
+            eq(approvalSteps.workflowId, workflowId),
+            eq(approvalSteps.tenantId, tenantId)
+          )
+        );
+
+      // Create new steps
+      const stepValues = steps.map((step: any) => ({
+        tenantId,
+        workflowId: updatedWorkflow.id,
+        stepOrder: step.stepOrder,
+        approverRole: step.approverRole || null,
+        approverUserId: step.approverUserId || null,
+        requiresAll: step.requiresAll || false,
+      }));
+
+      await db.insert(approvalSteps).values(stepValues);
+
+      res.json({ ...updatedWorkflow, steps: stepValues });
+    } catch (error: any) {
+      console.error('Error updating workflow:', error);
+      res.status(500).json({ message: error.message || 'Failed to update workflow' });
+    }
+  });
+
+  /**
+   * Update approval workflow (toggle active/inactive)
+   * 
+   * @route PATCH /api/workflows/:id
+   * @testid update-workflow
+   */
+  app.patch("/api/workflows/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const workflowId = req.params.id;
+      const { isActive } = req.body;
+
+      // Verify workflow exists and belongs to tenant
+      const workflow = await db
+        .select()
+        .from(approvalWorkflows)
+        .where(
+          and(
+            eq(approvalWorkflows.id, workflowId),
+            eq(approvalWorkflows.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!workflow || workflow.length === 0) {
+        return res.status(404).json({ message: "Workflow not found" });
+      }
+
+      // Update workflow
+      await db
+        .update(approvalWorkflows)
+        .set({
+          isActive: isActive,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(approvalWorkflows.id, workflowId),
+            eq(approvalWorkflows.tenantId, tenantId)
+          )
+        );
+
+      res.json({ message: "Workflow updated successfully" });
+    } catch (error: any) {
+      console.error('Error updating workflow:', error);
+      res.status(500).json({ message: error.message || 'Failed to update workflow' });
+    }
+  });
+
+  /**
+   * Delete approval workflow
+   * 
+   * @route DELETE /api/workflows/:id
+   * @testid delete-workflow
+   */
+  app.delete("/api/workflows/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const workflowId = req.params.id;
+
+      // Verify workflow exists and belongs to tenant
+      const workflow = await db
+        .select()
+        .from(approvalWorkflows)
+        .where(
+          and(
+            eq(approvalWorkflows.id, workflowId),
+            eq(approvalWorkflows.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!workflow || workflow.length === 0) {
+        return res.status(404).json({ message: "Workflow not found" });
+      }
+
+      // Delete workflow (cascade will delete approval steps)
+      await db
+        .delete(approvalWorkflows)
+        .where(
+          and(
+            eq(approvalWorkflows.id, workflowId),
+            eq(approvalWorkflows.tenantId, tenantId)
+          )
+        );
+
+      res.json({ message: "Workflow deleted successfully" });
+    } catch (error: any) {
+      console.error('Error deleting workflow:', error);
+      res.status(500).json({ message: error.message || 'Failed to delete workflow' });
     }
   });
 
