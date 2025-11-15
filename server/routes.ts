@@ -3199,6 +3199,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Collect user IDs from workflow steps for assigned approvers
+      for (const step of workflowSteps) {
+        if (step.approverUserId) userIds.add(step.approverUserId);
+      }
+
       // Fetch all users in one query (only if we have user IDs)
       const usersData = userIds.size > 0 
         ? await db
@@ -3210,12 +3215,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create a map for quick user lookup
       const userMap = new Map(usersData.map(u => [u.id, u]));
 
-      // Helper function to get user details
+      // Helper function to get user details (MUST include id field)
       const getUserDetails = (userId: string | null) => {
         if (!userId) return null;
         const user = userMap.get(userId);
         if (!user) return null;
         return {
+          id: user.id,
           firstName: user.firstName || '',
           lastName: user.lastName || '',
           email: user.email || '',
@@ -3358,6 +3364,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentStatus: journalEntry.status,
       };
 
+      // Build assignedApprovers array for current step
+      const currentStepApprovers = approvalRequest
+        ? workflowSteps
+            .filter(step => step.stepOrder === approvalRequest.currentStep)
+            .map(step => step.approverUserId)
+            .filter((id): id is string => id !== null)
+        : [];
+
       // Build response
       const response = {
         journalEntry: {
@@ -3370,6 +3384,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         timeline,
         summary,
+        approvalRequest: approvalRequest ? {
+          id: approvalRequest.id,
+          status: approvalRequest.status,
+          currentStep: approvalRequest.currentStep || 1,
+          workflowId: approvalRequest.workflowId,
+          requestedBy: approvalRequest.requestedBy,
+          createdAt: approvalRequest.createdAt,
+          assignedApprovers: currentStepApprovers,
+        } : null,
+        approvalHistoryRecords: approvalHistoryRecords.map(record => ({
+          id: record.id,
+          approvalRequestId: record.approvalRequestId,
+          stepOrder: record.stepOrder,
+          approverUserId: record.approverUserId,
+          decision: record.decision,
+          comments: record.comments,
+          timestamp: record.timestamp,
+          createdAt: record.createdAt,
+          approver: getUserDetails(record.approverUserId),
+        })),
+        workflowSteps: workflowSteps.map(step => ({
+          id: step.id,
+          workflowId: step.workflowId,
+          stepOrder: step.stepOrder,
+          stepName: step.stepName || `Step ${step.stepOrder}`,
+          assignedApprovers: step.approverUserId ? [step.approverUserId] : [],
+          isParallel: step.isParallel,
+        })),
       };
 
       res.json(response);

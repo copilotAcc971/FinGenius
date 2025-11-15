@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, Link, useLocation } from "wouter";
 import {
   ArrowLeft,
@@ -16,6 +16,7 @@ import {
   Trash2,
   CheckCircle,
   XCircle,
+  UserCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,13 +52,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency } from "@/lib/currency-utils";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Currency } from "@shared/schema";
 import { useState } from "react";
 
@@ -115,23 +127,42 @@ interface AuditTrailEvent {
   comments?: string;
 }
 
-interface WorkflowStep {
-  stepNumber: number;
-  stepName: string;
-  assignedApprovers: string[];
+interface ApprovalRequest {
+  id: string;
   status: 'pending' | 'approved' | 'rejected';
-  approver?: string;
-  actionTimestamp?: string;
-  comments?: string;
+  currentStep: number;
+  workflowId: string;
+  requestedBy: string;
+  createdAt: string;
+  assignedApprovers: string[];
 }
 
-interface WorkflowStatus {
-  currentStep: number;
-  totalSteps: number;
-  steps: WorkflowStep[];
-  isComplete: boolean;
-  isRejected: boolean;
-  rejectionReason?: string;
+interface ApprovalHistoryRecord {
+  id: string;
+  approvalRequestId: string;
+  stepOrder: number;
+  approverUserId: string;
+  decision: 'approved' | 'rejected';
+  comments: string | null;
+  timestamp: string;
+  createdAt: string;
+  approver: UserInfo | null;
+}
+
+interface WorkflowStep {
+  id: string;
+  workflowId: string;
+  stepOrder: number;
+  stepName: string;
+  assignedApprovers: string[];
+  isParallel: boolean;
+}
+
+interface AuditTrailResponse {
+  timeline: AuditTrailEvent[];
+  approvalRequest: ApprovalRequest | null;
+  approvalHistoryRecords: ApprovalHistoryRecord[];
+  workflowSteps: WorkflowStep[];
 }
 
 export default function JournalEntryDetailPage() {
@@ -139,8 +170,12 @@ export default function JournalEntryDetailPage() {
   const [, navigate] = useLocation();
   const { currentTenant } = useTenant();
   const { toast } = useToast();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showApproveDialog, setShowApproveDialog] = useState(false);
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [approveComments, setApproveComments] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -162,18 +197,118 @@ export default function JournalEntryDetailPage() {
   });
 
   // Fetch audit trail (with tenant context for proper cache scoping)
-  const { data: auditTrailResponse, isLoading: auditLoading } = useQuery<{ timeline: AuditTrailEvent[] }>({
+  const { data: auditTrailResponse, isLoading: auditLoading } = useQuery<AuditTrailResponse>({
     queryKey: ['/api/journal-entries', id, 'audit-trail', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && !!id,
   });
 
   const auditTrail = auditTrailResponse?.timeline || [];
+  const approvalRequest = auditTrailResponse?.approvalRequest;
+  const approvalHistoryRecords = auditTrailResponse?.approvalHistoryRecords || [];
+  const workflowSteps = auditTrailResponse?.workflowSteps || [];
 
   // Fetch currencies
   const { data: currencies = [] } = useQuery<Currency[]>({
     queryKey: ["/api/currencies", currentTenant?.id],
     enabled: !!currentTenant?.id,
   });
+
+  // Approve mutation
+  const approveMutation = useMutation({
+    mutationFn: async (comments?: string) => {
+      if (!currentTenant?.id) {
+        throw new Error("No tenant selected");
+      }
+      return apiRequest(`/api/journal-entries/${id}/approve`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-tenant-id": currentTenant.id 
+        },
+        body: JSON.stringify({ comments }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/journal-entries", id, { tenantId: currentTenant?.id }] });
+      queryClient.invalidateQueries({ queryKey: ['/api/journal-entries', id, 'audit-trail', { tenantId: currentTenant?.id }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/journal-entries", { tenantId: currentTenant?.id }] });
+      toast({
+        title: "Approved",
+        description: "Journal entry has been approved successfully",
+      });
+      setShowApproveDialog(false);
+      setApproveComments("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Approval failed",
+        description: error.message || "Failed to approve journal entry",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Reject mutation
+  const rejectMutation = useMutation({
+    mutationFn: async (rejectionReason: string) => {
+      if (!currentTenant?.id) {
+        throw new Error("No tenant selected");
+      }
+      return apiRequest(`/api/journal-entries/${id}/reject`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-tenant-id": currentTenant.id 
+        },
+        body: JSON.stringify({ rejectionReason }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/journal-entries", id, { tenantId: currentTenant?.id }] });
+      queryClient.invalidateQueries({ queryKey: ['/api/journal-entries', id, 'audit-trail', { tenantId: currentTenant?.id }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/journal-entries", { tenantId: currentTenant?.id }] });
+      toast({
+        title: "Rejected",
+        description: "Journal entry has been rejected",
+      });
+      setShowRejectDialog(false);
+      setRejectReason("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Rejection failed",
+        description: error.message || "Failed to reject journal entry",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleApprove = () => {
+    approveMutation.mutate(approveComments || undefined);
+  };
+
+  const handleReject = () => {
+    if (!rejectReason.trim()) {
+      toast({
+        title: "Rejection reason required",
+        description: "Please provide a reason for rejection",
+        variant: "destructive",
+      });
+      return;
+    }
+    rejectMutation.mutate(rejectReason);
+  };
+
+  // Check if current user can approve current step
+  const canApproveCurrentStep = useMemo(() => {
+    if (!user || !approvalRequest || !workflowSteps.length) return false;
+    if (entry?.status !== 'pending_approval') return false;
+    
+    const currentStep = workflowSteps.find(s => s.stepOrder === approvalRequest.currentStep);
+    if (!currentStep) return false;
+    
+    return currentStep.assignedApprovers.includes(user.id);
+  }, [user, approvalRequest, workflowSteps, entry?.status]);
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('en-US', {
@@ -515,6 +650,161 @@ export default function JournalEntryDetailPage() {
         </Card>
       </div>
 
+      {/* Approval Panel */}
+      {entry.workflowRequestId && entry.status === 'pending_approval' && approvalRequest && (
+        <Card data-testid="card-approval-panel">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserCheck className="h-5 w-5" />
+              Approval Workflow
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Current Step Indicator */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Badge variant="outline" data-testid="badge-current-step">
+                  Step {approvalRequest.currentStep} of {workflowSteps.length || 1}
+                </Badge>
+                {approvalRequest.status === 'pending' && (
+                  <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                    Pending
+                  </Badge>
+                )}
+              </div>
+              <Progress 
+                value={workflowSteps.length > 0 ? (approvalRequest.currentStep / workflowSteps.length) * 100 : 0} 
+                className="h-2" 
+                data-testid="progress-workflow"
+              />
+            </div>
+
+            {/* Current Step Approvers */}
+            {(() => {
+              const currentStep = workflowSteps.find(s => s.stepOrder === approvalRequest.currentStep);
+              if (!currentStep) return null;
+              
+              return (
+                <div>
+                  <h3 className="text-sm font-semibold mb-3">Current Step: {currentStep.stepName || `Step ${approvalRequest.currentStep}`}</h3>
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">Assigned Approvers:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {currentStep.assignedApprovers && currentStep.assignedApprovers.length > 0 ? (
+                        currentStep.assignedApprovers.map((approverId, idx) => (
+                          <Badge key={idx} variant="secondary" data-testid={`badge-approver-${idx}`}>
+                            {approverId}
+                          </Badge>
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No approvers assigned</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Approval History */}
+            {approvalHistoryRecords.length > 0 && (
+              <div>
+                <Separator className="mb-4" />
+                <h3 className="text-sm font-semibold mb-3">Approval History</h3>
+                <div className="space-y-3">
+                  {approvalHistoryRecords.map((record, idx) => (
+                    <div 
+                      key={record.id} 
+                      className="flex items-start gap-3 p-3 rounded-lg bg-muted/50"
+                      data-testid={`approval-history-${idx}`}
+                    >
+                      <div className="mt-0.5">
+                        {record.decision === 'approved' ? (
+                          <div className="rounded-full bg-green-100 dark:bg-green-950 p-1.5">
+                            <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          </div>
+                        ) : (
+                          <div className="rounded-full bg-destructive/10 p-1.5">
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <Badge 
+                            variant="outline" 
+                            className={record.decision === 'approved' 
+                              ? "bg-green-100 text-green-800 border-green-300 dark:bg-green-950 dark:text-green-300 dark:border-green-800"
+                              : "bg-destructive/10 text-destructive border-destructive/20"
+                            }
+                            data-testid={`badge-decision-${idx}`}
+                          >
+                            {record.decision === 'approved' ? 'Approved' : 'Rejected'}
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">
+                            Step {record.stepOrder}
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium" data-testid={`text-approver-${idx}`}>
+                          {getUserName(record.approver)}
+                        </p>
+                        <p className="text-xs text-muted-foreground" data-testid={`text-timestamp-${idx}`}>
+                          {formatDateTime(record.timestamp)}
+                        </p>
+                        {record.comments && (
+                          <p className="text-sm mt-2 p-2 rounded bg-background" data-testid={`text-comments-${idx}`}>
+                            {record.comments}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            {canApproveCurrentStep && (
+              <>
+                <Separator />
+                <div className="flex gap-3">
+                  <Button
+                    onClick={() => setShowApproveDialog(true)}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
+                    className="flex-1"
+                    data-testid="button-approve"
+                  >
+                    {approveMutation.isPending ? (
+                      <>Processing...</>
+                    ) : (
+                      <>
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                        Approve
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => setShowRejectDialog(true)}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
+                    className="flex-1"
+                    data-testid="button-reject"
+                  >
+                    {rejectMutation.isPending ? (
+                      <>Processing...</>
+                    ) : (
+                      <>
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Reject
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Debit/Credit Legs Table */}
       <Card data-testid="card-journal-legs">
         <CardHeader>
@@ -694,6 +984,118 @@ export default function JournalEntryDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Approve Dialog */}
+      <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+        <DialogContent data-testid="dialog-approve">
+          <DialogHeader>
+            <DialogTitle>Approve Journal Entry</DialogTitle>
+            <DialogDescription>
+              You are approving this journal entry at Step {approvalRequest?.currentStep}. 
+              You can optionally add comments to explain your approval decision.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="approve-comments">Comments (Optional)</Label>
+              <Textarea
+                id="approve-comments"
+                placeholder="Add any comments about your approval decision..."
+                value={approveComments}
+                onChange={(e) => setApproveComments(e.target.value)}
+                rows={4}
+                data-testid="textarea-approve-comments"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowApproveDialog(false);
+                setApproveComments("");
+              }}
+              disabled={approveMutation.isPending}
+              data-testid="button-cancel-approve"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleApprove}
+              disabled={approveMutation.isPending}
+              data-testid="button-confirm-approve"
+            >
+              {approveMutation.isPending ? (
+                <>Processing...</>
+              ) : (
+                <>
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  Approve
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject Dialog */}
+      <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
+        <DialogContent data-testid="dialog-reject">
+          <DialogHeader>
+            <DialogTitle>Reject Journal Entry</DialogTitle>
+            <DialogDescription>
+              You are rejecting this journal entry. Please provide a reason for the rejection.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="reject-reason">
+                Rejection Reason <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="reject-reason"
+                placeholder="Explain why you are rejecting this entry..."
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                rows={4}
+                required
+                data-testid="textarea-reject-reason"
+              />
+              <p className="text-xs text-muted-foreground">
+                A rejection reason is required.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowRejectDialog(false);
+                setRejectReason("");
+              }}
+              disabled={rejectMutation.isPending}
+              data-testid="button-cancel-reject"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleReject}
+              disabled={rejectMutation.isPending || !rejectReason.trim()}
+              data-testid="button-confirm-reject"
+            >
+              {rejectMutation.isPending ? (
+                <>Processing...</>
+              ) : (
+                <>
+                  <XCircle className="mr-2 h-4 w-4" />
+                  Reject
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
