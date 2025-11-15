@@ -5477,6 +5477,253 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/reports/profit-loss-comparison', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { startDate, endDate, prevStartDate, prevEndDate } = req.query;
+
+      if (!startDate || !endDate || !prevStartDate || !prevEndDate) {
+        return res.status(400).json({ message: "startDate, endDate, prevStartDate, and prevEndDate are required" });
+      }
+
+      const start = new Date(startDate as string);
+      const end = new Date(endDate as string);
+      const prevStart = new Date(prevStartDate as string);
+      const prevEnd = new Date(prevEndDate as string);
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime()) || isNaN(prevStart.getTime()) || isNaN(prevEnd.getTime())) {
+        return res.status(400).json({ message: "Invalid date format" });
+      }
+
+      // Get reports for both periods
+      const currentReport = await storage.getProfitLossReport(tenantId, start, end);
+      const previousReport = await storage.getProfitLossReport(tenantId, prevStart, prevEnd);
+      
+      // Fetch company profile for IFRS FX config
+      const profile = await storage.getCompanyProfile(tenantId);
+      
+      // Get base currency
+      const baseCurrencyRecord = await db.query.currencies.findFirst({
+        where: and(
+          eq(currencies.tenantId, tenantId),
+          eq(currencies.isBaseCurrency, true)
+        )
+      });
+      
+      const baseCurrency = baseCurrencyRecord?.code || "USD";
+      const ifrsCompliant = profile?.ifrsComplianceEnabled || false;
+
+      // Helper function to parse balance string to number
+      const parseBalance = (balance: string): number => parseFloat(balance) || 0;
+
+      // CRITICAL FIX: Include accounts from BOTH periods for complete coverage
+      // Build a map of all unique revenue account IDs from both periods
+      const allRevenueAccountIds = new Set<string>();
+      currentReport.revenueAccounts.forEach(acc => allRevenueAccountIds.add(acc.accountId));
+      previousReport.revenueAccounts.forEach(acc => allRevenueAccountIds.add(acc.accountId));
+
+      // Calculate variances for revenue - iterate over ALL accounts from both periods
+      const revenueComparison = Array.from(allRevenueAccountIds).map((accountId) => {
+        const currentAcc = currentReport.revenueAccounts.find(a => a.accountId === accountId);
+        const prevAcc = previousReport.revenueAccounts.find(a => a.accountId === accountId);
+        
+        // If account doesn't exist in current period, use 0 for current amount
+        const currentAmount = currentAcc ? parseBalance(currentAcc.balance) : 0;
+        const previousAmount = prevAcc ? parseBalance(prevAcc.balance) : 0;
+        const variance = currentAmount - previousAmount;
+        
+        let percentageChange: number | "Infinity" | "-Infinity";
+        if (previousAmount === 0) {
+          if (currentAmount === 0) {
+            percentageChange = 0;
+          } else if (currentAmount > 0) {
+            percentageChange = "Infinity";
+          } else {
+            percentageChange = "-Infinity";
+          }
+        } else if (currentAmount === 0) {
+          percentageChange = -100;
+        } else {
+          percentageChange = (variance / previousAmount) * 100;
+        }
+
+        // Get account details from whichever period has the account
+        const accountInfo = currentAcc || prevAcc!;
+
+        return {
+          accountId: accountInfo.accountId,
+          accountCode: accountInfo.accountCode,
+          accountName: accountInfo.accountName,
+          currentAmount,
+          previousAmount,
+          variance,
+          percentageChange,
+          isFavorable: variance > 0
+        };
+      });
+
+      // Build a map of all unique expense account IDs from both periods
+      const allExpenseAccountIds = new Set<string>();
+      currentReport.expenseAccounts.forEach(acc => allExpenseAccountIds.add(acc.accountId));
+      previousReport.expenseAccounts.forEach(acc => allExpenseAccountIds.add(acc.accountId));
+
+      // Calculate variances for expenses - iterate over ALL accounts from both periods
+      const expenseComparison = Array.from(allExpenseAccountIds).map((accountId) => {
+        const currentAcc = currentReport.expenseAccounts.find(a => a.accountId === accountId);
+        const prevAcc = previousReport.expenseAccounts.find(a => a.accountId === accountId);
+        
+        // If account doesn't exist in current period, use 0 for current amount
+        const currentAmount = currentAcc ? parseBalance(currentAcc.balance) : 0;
+        const previousAmount = prevAcc ? parseBalance(prevAcc.balance) : 0;
+        const variance = currentAmount - previousAmount;
+        
+        let percentageChange: number | "Infinity" | "-Infinity";
+        if (previousAmount === 0) {
+          if (currentAmount === 0) {
+            percentageChange = 0;
+          } else if (currentAmount > 0) {
+            percentageChange = "Infinity";
+          } else {
+            percentageChange = "-Infinity";
+          }
+        } else if (currentAmount === 0) {
+          percentageChange = -100;
+        } else {
+          percentageChange = (variance / previousAmount) * 100;
+        }
+
+        // Get account details from whichever period has the account
+        const accountInfo = currentAcc || prevAcc!;
+
+        return {
+          accountId: accountInfo.accountId,
+          accountCode: accountInfo.accountCode,
+          accountName: accountInfo.accountName,
+          currentAmount,
+          previousAmount,
+          variance,
+          percentageChange,
+          isFavorable: variance < 0 // For expenses, negative variance is favorable
+        };
+      });
+
+      const currentRevenue = parseBalance(currentReport.totalRevenue);
+      const previousRevenue = parseBalance(previousReport.totalRevenue);
+      const revenueVariance = currentRevenue - previousRevenue;
+      
+      let revenuePercentageChange: number | "Infinity" | "-Infinity";
+      if (previousRevenue === 0) {
+        if (currentRevenue === 0) {
+          revenuePercentageChange = 0;
+        } else if (currentRevenue > 0) {
+          revenuePercentageChange = "Infinity";
+        } else {
+          revenuePercentageChange = "-Infinity";
+        }
+      } else if (currentRevenue === 0) {
+        revenuePercentageChange = -100;
+      } else {
+        revenuePercentageChange = (revenueVariance / previousRevenue) * 100;
+      }
+
+      const currentExpenses = parseBalance(currentReport.totalExpenses);
+      const previousExpenses = parseBalance(previousReport.totalExpenses);
+      const expensesVariance = currentExpenses - previousExpenses;
+      
+      let expensesPercentageChange: number | "Infinity" | "-Infinity";
+      if (previousExpenses === 0) {
+        if (currentExpenses === 0) {
+          expensesPercentageChange = 0;
+        } else if (currentExpenses > 0) {
+          expensesPercentageChange = "Infinity";
+        } else {
+          expensesPercentageChange = "-Infinity";
+        }
+      } else if (currentExpenses === 0) {
+        expensesPercentageChange = -100;
+      } else {
+        expensesPercentageChange = (expensesVariance / previousExpenses) * 100;
+      }
+
+      const currentNetProfit = parseBalance(currentReport.netProfit);
+      const previousNetProfit = parseBalance(previousReport.netProfit);
+      const netProfitVariance = currentNetProfit - previousNetProfit;
+      
+      let netProfitPercentageChange: number | "Infinity" | "-Infinity";
+      if (previousNetProfit === 0) {
+        if (currentNetProfit === 0) {
+          netProfitPercentageChange = 0;
+        } else if (currentNetProfit > 0) {
+          netProfitPercentageChange = "Infinity";
+        } else {
+          netProfitPercentageChange = "-Infinity";
+        }
+      } else if (currentNetProfit === 0) {
+        netProfitPercentageChange = -100;
+      } else {
+        netProfitPercentageChange = (netProfitVariance / previousNetProfit) * 100;
+      }
+
+      // Calculate margin percentages
+      const currentGrossProfitMargin = currentRevenue !== 0 ? (currentRevenue / currentRevenue) * 100 : 0;
+      const previousGrossProfitMargin = previousRevenue !== 0 ? (previousRevenue / previousRevenue) * 100 : 0;
+      const currentNetProfitMargin = currentRevenue !== 0 ? (currentNetProfit / currentRevenue) * 100 : 0;
+      const previousNetProfitMargin = previousRevenue !== 0 ? (previousNetProfit / previousRevenue) * 100 : 0;
+
+      const response = {
+        current: {
+          startDate: start,
+          endDate: end,
+          revenue: revenueComparison,
+          expenses: expenseComparison,
+          totalRevenue: currentRevenue,
+          totalExpenses: currentExpenses,
+          netProfit: currentNetProfit,
+          grossProfitMargin: currentGrossProfitMargin,
+          netProfitMargin: currentNetProfitMargin
+        },
+        previous: {
+          startDate: prevStart,
+          endDate: prevEnd,
+          totalRevenue: previousRevenue,
+          totalExpenses: previousExpenses,
+          netProfit: previousNetProfit,
+          grossProfitMargin: previousGrossProfitMargin,
+          netProfitMargin: previousNetProfitMargin
+        },
+        variances: {
+          revenue: {
+            amount: revenueVariance,
+            percentage: revenuePercentageChange,
+            isFavorable: revenueVariance > 0
+          },
+          expenses: {
+            amount: expensesVariance,
+            percentage: expensesPercentageChange,
+            isFavorable: expensesVariance < 0
+          },
+          netProfit: {
+            amount: netProfitVariance,
+            percentage: netProfitPercentageChange,
+            isFavorable: netProfitVariance > 0
+          },
+          grossProfitMargin: currentGrossProfitMargin - previousGrossProfitMargin,
+          netProfitMargin: currentNetProfitMargin - previousNetProfitMargin
+        },
+        baseCurrency,
+        ifrsComplianceEnabled: ifrsCompliant,
+        fxTranslationStandard: ifrsCompliant ? (profile?.fxTranslationStandard || "ifrs-sme") : null,
+        incomeExpenseMethod: ifrsCompliant ? (profile?.fxIncomeExpenseMethod || "transaction-date") : null,
+        fxTranslationApplied: false
+      };
+
+      res.json(response);
+    } catch (error: any) {
+      console.error("Error generating profit & loss comparison report:", error);
+      res.status(500).json({ message: "Failed to generate profit & loss comparison report" });
+    }
+  });
+
   app.get('/api/reports/balance-sheet', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
