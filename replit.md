@@ -64,6 +64,16 @@ The application uses a multi-tenant architecture with a "verified-tenant pattern
   - **IAS 7 (Statement of Cash Flows):** Cash Flow Statement using Indirect Method with proper classification of activities and comparative information.
   - **IAS 21 (Foreign Currency Translation):** FX disclosure components in all financial reports showing IFRS compliance standard, translation method, and presentation currency.
   - **Comparative Period Support:** All major reports (P&L, Balance Sheet, Cash Flow) support at least one comparative period with side-by-side presentation and variance analysis as required by IAS 1.38.
+- **Employee Expense Management & Reimbursement (COMPLETED):**
+  - **Expense Submission:** Employees submit expense claims with amount, category, date, description, and receipt upload. System auto-sets submittedBy, submittedAt, and reimbursementStatus (pending).
+  - **Permission-Based Access:** 6 new RBAC permissions (submit, read, approve, reject, reimburse, view_all) for granular control. Users with only submit permission can view their own expenses. Users with read permission see expenses based on view_all flag. OR filtering enables users to see expenses they submitted on behalf of others.
+  - **Approval Workflow:** Managers approve or reject expenses with optional rejection reasons. System tracks approvedBy, approvedAt, rejectedBy, rejectedAt for full audit trail.
+  - **Reimbursement Processing:** Finance team processes approved expenses with payment method and reference validation (Zod schema enforcement). System tracks reimbursedBy, reimbursedAt, paymentMethod, paymentReference.
+  - **UI Components:** Three-tab interface (My Expenses, Pending Approvals, All Expenses) with permission-based rendering, status badges (pending/approved/rejected/reimbursed), filtering by status/employee/date range, and four dialogs (Submit, Approve, Reject, Reimburse).
+  - **Technical Excellence:** Centralized date serialization helper (serializeExpense) ensures consistent ISO string formatting across all 5 API endpoints. Server-side field control prevents client manipulation of tenantId, submittedBy, and timestamps. Multi-tenant isolation with OR filtering (employeeId OR submittedBy) for flexible data access.
+  - **Integration:** Fully integrated into sidebar navigation, command palette, breadcrumbs, and routing with RBAC filtering. 143 total permissions across all modules.
+- **Bills Form Enhancement (COMPLETED):**
+  - **Vendor Tax Registration Display:** Bills form now displays vendor tax registration number below vendor selection field when vendor is selected and has a tax ID. Field is conditionally rendered and includes proper data-testid for testing.
 
 ## External Dependencies
 - **OpenAI GPT-5:** For AI-powered document data extraction and categorization.
