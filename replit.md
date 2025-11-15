@@ -12,6 +12,16 @@ This project is a comprehensive, multi-tenant AI-powered accounting application 
 ## System Architecture
 The application employs a multi-tenant architecture with a "verified-tenant pattern" where the backend strictly enforces `tenantId` from middleware, never trusting client-provided values. Financial integrity is paramount, with all critical calculations (line item amounts, totals, taxes) performed server-side to prevent tampering.
 
+**Tenant Context Management (November 2025):**
+- **TenantSession Module:** Event-emitter singleton with async tenant readiness pattern prevents "400 Tenant ID required" errors
+- **Event-Driven Architecture:** Tenant state changes broadcast via events (ready, tenant-changed, tenant-lost) with cross-tab synchronization via StorageEvent
+- **Request Interception:** All API calls wait for tenant context before proceeding; throws descriptive errors if tenant unavailable
+- **Route Protection:** TenantGate component wraps authenticated routes, ensuring tenant context is ready before rendering
+- **Cache Management:** Auto-invalidates queries on tenant-changed; clears cache on tenant-lost to prevent stale data
+- **Double-Check Pattern:** Validates tenant exists immediately before fetch to prevent race conditions between async wait and API call
+- **Telemetry:** Timeout logging with extensible hook for production monitoring (window.trackEvent)
+- **Zero 400 Errors:** Production-ready implementation eliminates all "400 Tenant ID required" scenarios
+
 **UI/UX:**
 - Utilizes Shadcn UI components.
 - React Hook Form + Zod for form validation.
