@@ -6978,9 +6978,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Zod validation schema for sync parameters
   const syncParamsSchema = z.object({
-    startDate: z.string().datetime().optional(),
-    endDate: z.string().datetime().optional(),
-    limit: z.number().int().min(1).max(500).optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
   });
 
   // POST /api/open-banking/bank-accounts/:accountId/sync-transactions
@@ -7065,8 +7065,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Zod validation schema for list parameters
   const listParamsSchema = z.object({
-    startDate: z.string().datetime().optional(),
-    endDate: z.string().datetime().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
     limit: z.coerce.number().int().min(1).max(500).default(100),
     offset: z.coerce.number().int().min(0).default(0),
   });

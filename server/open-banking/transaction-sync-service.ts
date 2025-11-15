@@ -35,8 +35,8 @@ export class TransactionSyncService {
         limit
       });
 
-      // Enforce maximum limit
-      const effectiveLimit = Math.min(limit || MAX_TRANSACTIONS_PER_SYNC, MAX_TRANSACTIONS_PER_SYNC);
+      // Enforce maximum limit per batch
+      const batchLimit = Math.min(limit || MAX_TRANSACTIONS_PER_SYNC, MAX_TRANSACTIONS_PER_SYNC);
 
       // Get bank account with connection info and lastSyncedAt
       const [account] = await db
@@ -55,12 +55,18 @@ export class TransactionSyncService {
       }
 
       // Use lastSyncedAt as startDate if not provided
-      // Default to 30 days back if no lastSyncedAt
+      // Default to 90 days back if no lastSyncedAt (for initial backfill)
       const effectiveStartDate = startDate 
         || account.lastSyncedAt 
-        || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-      console.log(`[TransactionSyncService] Using start date: ${effectiveStartDate.toISOString()}`);
+      const effectiveEndDate = endDate || new Date();
+
+      console.log(`[TransactionSyncService] Using date range:`, {
+        startDate: effectiveStartDate.toISOString(),
+        endDate: effectiveEndDate.toISOString(),
+        batchLimit
+      });
 
       // Get connection
       const [connection] = await db
@@ -121,26 +127,79 @@ export class TransactionSyncService {
         connection.encryptionKeyVersion!
       );
 
-      // Get provider and fetch transactions with limit
+      // Get provider
       const provider = openBankingProviderFactory.createProvider(connection.provider);
-      
-      const transactions = await provider.getTransactions(
-        decryptedAccessToken,
-        account.accountId, // External provider account ID
-        {
-          startDate: effectiveStartDate,
-          endDate,
-          limit: effectiveLimit
-        }
-      );
 
-      console.log(`[TransactionSyncService] Fetched ${transactions.length} transactions from provider`);
+      // Pagination loop: Fetch ALL transactions until no more data
+      let allTransactions: Transaction[] = [];
+      let currentEndDate = effectiveEndDate;
+      let hasMoreData = true;
+      let paginationIterations = 0;
+      const MAX_PAGINATION_ITERATIONS = 100; // Safety limit to prevent infinite loops
+
+      while (hasMoreData && paginationIterations < MAX_PAGINATION_ITERATIONS) {
+        paginationIterations++;
+        
+        console.log(`[TransactionSyncService] Fetching batch ${paginationIterations}`, {
+          startDate: effectiveStartDate.toISOString(),
+          endDate: currentEndDate.toISOString(),
+          limit: batchLimit
+        });
+
+        // Fetch batch of transactions
+        const batchTransactions = await provider.getTransactions(
+          decryptedAccessToken,
+          account.accountId, // External provider account ID
+          {
+            startDate: effectiveStartDate,
+            endDate: currentEndDate,
+            limit: batchLimit
+          }
+        );
+
+        console.log(`[TransactionSyncService] Batch ${paginationIterations}: Fetched ${batchTransactions.length} transactions`);
+
+        if (batchTransactions.length === 0) {
+          // No more transactions
+          hasMoreData = false;
+          break;
+        }
+
+        // Add to all transactions
+        allTransactions.push(...batchTransactions);
+
+        // Check if we got a full batch (might indicate more data)
+        if (batchTransactions.length < batchLimit) {
+          // Got less than limit, likely no more data
+          hasMoreData = false;
+        } else {
+          // Got full batch, might be more data
+          // Use oldest transaction date from this batch as new endDate for next iteration
+          const oldestTransaction = batchTransactions.reduce((oldest, current) => 
+            current.date < oldest.date ? current : oldest
+          );
+          
+          // Move endDate to just before the oldest transaction to avoid re-fetching it
+          currentEndDate = new Date(oldestTransaction.date.getTime() - 1000); // 1 second before
+          
+          // Safety check: if we've reached or passed the start date, stop
+          if (currentEndDate <= effectiveStartDate) {
+            hasMoreData = false;
+          }
+        }
+      }
+
+      if (paginationIterations >= MAX_PAGINATION_ITERATIONS) {
+        console.warn(`[TransactionSyncService] Hit max pagination iterations (${MAX_PAGINATION_ITERATIONS})`);
+      }
+
+      console.log(`[TransactionSyncService] Pagination complete: ${allTransactions.length} total transactions fetched in ${paginationIterations} batches`);
 
       // Sync transactions to database
       let synced = 0;
       let duplicates = 0;
 
-      for (const transaction of transactions) {
+      for (const transaction of allTransactions) {
         // Insert new transaction with proper field names
         const transactionData: InsertBankTransaction = {
           tenantId: this.tenantId,
@@ -179,16 +238,17 @@ export class TransactionSyncService {
         .where(eq(bankAccounts.id, accountId));
 
       console.log(`[TransactionSyncService] Sync complete:`, {
-        total: transactions.length,
+        total: allTransactions.length,
         synced,
         duplicates,
+        batches: paginationIterations,
         lastSyncedAt: new Date().toISOString()
       });
 
       return {
         synced,
         duplicates,
-        total: transactions.length
+        total: allTransactions.length
       };
     } catch (error) {
       console.error('[TransactionSyncService] Error syncing transactions:', error);
