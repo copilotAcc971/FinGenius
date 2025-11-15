@@ -82,6 +82,8 @@ import {
   users,
   approvalRequests,
   approvalHistory,
+  approvalSteps,
+  approvalWorkflows,
 } from "@shared/schema";
 import { insertFXConfigSchema } from "@shared/fx-types";
 
@@ -2922,6 +2924,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error deleting retainer invoice:', error);
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== APPROVAL ROUTES =====
+  
+  /**
+   * Get pending approvals for current user
+   * 
+   * @route GET /api/approvals/pending
+   * @testid pending-approvals-list
+   */
+  app.get("/api/approvals/pending", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+
+      // Get user's roles for role-based approval matching
+      const rbacService = new RBACService(tenantId);
+      const userRoles = await rbacService.getUserRoles(userId);
+      const userRoleNames = userRoles.map(r => r.name);
+
+      // Build role condition - only add IN clause if user has roles
+      const roleCondition = userRoleNames.length > 0 
+        ? inArray(approvalSteps.approverRole, userRoleNames)
+        : sql`FALSE`;
+
+      // Alias for requestedBy user
+      const requesterUser = alias(users, 'requester_user');
+
+      // Build pending approvals query with all necessary joins
+      const pendingApprovals = await db
+        .select({
+          // Approval request details
+          approvalRequestId: approvalRequests.id,
+          entityType: approvalRequests.entityType,
+          entityId: approvalRequests.entityId,
+          currentStep: approvalRequests.currentStep,
+          requestedBy: approvalRequests.requestedBy,
+          approvalRequestCreatedAt: approvalRequests.createdAt,
+          approvalDeadline: approvalRequests.approvalDeadline,
+          approvalStatus: approvalRequests.status,
+          workflowId: approvalRequests.workflowId,
+          
+          // Workflow details
+          workflowName: approvalWorkflows.name,
+          
+          // Approval step details
+          stepOrder: approvalSteps.stepOrder,
+          stepName: approvalSteps.stepName,
+          approverRole: approvalSteps.approverRole,
+          approverUserId: approvalSteps.approverUserId,
+          
+          // Journal entry details (for journal_entry entity type)
+          journalEntryNumber: journalEntries.journalEntryNumber,
+          entryDate: journalEntries.entryDate,
+          description: journalEntries.description,
+          currencyCode: journalEntries.currencyCode,
+          
+          // Requester user details
+          requesterFirstName: requesterUser.firstName,
+          requesterLastName: requesterUser.lastName,
+          requesterEmail: requesterUser.email,
+        })
+        .from(approvalRequests)
+        .innerJoin(
+          approvalSteps,
+          and(
+            eq(approvalSteps.workflowId, approvalRequests.workflowId),
+            eq(approvalSteps.stepOrder, approvalRequests.currentStep)
+          )
+        )
+        .innerJoin(approvalWorkflows, eq(approvalWorkflows.id, approvalRequests.workflowId))
+        .leftJoin(
+          journalEntries,
+          and(
+            eq(approvalRequests.entityType, 'journal_entry'),
+            eq(journalEntries.id, approvalRequests.entityId)
+          )
+        )
+        .innerJoin(requesterUser, eq(requesterUser.id, approvalRequests.requestedBy))
+        .where(
+          and(
+            eq(approvalRequests.tenantId, tenantId),
+            eq(approvalRequests.status, 'pending'),
+            // User is assigned approver: either by userId OR by role
+            sql`(
+              ${approvalSteps.approverUserId} = ${userId}
+              OR ${roleCondition}
+            )`
+          )
+        )
+        .orderBy(desc(approvalRequests.createdAt));
+
+      // Calculate total amount for each journal entry
+      const pendingApprovalsWithAmounts = await Promise.all(
+        pendingApprovals.map(async (approval) => {
+          let totalAmount = '0';
+          
+          if (approval.entityType === 'journal_entry' && approval.entityId) {
+            // Get all legs for this journal entry to calculate total
+            const legs = await db
+              .select({ amount: journalEntryLegs.amount })
+              .from(journalEntryLegs)
+              .where(
+                and(
+                  eq(journalEntryLegs.journalEntryId, approval.entityId),
+                  eq(journalEntryLegs.tenantId, tenantId),
+                  eq(journalEntryLegs.type, 'Debit')
+                )
+              );
+            
+            totalAmount = legs.reduce((sum, leg) => {
+              const amount = parseFloat(leg.amount || '0');
+              return (parseFloat(sum) + amount).toFixed(2);
+            }, '0');
+          }
+          
+          return {
+            ...approval,
+            totalAmount,
+          };
+        })
+      );
+
+      // Get total steps for each workflow
+      const workflowStepCounts = await db
+        .select({
+          workflowId: approvalSteps.workflowId,
+          totalSteps: sql<number>`count(distinct ${approvalSteps.stepOrder})`.as('total_steps'),
+        })
+        .from(approvalSteps)
+        .where(eq(approvalSteps.tenantId, tenantId))
+        .groupBy(approvalSteps.workflowId);
+
+      const workflowStepMap = new Map(
+        workflowStepCounts.map(w => [w.workflowId, w.totalSteps])
+      );
+
+      // Format response
+      const formattedApprovals = pendingApprovalsWithAmounts.map(approval => ({
+        id: approval.approvalRequestId,
+        entityType: approval.entityType,
+        entityId: approval.entityId,
+        currentStep: approval.currentStep || 1,
+        requestedBy: approval.requestedBy,
+        createdAt: approval.approvalRequestCreatedAt,
+        approvalDeadline: approval.approvalDeadline,
+        
+        // Entity details
+        entity: {
+          journalEntryNumber: approval.journalEntryNumber,
+          entryDate: approval.entryDate,
+          description: approval.description,
+          totalAmount: approval.totalAmount,
+          currencyCode: approval.currencyCode,
+        },
+        
+        // Workflow details
+        workflow: {
+          id: approval.workflowId,
+          name: approval.workflowName,
+          totalSteps: workflowStepMap.get(approval.workflowId || '') || 1,
+          currentStepName: approval.stepName || `Step ${approval.currentStep}`,
+        },
+        
+        // Requester details
+        requester: {
+          id: approval.requestedBy,
+          firstName: approval.requesterFirstName,
+          lastName: approval.requesterLastName,
+          email: approval.requesterEmail,
+        },
+      }));
+
+      res.json(formattedApprovals);
+    } catch (error: any) {
+      console.error('Error fetching pending approvals:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch pending approvals' });
     }
   });
 

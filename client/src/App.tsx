@@ -48,6 +48,7 @@ import BankConnections from "@/pages/bank-connections";
 import RoleManagement from "@/pages/role-management";
 import UserManagement from "@/pages/user-management";
 import CurrenciesPage from "@/pages/settings/currencies";
+import PendingApprovals from "@/pages/pending-approvals";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -66,6 +67,7 @@ function Router() {
           <Route path="/accounts" component={Accounts} />
           <Route path="/journal-entries/:id" component={JournalEntryDetailPage} />
           <Route path="/journal-entries" component={JournalEntries} />
+          <Route path="/approvals" component={PendingApprovals} />
           <Route path="/assets" component={Assets} />
           <Route path="/bank-reconciliations" component={BankReconciliations} />
           <Route path="/bank-connections" component={BankConnections} />
