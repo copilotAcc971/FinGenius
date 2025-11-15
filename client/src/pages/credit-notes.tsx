@@ -5,11 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
-import { type CreditNote } from "@shared/schema";
+import { type CreditNote, type Currency } from "@shared/schema";
 import { CreditNoteDialog } from "@/components/credit-note-dialog";
 import { ApplyCreditDialog } from "@/components/apply-credit-dialog";
 import { useState } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { formatCurrency } from "@/lib/currency-utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +34,11 @@ export default function CreditNotesPage() {
 
   const { data: creditNotes, isLoading } = useQuery<CreditNote[]>({
     queryKey: ["/api/credit-notes", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
     enabled: !!currentTenant?.id,
   });
 
@@ -135,11 +141,17 @@ export default function CreditNotesPage() {
                     {getStatusBadge(creditNote.status)}
                     <div className="text-right">
                       <div className="text-lg font-semibold" data-testid={`text-credit-note-total-${creditNote.id}`}>
-                        ${parseFloat(creditNote.total).toFixed(2)}
+                        {currenciesLoading 
+                          ? '...' 
+                          : formatCurrency(parseFloat(creditNote.total), creditNote.currencyCode, currencies)
+                        }
                       </div>
                       {parseFloat(creditNote.balanceRemaining) > 0 && (
                         <div className="text-xs text-muted-foreground">
-                          Balance: ${parseFloat(creditNote.balanceRemaining).toFixed(2)}
+                          Balance: {currenciesLoading 
+                            ? '...' 
+                            : formatCurrency(parseFloat(creditNote.balanceRemaining), creditNote.currencyCode, currencies)
+                          }
                         </div>
                       )}
                     </div>

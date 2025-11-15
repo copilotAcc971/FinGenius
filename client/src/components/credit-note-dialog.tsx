@@ -1,4 +1,4 @@
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,12 +11,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { type CreditNote, type Customer, type Invoice, type Item, type Tax, insertCreditNoteSchema, type CreditNoteLineItem } from "@shared/schema";
+import { type CreditNote, type Customer, type Invoice, type Item, type Tax, type Currency, insertCreditNoteSchema, type CreditNoteLineItem } from "@shared/schema";
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { formatCurrency } from "@/lib/currency-utils";
 
 const creditNoteFormSchema = insertCreditNoteSchema.extend({
   creditNoteDate: z.string(),
+  currencyCode: z.string().length(3, "Currency code must be 3 characters").min(1, "Currency is required"),
 });
 
 interface CreditNoteDialogProps {
@@ -51,6 +53,11 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
     enabled: !!currentTenant?.id && open,
   });
 
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
+  });
+
   const { data: existingLineItems } = useQuery<CreditNoteLineItem[]>({
     queryKey: ["/api/credit-notes", creditNote?.id, "line-items", { tenantId: currentTenant?.id }],
     queryFn: async () => {
@@ -64,11 +71,51 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
     enabled: !!creditNote?.id && !!currentTenant?.id && open,
   });
 
+  // Currency variables
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
+  // availableCurrencies with useMemo (seeded pattern)
+  const availableCurrencies = useMemo(() => {
+    // If editing credit note and currencies not loaded yet, create placeholder
+    if (creditNote?.currencyCode && currencies.length === 0) {
+      return [{
+        code: creditNote.currencyCode,
+        name: creditNote.currencyCode,
+        symbol: creditNote.currencyCode,
+        isActive: false,
+        decimalPlaces: 2,
+        isBaseCurrency: false,
+        tenantId: currentTenant?.id || '',
+        id: 'placeholder'
+      }];
+    }
+    
+    // Start with all active currencies
+    const available = [...activeCurrencies];
+    
+    // Add ALL inactive currencies (not just credit note's currency)
+    const inactiveCurrencies = currencies.filter(c => !c.isActive);
+    for (const inactive of inactiveCurrencies) {
+      if (!available.find(c => c.code === inactive.code)) {
+        available.push(inactive);
+      }
+    }
+    
+    // Sort: active currencies first (alphabetically), then inactive
+    return available.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [activeCurrencies, currencies, creditNote?.currencyCode, currentTenant?.id]);
+
   const form = useForm<z.infer<typeof creditNoteFormSchema>>({
     resolver: zodResolver(creditNoteFormSchema),
     defaultValues: {
       tenantId: currentTenant?.id || "",
       customerId: "",
+      currencyCode: "USD",
       invoiceId: "",
       creditNoteDate: new Date().toISOString().split('T')[0],
       status: "draft",
@@ -81,11 +128,16 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
     },
   });
 
+  // Watch currency for totals display
+  const selectedCurrencyCode = useWatch({ control: form.control, name: "currencyCode" });
+  const safeCurrencyCode = selectedCurrencyCode || baseCurrency?.code || 'USD';
+
   useEffect(() => {
     if (creditNote) {
       form.reset({
         tenantId: creditNote.tenantId,
         customerId: creditNote.customerId,
+        currencyCode: creditNote.currencyCode,
         invoiceId: creditNote.invoiceId || "",
         creditNoteDate: new Date(creditNote.creditNoteDate).toISOString().split('T')[0],
         status: creditNote.status,
@@ -100,6 +152,7 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
       form.reset({
         tenantId: currentTenant?.id || "",
         customerId: "",
+        currencyCode: baseCurrency?.code || "USD",
         invoiceId: "",
         creditNoteDate: new Date().toISOString().split('T')[0],
         status: "draft",
@@ -125,7 +178,21 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
     } else if (!creditNote) {
       setLineItems([]);
     }
-  }, [creditNote, existingLineItems, currentTenant, form]);
+  }, [creditNote, existingLineItems, currentTenant, baseCurrency, form]);
+
+  // CRITICAL: Guarded form reset (prevents data corruption)
+  // Only runs for NEW credit notes, NEVER when editing
+  useEffect(() => {
+    if (!open || creditNote) return; // Only for new credit notes - prevents corruption
+    if (currenciesLoading) return; // Wait for currencies to load
+    
+    // Reset form with loaded data while preserving any user edits
+    const currentValues = form.getValues();
+    form.reset({
+      ...currentValues,
+      currencyCode: baseCurrency?.code || "USD",
+    });
+  }, [open, creditNote, currenciesLoading, baseCurrency, form]);
 
   const calculateTotals = (items: any[]) => {
     const subtotal = items.reduce((sum, item) => {
@@ -186,10 +253,7 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
     form.setValue("subtotal", totals.subtotal);
     form.setValue("taxAmount", totals.taxAmount);
     form.setValue("total", totals.total);
-    // Only set balanceRemaining to total if this is a new credit note
-    if (!creditNote) {
-      form.setValue("balanceRemaining", totals.total);
-    }
+    form.setValue("balanceRemaining", totals.total);
   };
 
   const onSubmit = async (data: z.infer<typeof creditNoteFormSchema>) => {
@@ -291,21 +355,25 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
-                name="invoiceId"
+                name="currencyCode"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Related Invoice (Optional)</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                    <FormLabel>Currency</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
-                        <SelectTrigger data-testid="select-invoice">
-                          <SelectValue placeholder="Select invoice" />
+                        <SelectTrigger data-testid="select-currency" disabled={currenciesLoading}>
+                          <SelectValue placeholder="Loading currencies..." />
                         </SelectTrigger>
                       </FormControl>
-                      <SelectContent position="popper">
-                        <SelectItem value="">None</SelectItem>
-                        {invoices?.map((invoice) => (
-                          <SelectItem key={invoice.id} value={invoice.id} data-testid={`option-invoice-${invoice.id}`}>
-                            {invoice.invoiceNumber} - ${parseFloat(invoice.total).toFixed(2)}
+                      <SelectContent>
+                        {availableCurrencies.map(currency => (
+                          <SelectItem 
+                            key={currency.code} 
+                            value={currency.code}
+                            data-testid={`option-currency-${currency.code}`}
+                          >
+                            {currency.code} - {currency.name} ({currency.symbol})
+                            {!currency.isActive && ' (Inactive)'}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -332,6 +400,36 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
 
             <FormField
               control={form.control}
+              name="invoiceId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Related Invoice (Optional)</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value || ""}>
+                    <FormControl>
+                      <SelectTrigger data-testid="select-invoice">
+                        <SelectValue placeholder="Select invoice" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent position="popper">
+                      <SelectItem value="">None</SelectItem>
+                      {invoices?.map((invoice) => (
+                        <SelectItem key={invoice.id} value={invoice.id} data-testid={`option-invoice-${invoice.id}`}>
+                          {invoice.invoiceNumber} - {formatCurrency(
+                            parseFloat(invoice.total || "0"),
+                            invoice.currencyCode,
+                            currencies
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="reason"
               render={({ field }) => (
                 <FormItem>
@@ -354,60 +452,85 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
               </div>
 
               {lineItems.map((item, index) => (
-                <div key={index} className="grid grid-cols-12 gap-2 items-end p-2 border rounded">
-                  <div className="col-span-3">
-                    <Input
-                      placeholder="Description"
-                      value={item.description}
-                      onChange={(e) => updateLineItem(index, "description", e.target.value)}
-                      data-testid={`input-line-description-${index}`}
-                    />
+                <div key={index} className="space-y-2 p-2 border rounded">
+                  <div className="grid grid-cols-12 gap-2">
+                    <div className="col-span-3">
+                      <Input
+                        placeholder="Description"
+                        value={item.description}
+                        onChange={(e) => updateLineItem(index, "description", e.target.value)}
+                        data-testid={`input-line-description-${index}`}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Input
+                        type="number"
+                        placeholder="Quantity"
+                        value={item.quantity}
+                        onChange={(e) => updateLineItem(index, "quantity", e.target.value)}
+                        data-testid={`input-line-quantity-${index}`}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Input
+                        type="number"
+                        placeholder="Unit Price"
+                        value={item.unitPrice}
+                        onChange={(e) => updateLineItem(index, "unitPrice", e.target.value)}
+                        data-testid={`input-line-price-${index}`}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Input
+                        type="number"
+                        placeholder="Discount"
+                        value={item.discount}
+                        onChange={(e) => updateLineItem(index, "discount", e.target.value)}
+                        data-testid={`input-line-discount-${index}`}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Input
+                        value={item.amount}
+                        disabled
+                        placeholder="Amount"
+                        data-testid={`input-line-amount-${index}`}
+                      />
+                    </div>
+                    <div className="col-span-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => removeLineItem(index)}
+                        data-testid={`button-remove-line-${index}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="col-span-2">
-                    <Input
-                      type="number"
-                      placeholder="Quantity"
-                      value={item.quantity}
-                      onChange={(e) => updateLineItem(index, "quantity", e.target.value)}
-                      data-testid={`input-line-quantity-${index}`}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Input
-                      type="number"
-                      placeholder="Unit Price"
-                      value={item.unitPrice}
-                      onChange={(e) => updateLineItem(index, "unitPrice", e.target.value)}
-                      data-testid={`input-line-price-${index}`}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Input
-                      type="number"
-                      placeholder="Discount"
-                      value={item.discount}
-                      onChange={(e) => updateLineItem(index, "discount", e.target.value)}
-                      data-testid={`input-line-discount-${index}`}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Input
-                      value={item.amount}
-                      disabled
-                      placeholder="Amount"
-                      data-testid={`input-line-amount-${index}`}
-                    />
-                  </div>
-                  <div className="col-span-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => removeLineItem(index)}
-                      data-testid={`button-remove-line-${index}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                  <div className="grid grid-cols-12 gap-2">
+                    <div className="col-span-3">
+                      <Select
+                        value={item.taxId}
+                        onValueChange={(value) => updateLineItem(index, "taxId", value)}
+                      >
+                        <SelectTrigger data-testid={`select-tax-${index}`}>
+                          <SelectValue placeholder="Select tax (optional)" />
+                        </SelectTrigger>
+                        <SelectContent position="popper">
+                          <SelectItem value="" data-testid="option-no-tax">No Tax</SelectItem>
+                          {taxes
+                            ?.filter(tax => !tax.currencyCode || tax.currencyCode === 'All' || tax.currencyCode === safeCurrencyCode)
+                            .map((tax) => (
+                              <SelectItem key={tax.id} value={tax.id} data-testid={`option-tax-${tax.id}`}>
+                                {tax.name} ({tax.rate}%) - {tax.currencyCode || 'All'}
+                              </SelectItem>
+                            ))
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -415,9 +538,36 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
 
             <div className="flex justify-end space-x-4 pt-4 border-t">
               <div className="text-right">
-                <p className="text-sm text-muted-foreground">Subtotal: ${form.watch("subtotal")}</p>
-                <p className="text-sm text-muted-foreground">Tax: ${form.watch("taxAmount")}</p>
-                <p className="text-lg font-semibold" data-testid="text-credit-note-total">Total: ${form.watch("total")}</p>
+                <p className="text-sm text-muted-foreground">
+                  Subtotal: {formatCurrency(
+                    parseFloat(form.watch("subtotal") || "0"),
+                    safeCurrencyCode,
+                    currencies
+                  )}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Tax: {formatCurrency(
+                    parseFloat(form.watch("taxAmount") || "0"),
+                    safeCurrencyCode,
+                    currencies
+                  )}
+                </p>
+                <p className="text-lg font-semibold" data-testid="text-credit-note-total">
+                  Total: {formatCurrency(
+                    parseFloat(form.watch("total") || "0"),
+                    safeCurrencyCode,
+                    currencies
+                  )}
+                </p>
+                {creditNote && (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Balance Remaining: {formatCurrency(
+                      parseFloat(form.watch("balanceRemaining") || "0"),
+                      safeCurrencyCode,
+                      currencies
+                    )}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -439,7 +589,7 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting} data-testid="button-submit">
+              <Button type="submit" disabled={currenciesLoading || isSubmitting} data-testid="button-submit">
                 {isSubmitting ? "Saving..." : creditNote ? "Update Credit Note" : "Create Credit Note"}
               </Button>
             </div>
