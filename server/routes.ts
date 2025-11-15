@@ -24,6 +24,7 @@ import {
   updateExchangeRatesForTenant
 } from './services/fx-rates';
 import { triggerManualFXRatesUpdate } from './jobs/fx-rates-update';
+import { getClosingRate, getAverageRate } from './fx-translation';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -65,6 +66,7 @@ import {
   bankAccounts,
   customers,
   vendors,
+  currencies,
 } from "@shared/schema";
 import { insertFXConfigSchema } from "@shared/fx-types";
 
@@ -118,6 +120,46 @@ async function verifyTenantAccess(req: any, res: any, next: any) {
     console.error("Error verifying tenant access:", error);
     res.status(500).json({ message: "Failed to verify tenant access" });
   }
+}
+
+// Helper function for IFRS-compliant FX translation in reports
+async function translateReportAmount(
+  amount: number,
+  fromCurrency: string,
+  baseCurrency: string,
+  accountType: "asset" | "liability" | "equity" | "revenue" | "expense" | "income",
+  reportDate: Date,
+  periodStart: Date,
+  incomeExpenseMethod: string
+): Promise<{ translatedAmount: number; exchangeDifference: number }> {
+  
+  if (fromCurrency === baseCurrency) {
+    return { translatedAmount: amount, exchangeDifference: 0 };
+  }
+
+  let rate: number;
+  
+  // Determine translation method based on account type and IFRS config
+  if (accountType === "asset" || accountType === "liability") {
+    // Monetary items: closing rate
+    rate = await getClosingRate(fromCurrency, baseCurrency, reportDate);
+  } else if (accountType === "equity") {
+    // Equity: historical rate (use closing as proxy)
+    rate = await getClosingRate(fromCurrency, baseCurrency, reportDate);
+  } else {
+    // Revenue/Expense/Income: based on configuration
+    if (incomeExpenseMethod === "average-rate") {
+      rate = await getAverageRate(fromCurrency, baseCurrency, periodStart, reportDate);
+    } else {
+      // Transaction date rate - use closing as proxy
+      rate = await getClosingRate(fromCurrency, baseCurrency, reportDate);
+    }
+  }
+
+  const translatedAmount = amount * rate;
+  const exchangeDifference = translatedAmount - amount;
+
+  return { translatedAmount, exchangeDifference };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -3099,8 +3141,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid date format" });
       }
 
+      // Get base report data
       const report = await storage.getProfitLossReport(tenantId, start, end);
-      res.json(report);
+      
+      // Fetch company profile for IFRS FX config
+      const profile = await storage.getCompanyProfile(tenantId);
+      
+      // Get base currency from currencies table
+      const baseCurrencyRecord = await db.query.currencies.findFirst({
+        where: and(
+          eq(currencies.tenantId, tenantId),
+          eq(currencies.isBaseCurrency, true)
+        )
+      });
+      
+      const baseCurrency = baseCurrencyRecord?.code || "USD";
+      const incomeExpenseMethod = profile?.fxIncomeExpenseMethod || "average-rate";
+      const fxTranslationStandard = profile?.fxTranslationStandard || "ifrs-sme";
+      
+      // For now, assume all amounts are already in base currency
+      // Future enhancement: Track currency per transaction and apply translation
+      const exchangeDifferences = {
+        totalRevenueExchangeDifference: 0,
+        totalExpenseExchangeDifference: 0,
+        netExchangeDifference: 0
+      };
+      
+      // Add FX metadata to response
+      const enrichedReport = {
+        ...report,
+        baseCurrency,
+        fxTranslationStandard,
+        incomeExpenseMethod,
+        exchangeDifferences,
+        fxTranslationApplied: false, // Will be true when we track currencies at transaction level
+      };
+      
+      res.json(enrichedReport);
     } catch (error: any) {
       console.error("Error generating profit & loss report:", error);
       res.status(500).json({ message: "Failed to generate profit & loss report" });
@@ -3122,8 +3199,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid date format" });
       }
 
+      // Get base report data
       const report = await storage.getBalanceSheetReport(tenantId, asOf);
-      res.json(report);
+      
+      // Fetch company profile for IFRS FX config
+      const profile = await storage.getCompanyProfile(tenantId);
+      
+      // Get base currency from currencies table
+      const baseCurrencyRecord = await db.query.currencies.findFirst({
+        where: and(
+          eq(currencies.tenantId, tenantId),
+          eq(currencies.isBaseCurrency, true)
+        )
+      });
+      
+      const baseCurrency = baseCurrencyRecord?.code || "USD";
+      const fxTranslationStandard = profile?.fxTranslationStandard || "ifrs-sme";
+      
+      // For now, assume all amounts are already in base currency
+      // Future enhancement: Track currency per transaction and apply closing rate translation
+      const exchangeDifferences = {
+        unrealizedAssetExchangeDifference: 0,
+        unrealizedLiabilityExchangeDifference: 0,
+        netUnrealizedExchangeDifference: 0
+      };
+      
+      // Add FX metadata to response
+      const enrichedReport = {
+        ...report,
+        baseCurrency,
+        fxTranslationStandard,
+        translationMethod: "closing-rate", // Monetary items use closing rate per IFRS
+        exchangeDifferences,
+        fxTranslationApplied: false, // Will be true when we track currencies at transaction level
+      };
+      
+      res.json(enrichedReport);
     } catch (error: any) {
       console.error("Error generating balance sheet report:", error);
       res.status(500).json({ message: "Failed to generate balance sheet report" });
@@ -3145,8 +3256,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid date format" });
       }
 
+      // Get base report data
       const report = await storage.getTrialBalanceReport(tenantId, asOf);
-      res.json(report);
+      
+      // Fetch company profile for IFRS FX config
+      const profile = await storage.getCompanyProfile(tenantId);
+      
+      // Get base currency from currencies table
+      const baseCurrencyRecord = await db.query.currencies.findFirst({
+        where: and(
+          eq(currencies.tenantId, tenantId),
+          eq(currencies.isBaseCurrency, true)
+        )
+      });
+      
+      const baseCurrency = baseCurrencyRecord?.code || "USD";
+      const fxTranslationStandard = profile?.fxTranslationStandard || "ifrs-sme";
+      
+      // For trial balance, we would show both original currency and translated amounts
+      // For now, all amounts are assumed to be in base currency
+      // Future enhancement: Add currency column and show multi-currency details
+      
+      // Add FX metadata to response
+      const enrichedReport = {
+        ...report,
+        baseCurrency,
+        fxTranslationStandard,
+        showMultiCurrency: false, // Will be true when we track currencies at transaction level
+        fxTranslationApplied: false,
+      };
+      
+      res.json(enrichedReport);
     } catch (error: any) {
       console.error("Error generating trial balance report:", error);
       res.status(500).json({ message: "Failed to generate trial balance report" });
