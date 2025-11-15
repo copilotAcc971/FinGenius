@@ -52,6 +52,7 @@ import { useTenant } from "@/hooks/useTenant";
 import { Plus, Trash2, Loader2, AlertCircle, Download } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Link } from "wouter";
+import { formatCurrency } from "@/lib/currency-utils";
 
 const safeParseFloat = (value: string | number | null | undefined): number => {
   if (value === '' || value === null || value === undefined) return 0;
@@ -194,6 +195,11 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
   const watchedCustomerId = useWatch({
     control: form.control,
     name: "invoice.customerId",
+  });
+
+  const selectedCurrencyCode = useWatch({
+    control: form.control,
+    name: "invoice.currencyCode",
   });
 
   // Filter active currencies and find base currency
@@ -1064,25 +1070,25 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
               <div className="flex justify-end gap-4">
                 <span className="text-sm text-muted-foreground min-w-32 text-right">Subtotal:</span>
                 <span className="font-mono font-medium min-w-24 text-right" data-testid="text-subtotal">
-                  ${calculatedValues.subtotal}
+                  {formatCurrency(parseFloat(calculatedValues.subtotal), selectedCurrencyCode || baseCurrency?.code || 'USD', currenciesLoading ? [] : currencies)}
                 </span>
               </div>
               <div className="flex justify-end gap-4">
                 <span className="text-sm text-muted-foreground min-w-32 text-right">Total Discount:</span>
                 <span className="font-mono font-medium min-w-24 text-right text-destructive" data-testid="text-total-discount">
-                  -${calculatedValues.totalDiscount}
+                  -{formatCurrency(parseFloat(calculatedValues.totalDiscount), selectedCurrencyCode || baseCurrency?.code || 'USD', currenciesLoading ? [] : currencies)}
                 </span>
               </div>
               <div className="flex justify-end gap-4">
                 <span className="text-sm text-muted-foreground min-w-32 text-right">Total Tax:</span>
                 <span className="font-mono font-medium min-w-24 text-right" data-testid="text-total-tax">
-                  ${calculatedValues.totalTax}
+                  {formatCurrency(parseFloat(calculatedValues.totalTax), selectedCurrencyCode || baseCurrency?.code || 'USD', currenciesLoading ? [] : currencies)}
                 </span>
               </div>
               <div className="flex justify-end gap-4 pt-2 border-t">
                 <span className="text-lg font-semibold min-w-32 text-right">Total Amount:</span>
                 <span className="text-lg font-mono font-bold min-w-24 text-right" data-testid="text-total">
-                  ${calculatedValues.total}
+                  {formatCurrency(parseFloat(calculatedValues.total), selectedCurrencyCode || baseCurrency?.code || 'USD', currenciesLoading ? [] : currencies)}
                 </span>
               </div>
             </div>

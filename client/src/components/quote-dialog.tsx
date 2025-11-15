@@ -1,4 +1,4 @@
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,13 +11,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { type Quote, type Customer, type Item, type Tax, insertQuoteSchema, type QuoteLineItem, type TenantCompanyProfile } from "@shared/schema";
+import { type Quote, type Customer, type Item, type Tax, type Currency, insertQuoteSchema, type QuoteLineItem, type TenantCompanyProfile } from "@shared/schema";
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { formatCurrency } from "@/lib/currency-utils";
 
 const quoteFormSchema = insertQuoteSchema.extend({
   quoteDate: z.string(),
   expiryDate: z.string(),
+  currencyCode: z.string().length(3, "Currency code must be 3 characters").min(1, "Currency is required"),
 });
 
 interface QuoteDialogProps {
@@ -52,6 +54,11 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
     enabled: !!currentTenant?.id && open,
   });
 
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
+    enabled: !!currentTenant?.id && open,
+  });
+
   const { data: existingLineItems } = useQuery<QuoteLineItem[]>({
     queryKey: ["/api/quotes", quote?.id, "line-items", { tenantId: currentTenant?.id }],
     queryFn: async () => {
@@ -65,11 +72,56 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
     enabled: !!quote?.id && !!currentTenant?.id && open,
   });
 
+  // Filter active currencies and find base currency
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
+  // Get the currency for the current quote (if editing)
+  const currentCurrency = quote?.currencyCode 
+    ? currencies.find(c => c.code === quote.currencyCode)
+    : null;
+
+  // Build available currencies list with useMemo
+  const availableCurrencies = useMemo(() => {
+    // If editing quote and currencies not loaded yet, create placeholder
+    if (quote?.currencyCode && currencies.length === 0) {
+      return [{
+        code: quote.currencyCode,
+        name: quote.currencyCode,
+        symbol: quote.currencyCode,
+        isActive: false,
+        decimalPlaces: 2,
+        isBaseCurrency: false,
+        tenantId: currentTenant?.id || '',
+        id: 'placeholder'
+      }];
+    }
+    
+    // Start with all active currencies
+    const available = [...activeCurrencies];
+    
+    // Add ALL inactive currencies (not just quote's currency)
+    const inactiveCurrencies = currencies.filter(c => !c.isActive);
+    for (const inactive of inactiveCurrencies) {
+      if (!available.find(c => c.code === inactive.code)) {
+        available.push(inactive);
+      }
+    }
+    
+    // Sort: active currencies first (alphabetically), then inactive
+    return available.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [activeCurrencies, currencies, quote?.currencyCode, currentTenant?.id]);
+
   const form = useForm<z.infer<typeof quoteFormSchema>>({
     resolver: zodResolver(quoteFormSchema),
     defaultValues: {
       tenantId: currentTenant?.id || "",
       customerId: "",
+      currencyCode: "USD",
       quoteSubject: "",
       issuerTaxId: "",
       customerTaxId: "",
@@ -83,11 +135,18 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
     },
   });
 
+  // Watch currency code for totals formatting
+  const selectedCurrencyCode = useWatch({
+    control: form.control,
+    name: "currencyCode",
+  });
+
   useEffect(() => {
     if (quote) {
       form.reset({
         tenantId: quote.tenantId,
         customerId: quote.customerId,
+        currencyCode: quote.currencyCode,
         quoteSubject: quote.quoteSubject || "",
         issuerTaxId: quote.issuerTaxId || "",
         customerTaxId: quote.customerTaxId || "",
@@ -103,6 +162,7 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
       form.reset({
         tenantId: currentTenant?.id || "",
         customerId: "",
+        currencyCode: baseCurrency?.code || "USD",
         quoteSubject: "",
         issuerTaxId: companyProfile?.taxRegistrationNumber || "",
         customerTaxId: "",
@@ -129,7 +189,22 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
     } else if (!quote) {
       setLineItems([]);
     }
-  }, [quote, existingLineItems, currentTenant, companyProfile, form]);
+  }, [quote, existingLineItems, currentTenant, companyProfile, baseCurrency, form]);
+
+  // CRITICAL: Guarded form reset for new quotes only (prevents data corruption when editing)
+  useEffect(() => {
+    if (!open || quote) return; // NEVER runs when editing
+    if (currenciesLoading) return; // Wait for currencies to load
+    
+    // Only runs for NEW quotes
+    const currentValues = form.getValues();
+    form.reset({
+      ...currentValues,
+      tenantId: currentTenant?.id || "",
+      currencyCode: baseCurrency?.code || "USD",
+      issuerTaxId: companyProfile?.taxRegistrationNumber || "",
+    });
+  }, [open, quote, currenciesLoading, baseCurrency, currentTenant, companyProfile, form]);
 
   const calculateTotals = (items: any[]) => {
     const subtotal = items.reduce((sum, item) => {
@@ -287,6 +362,32 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
               )}
             />
 
+            <FormField
+              control={form.control}
+              name="currencyCode"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Currency</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger data-testid="select-currency" disabled={currenciesLoading}>
+                        <SelectValue placeholder="Loading currencies..." />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {availableCurrencies.map(currency => (
+                        <SelectItem key={currency.code} value={currency.code}>
+                          {currency.code} - {currency.name} ({currency.symbol})
+                          {!currency.isActive && ' (Inactive)'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -400,11 +501,30 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
               ))}
             </div>
 
+            {/* Totals Section */}
             <div className="flex justify-end space-x-4 pt-4 border-t">
               <div className="text-right">
-                <p className="text-sm text-muted-foreground">Subtotal: ${form.watch("subtotal")}</p>
-                <p className="text-sm text-muted-foreground">Tax: ${form.watch("taxAmount")}</p>
-                <p className="text-lg font-semibold" data-testid="text-quote-total">Total: ${form.watch("total")}</p>
+                <p className="text-sm text-muted-foreground" data-testid="text-quote-subtotal">
+                  Subtotal: {formatCurrency(
+                    parseFloat(form.watch("subtotal") || "0"),
+                    selectedCurrencyCode || baseCurrency?.code || 'USD',
+                    currenciesLoading ? [] : currencies
+                  )}
+                </p>
+                <p className="text-sm text-muted-foreground" data-testid="text-quote-tax">
+                  Tax: {formatCurrency(
+                    parseFloat(form.watch("taxAmount") || "0"),
+                    selectedCurrencyCode || baseCurrency?.code || 'USD',
+                    currenciesLoading ? [] : currencies
+                  )}
+                </p>
+                <p className="text-lg font-semibold" data-testid="text-quote-total">
+                  Total: {formatCurrency(
+                    parseFloat(form.watch("total") || "0"),
+                    selectedCurrencyCode || baseCurrency?.code || 'USD',
+                    currenciesLoading ? [] : currencies
+                  )}
+                </p>
               </div>
             </div>
 
@@ -426,7 +546,7 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting} data-testid="button-submit">
+              <Button type="submit" disabled={currenciesLoading || isSubmitting} data-testid="button-submit">
                 {isSubmitting ? "Saving..." : quote ? "Update Quote" : "Create Quote"}
               </Button>
             </div>

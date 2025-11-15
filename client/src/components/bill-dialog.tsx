@@ -43,6 +43,7 @@ import { useTenant } from "@/hooks/useTenant";
 import { Plus, Trash2, Loader2, Upload, X, Sparkles, Tag } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { formatCurrency } from "@/lib/currency-utils";
 
 const safeParseFloat = (value: string | number | null | undefined): number => {
   if (value === '' || value === null || value === undefined) return 0;
@@ -200,6 +201,11 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
   const watchedLineItems = useWatch({
     control: form.control,
     name: "lineItems",
+  });
+
+  const selectedCurrencyCode = useWatch({
+    control: form.control,
+    name: "bill.currencyCode",
   });
 
   // Calculate amounts and totals using useMemo
@@ -852,7 +858,9 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
               <div className="space-y-2">
                 <div className="flex justify-between">
                   <span>Subtotal:</span>
-                  <span data-testid="text-bill-subtotal">${calculatedValues.subtotal}</span>
+                  <span data-testid="text-bill-subtotal">
+                    {formatCurrency(parseFloat(calculatedValues.subtotal), selectedCurrencyCode || baseCurrency?.code || 'USD', currenciesLoading ? [] : currencies)}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span>Tax:</span>
@@ -875,7 +883,9 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
                 </div>
                 <div className="flex justify-between font-bold text-lg">
                   <span>Total:</span>
-                  <span data-testid="text-bill-total">${calculatedValues.total}</span>
+                  <span data-testid="text-bill-total">
+                    {formatCurrency(parseFloat(calculatedValues.total), selectedCurrencyCode || baseCurrency?.code || 'USD', currenciesLoading ? [] : currencies)}
+                  </span>
                 </div>
               </div>
             </div>

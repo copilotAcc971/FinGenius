@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
-import { type Quote } from "@shared/schema";
+import { type Quote, type Currency } from "@shared/schema";
 import { QuoteDialog } from "@/components/quote-dialog";
 import { useState } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -19,6 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { formatCurrency } from "@/lib/currency-utils";
 
 export default function QuotesPage() {
   const { currentTenant } = useTenant();
@@ -31,6 +32,11 @@ export default function QuotesPage() {
 
   const { data: quotes, isLoading } = useQuery<Quote[]>({
     queryKey: ["/api/quotes", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
     enabled: !!currentTenant?.id,
   });
 
@@ -155,7 +161,7 @@ export default function QuotesPage() {
                   <div className="flex items-center gap-2">
                     {getStatusBadge(quote.status)}
                     <span className="text-lg font-semibold" data-testid={`text-quote-total-${quote.id}`}>
-                      ${parseFloat(quote.total).toFixed(2)}
+                      {currenciesLoading ? '...' : formatCurrency(parseFloat(quote.total), quote.currencyCode, currencies)}
                     </span>
                   </div>
                 </div>
