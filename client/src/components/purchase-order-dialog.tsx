@@ -9,7 +9,9 @@ import {
   type PurchaseOrderLineItem,
   type Item,
   type Tax,
+  type Currency,
 } from "@shared/schema";
+import { formatCurrency } from "@/lib/currency-utils";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,6 +65,7 @@ const formSchema = z.object({
   purchaseOrder: z.object({
     tenantId: z.string(),
     vendorId: z.string().min(1, "Vendor is required"),
+    currencyCode: z.string().length(3, "Currency code must be 3 characters").min(1, "Currency is required"),
     orderDate: z.string().min(1, "Order date is required"),
     expectedDate: z.string().optional(),
     status: z.string(),
@@ -109,10 +112,57 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
     enabled: !!currentTenant?.id && open,
   });
 
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id && open,
+  });
+
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
   const { data: lineItems, isLoading: lineItemsLoading } = useQuery<PurchaseOrderLineItem[]>({
     queryKey: [`/api/purchase-orders/${purchaseOrder?.id}/line-items`, { tenantId: currentTenant?.id }],
     enabled: !!purchaseOrder?.id && !!currentTenant?.id && open,
   });
+
+  // availableCurrencies with useMemo (seeded pattern)
+  const availableCurrencies = useMemo(() => {
+    // If editing purchase order and currencies not loaded yet, create placeholder
+    if (purchaseOrder?.currencyCode && currencies.length === 0) {
+      return [{
+        code: purchaseOrder.currencyCode,
+        name: purchaseOrder.currencyCode,
+        symbol: purchaseOrder.currencyCode,
+        isActive: false,
+        decimalPlaces: 2,
+        isBaseCurrency: false,
+        tenantId: currentTenant?.id || '',
+        id: 'placeholder'
+      }];
+    }
+    
+    // Start with all active currencies
+    const available = [...activeCurrencies];
+    
+    // Add ALL inactive currencies (not just purchase order's currency)
+    const inactiveCurrencies = currencies.filter(c => !c.isActive);
+    for (const inactive of inactiveCurrencies) {
+      if (!available.find(c => c.code === inactive.code)) {
+        available.push(inactive);
+      }
+    }
+    
+    // Sort: active currencies first (alphabetically), then inactive
+    return available.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [activeCurrencies, currencies, purchaseOrder?.currencyCode, currentTenant?.id]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -120,6 +170,7 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
       purchaseOrder: {
         tenantId: currentTenant?.id || "",
         vendorId: "",
+        currencyCode: "USD",
         orderDate: new Date().toISOString().split('T')[0],
         expectedDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: "draft",
@@ -150,6 +201,10 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
     name: "lineItems",
   });
 
+  // Watch currency for totals display
+  const selectedCurrencyCode = useWatch({ control: form.control, name: "purchaseOrder.currencyCode" });
+  const safeCurrencyCode = selectedCurrencyCode || baseCurrency?.code || 'USD';
+
   // Initialize form when editing
   useEffect(() => {
     if (!open) return;
@@ -159,6 +214,7 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
         purchaseOrder: {
           tenantId: purchaseOrder.tenantId,
           vendorId: purchaseOrder.vendorId,
+          currencyCode: purchaseOrder.currencyCode,
           orderDate: new Date(purchaseOrder.orderDate).toISOString().split('T')[0],
           expectedDate: purchaseOrder.expectedDate ? new Date(purchaseOrder.expectedDate).toISOString().split('T')[0] : "",
           status: purchaseOrder.status,
@@ -189,6 +245,7 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
         purchaseOrder: {
           tenantId: currentTenant?.id || "",
           vendorId: "",
+          currencyCode: baseCurrency?.code || "USD",
           orderDate: new Date().toISOString().split('T')[0],
           expectedDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
           status: "draft",
@@ -208,7 +265,24 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
         }],
       });
     }
-  }, [purchaseOrder, lineItems, lineItemsLoading, open, currentTenant, form]);
+  }, [purchaseOrder, lineItems, lineItemsLoading, open, currentTenant, baseCurrency, form]);
+
+  // CRITICAL: Guarded form reset (prevents data corruption)
+  // Only runs for NEW purchase orders, NEVER when editing
+  useEffect(() => {
+    if (!open || purchaseOrder) return; // Only for new orders - prevents corruption
+    if (currenciesLoading) return; // Wait for currencies to load
+    
+    // Reset form with loaded data while preserving any user edits
+    const currentValues = form.getValues();
+    form.reset({
+      ...currentValues,
+      purchaseOrder: {
+        ...currentValues.purchaseOrder,
+        currencyCode: baseCurrency?.code || "USD",
+      },
+    });
+  }, [open, purchaseOrder, currenciesLoading, baseCurrency, form]);
 
   // Calculate totals whenever line items change
   useEffect(() => {
@@ -397,6 +471,43 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
+                    name="purchaseOrder.currencyCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Currency</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-currency" disabled={currenciesLoading}>
+                              <SelectValue placeholder={currenciesLoading ? "Loading currencies..." : "Select currency"} />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {availableCurrencies.map(currency => (
+                              <SelectItem 
+                                key={currency.code} 
+                                value={currency.code}
+                                data-testid={`option-currency-${currency.code}`}
+                              >
+                                {currency.code} - {currency.name} ({currency.symbol})
+                                {!currency.isActive && ' (Inactive)'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                        {currenciesError && (
+                          <div className="text-destructive text-sm mt-1">
+                            Failed to load currencies. Please refresh the page.
+                          </div>
+                        )}
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
                     name="purchaseOrder.orderDate"
                     render={({ field }) => (
                       <FormItem>
@@ -507,11 +618,13 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
                                 </FormControl>
                                 <SelectContent>
                                   <SelectItem value="">No tax</SelectItem>
-                                  {taxes.map((tax) => (
-                                    <SelectItem key={tax.id} value={tax.id}>
-                                      {tax.name} ({tax.rate}%)
-                                    </SelectItem>
-                                  ))}
+                                  {taxes
+                                    ?.filter(tax => !tax.currencyCode || tax.currencyCode === 'All' || tax.currencyCode === safeCurrencyCode)
+                                    .map((tax) => (
+                                      <SelectItem key={tax.id} value={tax.id}>
+                                        {tax.name} ({tax.rate}%){tax.currencyCode ? ` - ${tax.currencyCode}` : ' - All'}
+                                      </SelectItem>
+                                    ))}
                                 </SelectContent>
                               </Select>
                             </FormItem>
@@ -605,19 +718,31 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground">Subtotal:</span>
                           <span className="font-mono" data-testid="text-subtotal">
-                            ${safeParseFloat(form.watch("purchaseOrder.subtotal")).toFixed(2)}
+                            {formatCurrency(
+                              safeParseFloat(form.watch("purchaseOrder.subtotal")),
+                              safeCurrencyCode,
+                              currencies
+                            )}
                           </span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground">Tax:</span>
                           <span className="font-mono" data-testid="text-tax">
-                            ${safeParseFloat(form.watch("purchaseOrder.taxAmount")).toFixed(2)}
+                            {formatCurrency(
+                              safeParseFloat(form.watch("purchaseOrder.taxAmount")),
+                              safeCurrencyCode,
+                              currencies
+                            )}
                           </span>
                         </div>
                         <div className="flex justify-between font-semibold text-lg border-t pt-2">
                           <span>Total:</span>
                           <span className="font-mono" data-testid="text-total">
-                            ${safeParseFloat(form.watch("purchaseOrder.total")).toFixed(2)}
+                            {formatCurrency(
+                              safeParseFloat(form.watch("purchaseOrder.total")),
+                              safeCurrencyCode,
+                              currencies
+                            )}
                           </span>
                         </div>
                       </div>
@@ -678,7 +803,7 @@ export function PurchaseOrderDialog({ open, onOpenChange, purchaseOrder }: Purch
               </Button>
               <Button 
                 type="submit" 
-                disabled={mutation.isPending}
+                disabled={currenciesLoading || currenciesError || mutation.isPending}
                 data-testid="button-save"
               >
                 {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

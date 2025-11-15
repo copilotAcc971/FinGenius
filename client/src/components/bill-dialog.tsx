@@ -106,10 +106,17 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
     enabled: !!currentTenant?.id && open,
   });
 
-  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
-    queryKey: ["/api/currencies", currentTenant?.id],
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
+
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
 
   const { data: lineItems, isLoading: lineItemsLoading } = useQuery<BillLineItem[]>({
     queryKey: ["/api/bills", bill?.id, "line-items", currentTenant?.id],
@@ -123,15 +130,6 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
     },
     enabled: !!bill?.id && !!currentTenant?.id && open,
   });
-
-  // Filter active currencies and find base currency
-  const activeCurrencies = currencies.filter(c => c.isActive);
-  const baseCurrency = currencies.find(c => c.isBaseCurrency);
-
-  // Get the currency for the current bill (if editing)
-  const currentCurrency = bill?.currencyCode 
-    ? currencies.find(c => c.code === bill.currencyCode)
-    : null;
 
   // Build available currencies list with useMemo
   const availableCurrencies = useMemo(() => {
@@ -635,6 +633,11 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
                       </SelectContent>
                     </Select>
                     <FormMessage />
+                    {currenciesError && (
+                      <div className="text-destructive text-sm mt-1">
+                        Failed to load currencies. Please refresh the page.
+                      </div>
+                    )}
                   </FormItem>
                 )}
               />
@@ -919,7 +922,7 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
               </Button>
               <Button 
                 type="submit" 
-                disabled={saveMutation.isPending || currenciesLoading}
+                disabled={saveMutation.isPending || currenciesLoading || currenciesError}
                 data-testid="button-save-bill"
               >
                 {saveMutation.isPending && (

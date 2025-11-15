@@ -54,10 +54,17 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
     enabled: !!currentTenant?.id && open,
   });
 
-  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
-    queryKey: ["/api/currencies", currentTenant?.id],
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
+
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
 
   const { data: existingLineItems } = useQuery<QuoteLineItem[]>({
     queryKey: ["/api/quotes", quote?.id, "line-items", { tenantId: currentTenant?.id }],
@@ -71,15 +78,6 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
     },
     enabled: !!quote?.id && !!currentTenant?.id && open,
   });
-
-  // Filter active currencies and find base currency
-  const activeCurrencies = currencies.filter(c => c.isActive);
-  const baseCurrency = currencies.find(c => c.isBaseCurrency);
-
-  // Get the currency for the current quote (if editing)
-  const currentCurrency = quote?.currencyCode 
-    ? currencies.find(c => c.code === quote.currencyCode)
-    : null;
 
   // Build available currencies list with useMemo
   const availableCurrencies = useMemo(() => {
@@ -384,6 +382,11 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
                     </SelectContent>
                   </Select>
                   <FormMessage />
+                  {currenciesError && (
+                    <div className="text-destructive text-sm mt-1">
+                      Failed to load currencies. Please refresh the page.
+                    </div>
+                  )}
                 </FormItem>
               )}
             />
@@ -546,7 +549,7 @@ export function QuoteDialog({ open, onOpenChange, quote }: QuoteDialogProps) {
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={currenciesLoading || isSubmitting} data-testid="button-submit">
+              <Button type="submit" disabled={currenciesLoading || currenciesError || isSubmitting} data-testid="button-submit">
                 {isSubmitting ? "Saving..." : quote ? "Update Quote" : "Create Quote"}
               </Button>
             </div>

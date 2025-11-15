@@ -126,10 +126,17 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
     enabled: !!currentTenant?.id && open,
   });
 
-  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
-    queryKey: ["/api/currencies", currentTenant?.id],
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
+
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
 
   const { data: companyProfile, isLoading: profileLoading } = useQuery<TenantCompanyProfile>({
     queryKey: ["/api/company-profile", currentTenant?.id],
@@ -201,15 +208,6 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
     control: form.control,
     name: "invoice.currencyCode",
   });
-
-  // Filter active currencies and find base currency
-  const activeCurrencies = currencies.filter(c => c.isActive);
-  const baseCurrency = currencies.find(c => c.isBaseCurrency);
-
-  // Get the currency for the current invoice (if editing)
-  const currentCurrency = invoice?.currencyCode 
-    ? currencies.find(c => c.code === invoice.currencyCode)
-    : null;
 
   // Build available currencies list with useMemo
   const availableCurrencies = useMemo(() => {
@@ -853,6 +851,11 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                         </SelectContent>
                       </Select>
                       <FormMessage />
+                      {currenciesError && (
+                        <div className="text-destructive text-sm mt-1">
+                          Failed to load currencies. Please refresh the page.
+                        </div>
+                      )}
                     </FormItem>
                   )}
                 />
@@ -1136,7 +1139,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                       <Button 
                         type="submit" 
                         variant="outline"
-                        disabled={!isDataReady || saveMutation.isPending || lineItemsLoading || currenciesLoading} 
+                        disabled={!isDataReady || saveMutation.isPending || lineItemsLoading || currenciesLoading || currenciesError} 
                         data-testid="button-save-draft"
                       >
                         {saveMutation.isPending ? "Saving..." : "Save as Draft"}
@@ -1157,7 +1160,7 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                       <Button 
                         type="button"
                         onClick={form.handleSubmit(onSaveAndSend)}
-                        disabled={!isDataReady || saveAndSendMutation.isPending || lineItemsLoading || currenciesLoading} 
+                        disabled={!isDataReady || saveAndSendMutation.isPending || lineItemsLoading || currenciesLoading || currenciesError} 
                         data-testid="button-save-send"
                       >
                         {saveAndSendMutation.isPending ? "Sending..." : "Save & Send"}

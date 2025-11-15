@@ -22,8 +22,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import type { PurchaseOrder, Vendor } from "@shared/schema";
+import type { PurchaseOrder, Vendor, Currency } from "@shared/schema";
 import { PurchaseOrderDialog } from "@/components/purchase-order-dialog";
+import { formatCurrency } from "@/lib/currency-utils";
 
 export default function PurchaseOrders() {
   const [showDialog, setShowDialog] = useState(false);
@@ -52,6 +53,11 @@ export default function PurchaseOrders() {
 
   const { data: vendors = [] } = useQuery<Vendor[]>({
     queryKey: ["/api/vendors", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
+    queryKey: ["/api/currencies", currentTenant?.id],
     enabled: !!currentTenant?.id,
   });
 
@@ -196,7 +202,10 @@ export default function PurchaseOrders() {
                     {po.expectedDate ? new Date(po.expectedDate).toLocaleDateString() : '-'}
                   </TableCell>
                   <TableCell className="text-right font-mono" data-testid={`text-total-${po.id}`}>
-                    ${parseFloat(po.total).toFixed(2)}
+                    {currenciesLoading 
+                      ? '...' 
+                      : formatCurrency(parseFloat(po.total), po.currencyCode, currencies)
+                    }
                   </TableCell>
                   <TableCell>{getStatusBadge(po.status)}</TableCell>
                   <TableCell>

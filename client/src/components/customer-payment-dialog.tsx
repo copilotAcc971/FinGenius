@@ -62,12 +62,15 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
     enabled: !!currentTenant?.id && open,
   });
 
-  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
-    queryKey: ["/api/currencies", currentTenant?.id],
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
 
-  // Currency variables
   const activeCurrencies = currencies.filter(c => c.isActive);
   const baseCurrency = currencies.find(c => c.isBaseCurrency);
 
@@ -311,6 +314,11 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
                     </SelectContent>
                   </Select>
                   <FormMessage />
+                  {currenciesError && (
+                    <div className="text-destructive text-sm mt-1">
+                      Failed to load currencies. Please refresh the page.
+                    </div>
+                  )}
                 </FormItem>
               )}
             />
@@ -424,7 +432,7 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
               </Button>
               <Button
                 type="submit"
-                disabled={currenciesLoading || saveMutation.isPending}
+                disabled={currenciesLoading || currenciesError || saveMutation.isPending}
                 data-testid="button-save"
               >
                 {saveMutation.isPending ? "Saving..." : payment ? "Update" : "Save"}

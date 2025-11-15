@@ -50,10 +50,17 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
     enabled: !!currentTenant?.id && open,
   });
 
-  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
-    queryKey: ["/api/currencies", currentTenant?.id],
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
+
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
 
   const { data: existingLineItems } = useQuery<SalesOrderLineItem[]>({
     queryKey: ["/api/sales-orders", order?.id, "line-items", { tenantId: currentTenant?.id }],
@@ -67,10 +74,6 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
     },
     enabled: !!order?.id && !!currentTenant?.id && open,
   });
-
-  // Currency variables
-  const activeCurrencies = currencies.filter(c => c.isActive);
-  const baseCurrency = currencies.find(c => c.isBaseCurrency);
 
   // availableCurrencies with useMemo (seeded pattern)
   const availableCurrencies = useMemo(() => {
@@ -387,6 +390,11 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
                       </SelectContent>
                     </Select>
                     <FormMessage />
+                    {currenciesError && (
+                      <div className="text-destructive text-sm mt-1">
+                        Failed to load currencies. Please refresh the page.
+                      </div>
+                    )}
                   </FormItem>
                 )}
               />
@@ -588,7 +596,7 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={currenciesLoading || isSubmitting} data-testid="button-submit">
+              <Button type="submit" disabled={currenciesLoading || currenciesError || isSubmitting} data-testid="button-submit">
                 {isSubmitting ? "Saving..." : order ? "Update Sales Order" : "Create Sales Order"}
               </Button>
             </div>

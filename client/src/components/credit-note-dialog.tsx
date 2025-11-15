@@ -53,10 +53,17 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
     enabled: !!currentTenant?.id && open,
   });
 
-  const { data: currencies = [], isLoading: currenciesLoading } = useQuery<Currency[]>({
-    queryKey: ["/api/currencies", currentTenant?.id],
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id && open,
   });
+
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
 
   const { data: existingLineItems } = useQuery<CreditNoteLineItem[]>({
     queryKey: ["/api/credit-notes", creditNote?.id, "line-items", { tenantId: currentTenant?.id }],
@@ -70,10 +77,6 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
     },
     enabled: !!creditNote?.id && !!currentTenant?.id && open,
   });
-
-  // Currency variables
-  const activeCurrencies = currencies.filter(c => c.isActive);
-  const baseCurrency = currencies.find(c => c.isBaseCurrency);
 
   // availableCurrencies with useMemo (seeded pattern)
   const availableCurrencies = useMemo(() => {
@@ -379,6 +382,11 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
                       </SelectContent>
                     </Select>
                     <FormMessage />
+                    {currenciesError && (
+                      <div className="text-destructive text-sm mt-1">
+                        Failed to load currencies. Please refresh the page.
+                      </div>
+                    )}
                   </FormItem>
                 )}
               />
@@ -589,7 +597,7 @@ export function CreditNoteDialog({ open, onOpenChange, creditNote }: CreditNoteD
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={currenciesLoading || isSubmitting} data-testid="button-submit">
+              <Button type="submit" disabled={currenciesLoading || currenciesError || isSubmitting} data-testid="button-submit">
                 {isSubmitting ? "Saving..." : creditNote ? "Update Credit Note" : "Create Credit Note"}
               </Button>
             </div>
