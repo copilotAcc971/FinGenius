@@ -11,7 +11,7 @@ import googleDriveRoutes from "./google-drive-routes";
 import { OpenBankingService, EncryptedPayloadValidationError, TokenRefreshError, nonceStore } from './open-banking';
 import { openBankingProviderFactory } from './open-banking/providers';
 import { db } from './db';
-import { eq, and, desc, asc, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, inArray, isNull, lt, gte, lte, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import jwt from 'jsonwebtoken';
 import { randomBytes } from 'crypto';
@@ -1342,8 +1342,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Invoice routes
   app.get('/api/invoices', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.read'), async (req: any, res) => {
     try {
-      const invoices = await storage.getInvoicesByTenant(req.tenantId);
-      res.json(invoices);
+      const { limit, sortBy = 'createdAt', sortOrder = 'desc', status } = req.query;
+      
+      const conditions = [
+        eq(invoices.tenantId, req.tenantId),
+        isNull(invoices.deletedAt)
+      ];
+      
+      // Handle status filter for overdue invoices
+      if (status === 'overdue') {
+        conditions.push(
+          and(
+            lt(invoices.dueDate, new Date()),
+            or(
+              eq(invoices.status, 'sent'),
+              eq(invoices.status, 'overdue')
+            )
+          )
+        );
+      }
+      
+      let query = db
+        .select()
+        .from(invoices)
+        .where(and(...conditions));
+      
+      // For overdue invoices, sort by dueDate ascending (most overdue first)
+      // For regular queries, use the requested sort
+      if (status === 'overdue') {
+        query = query.orderBy(asc(invoices.dueDate));
+      } else {
+        const orderColumn = sortBy === 'invoiceDate' ? invoices.invoiceDate : invoices.createdAt;
+        query = sortOrder === 'asc' 
+          ? query.orderBy(asc(orderColumn))
+          : query.orderBy(desc(orderColumn));
+      }
+      
+      if (limit) {
+        query = query.limit(parseInt(limit as string));
+      }
+      
+      const result = await query;
+      res.json(result);
     } catch (error) {
       console.error("Error fetching invoices:", error);
       res.status(500).json({ message: "Failed to fetch invoices" });
@@ -4452,8 +4492,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Bill routes
   app.get('/api/bills', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.read'), async (req: any, res) => {
     try {
-      const bills = await storage.getBillsByTenant(req.tenantId);
-      res.json(bills);
+      const { limit, sortBy = 'createdAt', sortOrder = 'desc', dueSoon } = req.query;
+      
+      const conditions = [eq(bills.tenantId, req.tenantId)];
+      
+      // Handle dueSoon filter for upcoming payments
+      if (dueSoon === 'true') {
+        const now = new Date();
+        const sevenDaysFromNow = new Date();
+        sevenDaysFromNow.setDate(now.getDate() + 7);
+        
+        conditions.push(
+          and(
+            gte(bills.dueDate, now),
+            lte(bills.dueDate, sevenDaysFromNow),
+            sql`${bills.status} != 'paid'`
+          )
+        );
+      }
+      
+      let query = db
+        .select()
+        .from(bills)
+        .where(and(...conditions));
+      
+      // For upcoming bills, sort by dueDate ascending (soonest first)
+      // For regular queries, use the requested sort
+      if (dueSoon === 'true') {
+        query = query.orderBy(asc(bills.dueDate));
+      } else {
+        const orderColumn = sortBy === 'billDate' ? bills.billDate : bills.createdAt;
+        query = sortOrder === 'asc' 
+          ? query.orderBy(asc(orderColumn))
+          : query.orderBy(desc(orderColumn));
+      }
+      
+      if (limit) {
+        query = query.limit(parseInt(limit as string));
+      }
+      
+      const result = await query;
+      res.json(result);
     } catch (error) {
       console.error("Error fetching bills:", error);
       res.status(500).json({ message: "Failed to fetch bills" });
