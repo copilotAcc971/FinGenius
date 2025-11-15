@@ -29,6 +29,7 @@ import { assessRateVolatility } from './fx-volatility';
 import { fetchInvoiceEntryData, createInvoiceJournalEntry, fetchBillEntryData, createBillJournalEntry, fetchCustomerPaymentEntryData, createCustomerPaymentJournalEntry, fetchVendorPaymentEntryData, createVendorPaymentJournalEntry } from './accounting/entry-creators';
 import { ValidationError as AccountingValidationError } from './accounting/errors';
 import { withTransaction } from './accounting/service';
+import { getAccountBalance, updateHistoricalBalances } from './accounting/historical-balance-service';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -73,6 +74,9 @@ import {
   currencies,
   bills,
   journalEntries,
+  journalEntryLegs,
+  accounts,
+  accountTransactionHistory,
   users,
   approvalRequests,
   approvalHistory,
@@ -617,6 +621,278 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error deleting account:", error);
       res.status(400).json({ message: error.message || "Failed to delete account" });
+    }
+  });
+
+  /**
+   * GET /api/accounts/:id/balance
+   * Get current or historical balance for an account
+   * 
+   * @query asOfDate - Optional ISO date string for historical balance (e.g., "2024-11-15")
+   * @returns Account balance with metadata
+   * 
+   * @example
+   * GET /api/accounts/acc-123/balance?tenantId=tenant-456
+   * GET /api/accounts/acc-123/balance?tenantId=tenant-456&asOfDate=2024-11-15
+   * 
+   * @testid API endpoint for account balance queries used in UI balance displays
+   */
+  app.get('/api/accounts/:id/balance', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const { asOfDate } = req.query;
+
+      // Fetch account to verify it exists and belongs to tenant
+      const [account] = await db
+        .select()
+        .from(accounts)
+        .where(and(
+          eq(accounts.id, id),
+          eq(accounts.tenantId, tenantId)
+        ))
+        .limit(1);
+
+      if (!account) {
+        return res.status(404).json({ message: "Account not found" });
+      }
+
+      // Parse and validate asOfDate if provided
+      let asOfDateParsed: Date | undefined;
+      if (asOfDate) {
+        try {
+          asOfDateParsed = new Date(asOfDate as string);
+          if (isNaN(asOfDateParsed.getTime())) {
+            return res.status(400).json({ message: "Invalid asOfDate format. Use ISO date string (e.g., 2024-11-15)" });
+          }
+        } catch (error) {
+          return res.status(400).json({ message: "Invalid asOfDate format. Use ISO date string (e.g., 2024-11-15)" });
+        }
+      }
+
+      // Get balance using historical balance service
+      const balance = await getAccountBalance(
+        tenantId,
+        id,
+        asOfDateParsed
+      );
+
+      // Determine normal balance type based on account type
+      const normalizedType = account.type.toLowerCase();
+      let normalBalanceType: 'debit' | 'credit';
+      
+      if (normalizedType === 'asset' || normalizedType === 'expense') {
+        normalBalanceType = 'debit';
+      } else if (normalizedType === 'liability' || normalizedType === 'equity' || normalizedType === 'income') {
+        normalBalanceType = 'credit';
+      } else {
+        normalBalanceType = 'debit'; // fallback
+      }
+
+      // Get tenant's base currency (FIX: was hardcoded to 'USD')
+      const [baseCurrency] = await db
+        .select({ code: currencies.code })
+        .from(currencies)
+        .where(and(
+          eq(currencies.tenantId, tenantId),
+          eq(currencies.isBaseCurrency, true)
+        ))
+        .limit(1);
+
+      // Return structured response
+      res.json({
+        accountId: account.id,
+        accountCode: account.code,
+        accountName: account.name,
+        accountType: account.type,
+        balance,
+        asOfDate: asOfDateParsed ? asOfDateParsed.toISOString() : null,
+        currency: baseCurrency?.code || 'USD', // Use base currency or fallback to USD
+        normalBalanceType
+      });
+    } catch (error: any) {
+      console.error("Error fetching account balance:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch account balance" });
+    }
+  });
+
+  /**
+   * GET /api/accounts/:id/transaction-history
+   * Get detailed transaction history for an account with pagination
+   * 
+   * @query startDate - Optional ISO date string for date range start
+   * @query endDate - Optional ISO date string for date range end
+   * @query limit - Number of records to return (default: 100, max: 1000)
+   * @query offset - Pagination offset (default: 0)
+   * @returns Account transaction history with summary and pagination
+   * 
+   * @example
+   * GET /api/accounts/acc-123/transaction-history?tenantId=tenant-456
+   * GET /api/accounts/acc-123/transaction-history?tenantId=tenant-456&startDate=2024-01-01&endDate=2024-12-31&limit=50&offset=0
+   * 
+   * @testid API endpoint for account transaction history used in UI transaction tables
+   */
+  app.get('/api/accounts/:id/transaction-history', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const { startDate, endDate, limit = '100', offset = '0' } = req.query;
+
+      // Fetch account to verify it exists and belongs to tenant
+      const [account] = await db
+        .select()
+        .from(accounts)
+        .where(and(
+          eq(accounts.id, id),
+          eq(accounts.tenantId, tenantId)
+        ))
+        .limit(1);
+
+      if (!account) {
+        return res.status(404).json({ message: "Account not found" });
+      }
+
+      // Parse and validate pagination parameters
+      const limitNum = Math.min(parseInt(limit as string, 10) || 100, 1000);
+      const offsetNum = parseInt(offset as string, 10) || 0;
+
+      if (limitNum < 1 || limitNum > 1000) {
+        return res.status(400).json({ message: "Limit must be between 1 and 1000" });
+      }
+
+      if (offsetNum < 0) {
+        return res.status(400).json({ message: "Offset must be >= 0" });
+      }
+
+      // Parse and validate date range if provided
+      let startDateParsed: Date | undefined;
+      let endDateParsed: Date | undefined;
+
+      if (startDate) {
+        try {
+          startDateParsed = new Date(startDate as string);
+          if (isNaN(startDateParsed.getTime())) {
+            return res.status(400).json({ message: "Invalid startDate format. Use ISO date string (e.g., 2024-01-01)" });
+          }
+        } catch (error) {
+          return res.status(400).json({ message: "Invalid startDate format. Use ISO date string (e.g., 2024-01-01)" });
+        }
+      }
+
+      if (endDate) {
+        try {
+          endDateParsed = new Date(endDate as string);
+          if (isNaN(endDateParsed.getTime())) {
+            return res.status(400).json({ message: "Invalid endDate format. Use ISO date string (e.g., 2024-12-31)" });
+          }
+        } catch (error) {
+          return res.status(400).json({ message: "Invalid endDate format. Use ISO date string (e.g., 2024-12-31)" });
+        }
+      }
+
+      // Build query filters
+      const filters: any[] = [
+        eq(accountTransactionHistory.tenantId, tenantId),
+        eq(accountTransactionHistory.accountId, id)
+      ];
+
+      if (startDateParsed) {
+        filters.push(sql`${accountTransactionHistory.transactionDate} >= ${startDateParsed}`);
+      }
+
+      if (endDateParsed) {
+        filters.push(sql`${accountTransactionHistory.transactionDate} <= ${endDateParsed}`);
+      }
+
+      // Query transactions with joins to get journal entry details
+      const transactions = await db
+        .select({
+          id: accountTransactionHistory.id,
+          transactionDate: accountTransactionHistory.transactionDate,
+          journalEntryId: accountTransactionHistory.journalEntryId,
+          journalEntryNumber: journalEntries.journalEntryNumber,
+          journalEntryLegId: accountTransactionHistory.journalEntryLegId,
+          description: accountTransactionHistory.description,
+          debitAmount: accountTransactionHistory.debitAmount,
+          creditAmount: accountTransactionHistory.creditAmount,
+          runningBalance: accountTransactionHistory.runningBalance,
+          sourceDocumentType: accountTransactionHistory.sourceDocumentType,
+          sourceDocumentId: accountTransactionHistory.sourceDocumentId,
+        })
+        .from(accountTransactionHistory)
+        .leftJoin(journalEntries, eq(accountTransactionHistory.journalEntryId, journalEntries.id))
+        .where(and(...filters))
+        .orderBy(asc(accountTransactionHistory.transactionDate))
+        .limit(limitNum + 1) // Fetch one extra to check if there are more
+        .offset(offsetNum);
+
+      // Check if there are more results
+      const hasMore = transactions.length > limitNum;
+      const displayTransactions = hasMore ? transactions.slice(0, limitNum) : transactions;
+
+      // Calculate summary statistics for the filtered range
+      const [summaryResult] = await db
+        .select({
+          totalDebits: sql<string>`COALESCE(SUM(${accountTransactionHistory.debitAmount}), 0)`,
+          totalCredits: sql<string>`COALESCE(SUM(${accountTransactionHistory.creditAmount}), 0)`,
+          transactionCount: sql<number>`COUNT(*)`,
+        })
+        .from(accountTransactionHistory)
+        .where(and(...filters));
+
+      // Get opening balance (balance before startDate or at account inception)
+      // FIX: Use day BEFORE startDate to exclude same-day transactions from opening balance
+      let openingBalance = '0.00';
+      if (startDateParsed) {
+        const dayBeforeStart = new Date(startDateParsed);
+        dayBeforeStart.setDate(dayBeforeStart.getDate() - 1);
+        openingBalance = await getAccountBalance(tenantId, id, dayBeforeStart);
+      }
+
+      // Calculate closing balance (last transaction's running balance or current balance)
+      let closingBalance = '0.00';
+      if (displayTransactions.length > 0) {
+        closingBalance = displayTransactions[displayTransactions.length - 1].runningBalance || '0.00';
+      } else if (endDateParsed) {
+        closingBalance = await getAccountBalance(tenantId, id, endDateParsed);
+      } else {
+        closingBalance = await getAccountBalance(tenantId, id);
+      }
+
+      // Return structured response
+      res.json({
+        accountId: account.id,
+        accountCode: account.code,
+        accountName: account.name,
+        transactions: displayTransactions.map(t => ({
+          id: t.id,
+          transactionDate: t.transactionDate,
+          journalEntryId: t.journalEntryId,
+          journalEntryNumber: t.journalEntryNumber,
+          journalEntryLegId: t.journalEntryLegId,
+          description: t.description,
+          debitAmount: t.debitAmount,
+          creditAmount: t.creditAmount,
+          runningBalance: t.runningBalance,
+          sourceDocumentType: t.sourceDocumentType,
+          sourceDocumentId: t.sourceDocumentId,
+        })),
+        summary: {
+          totalDebits: summaryResult?.totalDebits || '0.00',
+          totalCredits: summaryResult?.totalCredits || '0.00',
+          openingBalance,
+          closingBalance,
+          transactionCount: summaryResult?.transactionCount || 0,
+        },
+        pagination: {
+          limit: limitNum,
+          offset: offsetNum,
+          hasMore
+        }
+      });
+    } catch (error: any) {
+      console.error("Error fetching account transaction history:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch account transaction history" });
     }
   });
 
@@ -1472,7 +1748,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           tx
         );
 
-        // 3f. Update invoice status to 'posted'
+        // 3f. Update historical balances for all affected accounts
+        await updateHistoricalBalances(tenantId, journalEntry.id, tx);
+
+        // 3g. Update invoice status to 'posted'
         const updatedInvoice = await storage.updateInvoice(id, tenantId, {
           status: 'posted',
         }, tx);
@@ -2171,7 +2450,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         await storage.createJournalEntryLegs(tenantId, legs, tx);
 
-        // 5. Update credit note status to 'posted'
+        // 5. Update historical balances for all affected accounts
+        await updateHistoricalBalances(tenantId, journalEntry.id, tx);
+
+        // 6. Update credit note status to 'posted'
         const updatedCreditNote = await tx
           .update(creditNotes)
           .set({ status: 'posted', updatedAt: new Date() })
@@ -2254,7 +2536,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         await storage.createJournalEntryLegs(tenantId, legs, tx);
 
-        // 5. Update debit note status to 'posted'
+        // 5. Update historical balances for all affected accounts
+        await updateHistoricalBalances(tenantId, journalEntry.id, tx);
+
+        // 6. Update debit note status to 'posted'
         const updatedDebitNote = await tx
           .update(debitNotes)
           .set({ status: 'posted', updatedAt: new Date() })
@@ -2348,6 +2633,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }));
         
         await storage.createJournalEntryLegs(tenantId, legs, tx);
+
+        // 5. Update historical balances for all affected accounts
+        await updateHistoricalBalances(tenantId, journalEntry.id, tx);
         
         return { payment, journalEntry };
       });
@@ -3331,7 +3619,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           tx
         );
 
-        // 3f. Update bill status to 'paid' within transaction
+        // 3f. Update historical balances for all affected accounts
+        await updateHistoricalBalances(tenantId, journalEntry.id, tx);
+
+        // 3g. Update bill status to 'paid' within transaction
         const [updatedBill] = await tx
           .update(bills)
           .set({ status: 'paid', updatedAt: new Date() })
@@ -3684,6 +3975,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }));
 
         await storage.createJournalEntryLegs(tenantId, legs, tx);
+
+        // 5. Update historical balances for all affected accounts
+        await updateHistoricalBalances(tenantId, journalEntry.id, tx);
 
         return { payment, journalEntry };
       });

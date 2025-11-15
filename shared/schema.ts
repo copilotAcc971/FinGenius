@@ -751,6 +751,8 @@ export const historicalBalances = pgTable("historical_balances", {
   unique("unique_historical_balance_period").on(table.tenantId, table.accountId, table.periodStart, table.periodEnd),
   index("historical_balances_account_idx").on(table.tenantId, table.accountId),
   index("historical_balances_period_idx").on(table.periodStart, table.periodEnd),
+  // PERFORMANCE FIX: Composite index for efficient period lookups by tenant and account
+  index("idx_historical_balances_tenant_account_period").on(table.tenantId, table.accountId, table.periodStart),
 ]);
 
 export const insertHistoricalBalanceSchema = createInsertSchema(historicalBalances, {
@@ -793,6 +795,8 @@ export const accountTransactionHistory = pgTable("account_transaction_history", 
   index("account_transaction_history_date_idx").on(table.transactionDate),
   index("account_transaction_history_source_idx").on(table.sourceDocumentType, table.sourceDocumentId),
   index("account_transaction_history_journal_entry_idx").on(table.journalEntryId),
+  // PERFORMANCE FIX: Composite index for efficient chronological queries by tenant, account, and date
+  index("idx_account_tx_history_tenant_account_date").on(table.tenantId, table.accountId, table.transactionDate),
   sql`CONSTRAINT check_transaction_type CHECK (transaction_type IN ('debit', 'credit'))`,
 ]);
 
