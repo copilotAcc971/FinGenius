@@ -32,6 +32,14 @@ The application uses a multi-tenant architecture with a "verified-tenant pattern
 - **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with granular permissions (70+), default roles, custom roles, multi-role support, and route/UI protection.
 - **Automatic Journal Entries:** Automated double-entry bookkeeping for all major document types (Invoice, Bill, Customer Payment, Vendor Payment, Credit Note, Debit Note) with an atomic transaction pattern. Includes historical balance tracking with idempotent operations and cascade recalculation, and comprehensive journal entry reporting.
 - **Approval Workflow Engine:** Multi-stage routing system for journal entries with workflow matching, multi-approver support, resubmission capabilities, and auto-posting after final approval.
+- **Approval Workflow UI (Phase 4 - COMPLETED):**
+  - **Pending Approvals Dashboard:** List view with entity filtering, approve/reject actions with comments, tenant-scoped queries with cache invalidation.
+  - **Journal Entry Detail Workflow Panel:** Audit timeline showing approval steps, integrated approve/reject functionality.
+  - **Sidebar Approvals Badge:** Real-time pending count with tenant isolation and GlobalTenantEvents cache reset.
+  - **Workflows Management:** Full CRUD for approval workflows (list/create/edit/delete) with entity type filters, search, status toggle.
+  - **Workflow Form:** Dynamic approval step configuration with role/user selection, amount thresholds, and validation.
+  - **Account Balance Views:** Historical balance timeline with charts, transaction history with pagination, date range filtering.
+  - **Cache Architecture:** Tenant-scoped query keys pattern `["/api/resource", { tenantId }]` prevents cross-tenant data leakage. GlobalTenantEvents component centralizes tenant-switch cache hygiene.
 
 ## External Dependencies
 - **OpenAI GPT-5:** For AI-powered document data extraction and categorization.
