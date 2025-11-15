@@ -209,7 +209,7 @@ export interface IStorage {
     taxRate: string | null;
   }>>;
   createInvoiceWithItems(payload: InvoicePayload): Promise<Invoice>;
-  updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>): Promise<Invoice>;
+  updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>, tx?: typeof db): Promise<Invoice>;
   updateInvoiceWithItems(id: string, tenantId: string, payload: InvoicePayload): Promise<Invoice>;
   deleteInvoice(id: string, tenantId: string): Promise<boolean>;
   
@@ -1055,13 +1055,14 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>): Promise<Invoice> {
+  async updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>, tx?: typeof db): Promise<Invoice> {
+    const client = tx || db;
     const invoice = await this.getInvoiceById(id, tenantId);
     if (!invoice) {
       throw new Error("Invoice not found");
     }
     
-    const [updatedInvoice] = await db
+    const [updatedInvoice] = await client
       .update(invoices)
       .set({ ...data, updatedAt: new Date() })
       .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)))
@@ -5633,7 +5634,7 @@ export class MemStorage implements IStorage {
     return newInvoice;
   }
 
-  async updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>): Promise<Invoice> {
+  async updateInvoice(id: string, tenantId: string, data: Partial<InsertInvoice>, tx?: typeof db): Promise<Invoice> {
     const existing = this.invoices.find(i => i.id === id && i.tenantId === tenantId && !i.deletedAt);
     if (!existing) throw new Error("Invoice not found");
     

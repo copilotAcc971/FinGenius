@@ -21,7 +21,7 @@ import { z } from "zod";
 // Shared across all modules to prevent drift
 // ====================================
 
-export const JOURNAL_ENTRY_STATUS = ['draft', 'posted'] as const;
+export const JOURNAL_ENTRY_STATUS = ['draft', 'pending_approval', 'approved', 'posted', 'rejected'] as const;
 export const BILL_STATUS = ['unpaid', 'scheduled', 'paid', 'overdue', 'cancelled'] as const;
 export const AI_EXTRACTION_STATUS = ['pending_review', 'reviewed', 'corrected'] as const;
 export const PAYMENT_APPROVAL_STATUS = ['draft', 'pending_approval', 'approved', 'rejected', 'cancelled'] as const;
@@ -733,6 +733,81 @@ export const journalEntrySequences = pgTable("journal_entry_sequences", {
 });
 
 export type JournalEntrySequence = typeof journalEntrySequences.$inferSelect;
+
+// Historical Balances (Track account balances by period for accurate reporting)
+export const historicalBalances = pgTable("historical_balances", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  accountId: varchar("account_id").notNull().references(() => accounts.id),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  openingBalance: decimal("opening_balance", { precision: 15, scale: 2 }).notNull().default('0'),
+  closingBalance: decimal("closing_balance", { precision: 15, scale: 2 }).notNull().default('0'),
+  
+  // Multi-currency support
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+}, (table) => [
+  unique("unique_historical_balance_period").on(table.tenantId, table.accountId, table.periodStart, table.periodEnd),
+  index("historical_balances_account_idx").on(table.tenantId, table.accountId),
+  index("historical_balances_period_idx").on(table.periodStart, table.periodEnd),
+]);
+
+export const insertHistoricalBalanceSchema = createInsertSchema(historicalBalances, {
+  openingBalance: decimalString,
+  closingBalance: decimalString,
+  exchangeRate: decimalString.optional(),
+}).omit({
+  id: true,
+});
+
+export type InsertHistoricalBalance = z.infer<typeof insertHistoricalBalanceSchema>;
+export type HistoricalBalance = typeof historicalBalances.$inferSelect;
+
+// Account Transaction History (Transaction-level balance tracking for audit trail)
+export const accountTransactionHistory = pgTable("account_transaction_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  accountId: varchar("account_id").notNull().references(() => accounts.id),
+  journalEntryId: varchar("journal_entry_id").references(() => journalEntries.id),
+  journalEntryLegId: varchar("journal_entry_leg_id").references(() => journalEntryLegs.id),
+  
+  transactionDate: timestamp("transaction_date").notNull(),
+  transactionType: varchar("transaction_type", { length: 50 }).notNull(), // 'debit', 'credit'
+  
+  // Source document tracking
+  sourceDocumentType: varchar("source_document_type", { length: 50 }), // 'invoice', 'bill', 'payment', etc.
+  sourceDocumentId: varchar("source_document_id"),
+  
+  debitAmount: decimal("debit_amount", { precision: 15, scale: 2 }).default('0'),
+  creditAmount: decimal("credit_amount", { precision: 15, scale: 2 }).default('0'),
+  runningBalance: decimal("running_balance", { precision: 15, scale: 2 }).notNull(),
+  
+  // Multi-currency tracking
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 20, scale: 10 }).notNull().default('1.0'),
+  
+  description: text("description"),
+}, (table) => [
+  index("account_transaction_history_account_idx").on(table.tenantId, table.accountId),
+  index("account_transaction_history_date_idx").on(table.transactionDate),
+  index("account_transaction_history_source_idx").on(table.sourceDocumentType, table.sourceDocumentId),
+  index("account_transaction_history_journal_entry_idx").on(table.journalEntryId),
+  sql`CONSTRAINT check_transaction_type CHECK (transaction_type IN ('debit', 'credit'))`,
+]);
+
+export const insertAccountTransactionHistorySchema = createInsertSchema(accountTransactionHistory, {
+  debitAmount: decimalString.optional(),
+  creditAmount: decimalString.optional(),
+  runningBalance: decimalString,
+  exchangeRate: decimalString.optional(),
+  transactionType: z.enum(['debit', 'credit']),
+}).omit({
+  id: true,
+});
+
+export type InsertAccountTransactionHistory = z.infer<typeof insertAccountTransactionHistorySchema>;
+export type AccountTransactionHistory = typeof accountTransactionHistory.$inferSelect;
 
 // Purchase Order Number Sequencing (per tenant)
 export const purchaseOrderSequences = pgTable("purchase_order_sequences", {
@@ -1735,7 +1810,7 @@ export const journalEntries = pgTable("journal_entries", {
   referenceNumber: varchar("reference_number", { length: 100 }),
   description: text("description"),
   notes: text("notes"),
-  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, posted
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, pending_approval, approved, posted, rejected
   
   // Multi-currency support (for FX gain/loss entries)
   currencyCode: varchar("currency_code", { length: 3 }).notNull().default('USD'),
@@ -1753,6 +1828,13 @@ export const journalEntries = pgTable("journal_entries", {
   reversedEntryId: varchar("reversed_entry_id").references((): any => journalEntries.id), // If this entry reverses another entry
   reversalReason: text("reversal_reason"), // Reason for reversal (required for reversals)
   
+  // Workflow tracking fields
+  workflowRequestId: varchar("workflow_request_id"), // Links to approvalRequests table for multi-stage approval
+  preparedBy: varchar("prepared_by").references(() => users.id), // Who created/prepared the entry
+  preparedAt: timestamp("prepared_at"), // When entry was initially prepared
+  postedBy: varchar("posted_by").references(() => users.id), // Who posted the entry
+  postedAt: timestamp("posted_at"), // When entry was posted
+  
   createdBy: varchar("created_by").references(() => users.id),
   lastModifiedBy: varchar("last_modified_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
@@ -1762,18 +1844,21 @@ export const journalEntries = pgTable("journal_entries", {
   index("journal_entries_source_document_idx").on(table.sourceDocumentType, table.sourceDocumentId),
   index("journal_entries_tenant_date_idx").on(table.tenantId, table.entryDate),
   index("journal_entries_reversed_entry_idx").on(table.reversedEntryId),
+  index("journal_entries_workflow_request_idx").on(table.workflowRequestId),
   sql`CREATE UNIQUE INDEX IF NOT EXISTS journal_entries_prevent_duplicate_posts ON journal_entries (tenant_id, source_document_type, source_document_id) WHERE status = 'posted' AND is_auto_generated = true`,
-  sql`CONSTRAINT check_journal_entry_status CHECK (status IN ('draft', 'posted'))`,
+  sql`CONSTRAINT check_journal_entry_status CHECK (status IN ('draft', 'pending_approval', 'approved', 'posted', 'rejected'))`,
   sql`CONSTRAINT check_source_document_type CHECK (source_document_type IS NULL OR source_document_type IN ('invoice', 'bill', 'payment', 'customer_payment', 'credit_note', 'debit_note', 'expense', 'fixed_asset', 'inventory_adjustment', 'depreciation', 'payment_batch', 'approval'))`,
 ]);
 
 export const insertJournalEntrySchema = createInsertSchema(journalEntries, {
-  status: z.enum(['draft', 'posted']),
+  status: z.enum(['draft', 'pending_approval', 'approved', 'posted', 'rejected']),
 }).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
   journalEntryNumber: true, // Auto-generated
+  preparedAt: true, // Set by system
+  postedAt: true, // Set by system
 }).extend({
   entryDate: z.coerce.date(),
 });

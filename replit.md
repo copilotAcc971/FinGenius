@@ -75,6 +75,14 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
     - **Owner Bypass:** Owner role has universal access to all features
     - **Migration Support:** Automatic migration from legacy role strings to new RBAC system
     - **Administration UI:** Role management and user management pages with full CRUD operations
+- **Automatic Journal Entries (Phase 3 - IN PROGRESS):** Complete double-entry bookkeeping automation:
+    - **Journal Entry Creators:** Implemented for all major document types (Invoice, Bill, Customer Payment, Vendor Payment, Credit Note, Debit Note)
+    - **Schema Enhancements:** Extended journalEntries table with workflow tracking fields (workflowRequestId, preparedBy, preparedAt, postedBy, postedAt) and expanded status enum (draft, pending_approval, approved, posted, rejected)
+    - **Historical Balance Tracking:** New tables for historicalBalances and accountTransactionHistory to support period-over-period financial reporting and audit trails
+    - **Atomic Posting:** Transaction-aware storage methods ensure invoice posting and journal entry creation commit atomically
+    - **Invoice Posting API:** POST /api/invoices/:id/post endpoint creates journal entries automatically (DR AR, CR Revenue, CR Tax) with COGS entries for inventory items
+    - **Audit Metadata:** All auto-generated entries track preparer, preparation timestamp, and generation source with modificationLocked flag
+    - **Next Steps:** Wire bill/payment/credit/debit note posting endpoints, implement approval workflows with graphical builder, complete historical balance service
 
 ## External Dependencies
 - **OpenAI GPT-5:** Used for AI-powered document data extraction from bills and categorisation.

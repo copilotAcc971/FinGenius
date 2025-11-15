@@ -16,7 +16,7 @@
 import { z } from 'zod';
 import type { DBTransaction } from './service';
 import type { IStorage } from '../storage';
-import type { CreateJournalEntry } from './service';
+import type { CreateJournalEntry, JournalEntryLine } from './service';
 import { eq, and } from 'drizzle-orm';
 import { 
   invoices, 
@@ -35,6 +35,7 @@ import {
   taxes,
 } from '@shared/schema';
 import { ValidationError } from './errors';
+import { resolveSystemAccounts, validateBalance } from './service';
 
 // ====================================
 // DOCUMENT INPUT TYPES
@@ -226,6 +227,21 @@ export interface CreditNoteEntryInput {
 }
 
 /**
+ * Debit Note Line Item Entry Input
+ * 
+ * Normalized structure for debit note line items used in journal entry creation.
+ * 
+ * **Expense Account Assignment:**
+ * - expenseAccountId is the account to credit (reverse the debit from original bill)
+ * - Required for accurate journal entry creation
+ */
+export interface DebitNoteLineEntryInput {
+  expenseAccountId: string;  // Which expense/asset account to credit
+  description: string;
+  amount: string;
+}
+
+/**
  * Debit Note Entry Input
  * 
  * Normalized structure for debit notes used in journal entry creation.
@@ -251,6 +267,7 @@ export interface DebitNoteEntryInput {
   subtotal: string;
   totalTax: string;
   totalAmount: string;
+  lineItems: DebitNoteLineEntryInput[];
 }
 
 // ====================================
@@ -648,8 +665,9 @@ export async function fetchCreditNoteEntryData(
  * 
  * **Implementation Steps:**
  * 1. Fetch debit note from storage by ID
- * 2. Verify billId reference (may be null for standalone debit notes)
- * 3. Return normalized structure with totals
+ * 2. Fetch all debit note line items for this debit note
+ * 3. For each line item, verify accountId is set (required for journal entry)
+ * 4. Aggregate totals and return normalized structure
  * 
  * **Document Reversal:**
  * - If billId is set, this debit note reverses that bill
@@ -685,6 +703,18 @@ export async function fetchDebitNoteEntryData(
     throw new ValidationError(`Debit note ${debitNoteId} not found`);
   }
   
+  // Fetch debit note line items
+  const lineItems = await tx
+    .select()
+    .from(debitNoteLineItems)
+    .where(and(eq(debitNoteLineItems.debitNoteId, debitNoteId), eq(debitNoteLineItems.tenantId, tenantId)));
+  
+  const lineInputs: DebitNoteLineEntryInput[] = lineItems.map(line => ({
+    expenseAccountId: line.accountId,  // Account to credit (reverse the original debit)
+    description: line.description,
+    amount: line.amount,
+  }));
+  
   return {
     id: debitNote[0].id,
     debitNoteNumber: debitNote[0].debitNoteNumber,
@@ -694,12 +724,37 @@ export async function fetchDebitNoteEntryData(
     subtotal: debitNote[0].subtotal,
     totalTax: debitNote[0].taxAmount || '0.00',
     totalAmount: debitNote[0].total,
+    lineItems: lineInputs,
   };
 }
 
 // ====================================
+// VALIDATION & CALCULATION HELPERS
+// ====================================
+
+/**
+ * Calculate total debits and credits from journal entry legs
+ */
+export function calculateEntryTotals(legs: { type: 'Debit' | 'Credit'; amount: string }[]): {
+  totalDebits: string;
+  totalCredits: string;
+} {
+  const totalDebits = legs
+    .filter(leg => leg.type === 'Debit')
+    .reduce((sum, leg) => sum + parseFloat(leg.amount), 0)
+    .toFixed(2);
+  
+  const totalCredits = legs
+    .filter(leg => leg.type === 'Credit')
+    .reduce((sum, leg) => sum + parseFloat(leg.amount), 0)
+    .toFixed(2);
+  
+  return { totalDebits, totalCredits };
+}
+
+
+// ====================================
 // ENTRY CREATOR FUNCTIONS
-// (To be implemented in Task 4b-2)
 // ====================================
 
 /**
@@ -718,6 +773,7 @@ export async function fetchDebitNoteEntryData(
  * 
  * @param input - Normalized invoice entry input
  * @param tenantId - Tenant ID for security isolation
+ * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
  * @returns Created journal entry
@@ -725,11 +781,74 @@ export async function fetchDebitNoteEntryData(
 export async function createInvoiceJournalEntry(
   input: InvoiceEntryInput,
   tenantId: string,
+  userId: string,
   storage: IStorage,
   tx: DBTransaction
 ): Promise<CreateJournalEntry> {
-  // TODO: Implement in Task 4b-2
-  throw new Error('Not implemented yet - Task 4b-2');
+  // Fetch all system accounts in one query
+  const sysAccounts = await resolveSystemAccounts(tenantId, tx);
+  
+  // Build journal entry lines
+  const lines: JournalEntryLine[] = [];
+  
+  // DR Accounts Receivable [totalAmount]
+  lines.push({
+    accountId: sysAccounts.accountsReceivable.id,
+    debitAmount: input.totalAmount,
+    description: `Invoice ${input.invoiceNumber} - Customer receivable`,
+  });
+  
+  // CR Sales Revenue [subtotal]
+  if (parseFloat(input.subtotal) > 0) {
+    lines.push({
+      accountId: sysAccounts.revenue.id,
+      creditAmount: input.subtotal,
+      description: `Invoice ${input.invoiceNumber} - Sales revenue`,
+    });
+  }
+  
+  // CR Tax Payable [totalTax]
+  if (parseFloat(input.totalTax) > 0) {
+    lines.push({
+      accountId: sysAccounts.taxPayable.id,
+      creditAmount: input.totalTax,
+      description: `Invoice ${input.invoiceNumber} - Tax collected`,
+    });
+  }
+  
+  // For inventory items: DR COGS, CR Inventory
+  for (const lineItem of input.lineItems) {
+    if (lineItem.isInventoryItem && lineItem.costOfGoodsSold && parseFloat(lineItem.costOfGoodsSold) > 0) {
+      // DR Cost of Goods Sold
+      lines.push({
+        accountId: sysAccounts.cogs.id,
+        debitAmount: lineItem.costOfGoodsSold,
+        description: `COGS - ${lineItem.description}`,
+      });
+      
+      // CR Inventory
+      lines.push({
+        accountId: sysAccounts.inventory.id,
+        creditAmount: lineItem.costOfGoodsSold,
+        description: `Inventory reduction - ${lineItem.description}`,
+      });
+    }
+  }
+  
+  // Validate debits = credits
+  validateBalance(lines);
+  
+  return {
+    entryDate: input.invoiceDate,
+    description: `Invoice ${input.invoiceNumber}`,
+    referenceNumber: input.invoiceNumber,
+    sourceDocumentType: 'invoice',
+    sourceDocumentId: input.id,
+    isAutoGenerated: true,
+    preparedBy: userId,
+    preparedAt: new Date(),
+    lines,
+  };
 }
 
 /**
@@ -744,6 +863,7 @@ export async function createInvoiceJournalEntry(
  * 
  * @param input - Normalized bill entry input
  * @param tenantId - Tenant ID for security isolation
+ * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
  * @returns Created journal entry
@@ -751,11 +871,57 @@ export async function createInvoiceJournalEntry(
 export async function createBillJournalEntry(
   input: BillEntryInput,
   tenantId: string,
+  userId: string,
   storage: IStorage,
   tx: DBTransaction
 ): Promise<CreateJournalEntry> {
-  // TODO: Implement in Task 4b-2
-  throw new Error('Not implemented yet - Task 4b-2');
+  // Fetch all system accounts in one query
+  const sysAccounts = await resolveSystemAccounts(tenantId, tx);
+  
+  // Build journal entry lines
+  const lines: JournalEntryLine[] = [];
+  
+  // DR Expense Account(s) per line item - uses expenseAccountId from each line
+  for (const lineItem of input.lineItems) {
+    if (parseFloat(lineItem.amount) > 0) {
+      lines.push({
+        accountId: lineItem.expenseAccountId,
+        debitAmount: lineItem.amount,
+        description: lineItem.description,
+      });
+    }
+  }
+  
+  // DR Tax Receivable (input tax on purchases)
+  if (parseFloat(input.totalTax) > 0) {
+    lines.push({
+      accountId: sysAccounts.taxPayable.id, // Using same Tax Payable account for input tax
+      debitAmount: input.totalTax,
+      description: `Bill ${input.billNumber} - Input tax`,
+    });
+  }
+  
+  // CR Accounts Payable [totalAmount]
+  lines.push({
+    accountId: sysAccounts.accountsPayable.id,
+    creditAmount: input.totalAmount,
+    description: `Bill ${input.billNumber} - Vendor payable`,
+  });
+  
+  // Validate debits = credits
+  validateBalance(lines);
+  
+  return {
+    entryDate: input.billDate,
+    description: `Bill ${input.billNumber}`,
+    referenceNumber: input.billNumber,
+    sourceDocumentType: 'bill',
+    sourceDocumentId: input.id,
+    isAutoGenerated: true,
+    preparedBy: userId,
+    preparedAt: new Date(),
+    lines,
+  };
 }
 
 /**
@@ -769,6 +935,7 @@ export async function createBillJournalEntry(
  * 
  * @param input - Normalized customer payment entry input
  * @param tenantId - Tenant ID for security isolation
+ * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
  * @returns Created journal entry
@@ -776,11 +943,44 @@ export async function createBillJournalEntry(
 export async function createCustomerPaymentJournalEntry(
   input: CustomerPaymentEntryInput,
   tenantId: string,
+  userId: string,
   storage: IStorage,
   tx: DBTransaction
 ): Promise<CreateJournalEntry> {
-  // TODO: Implement in Task 4b-2
-  throw new Error('Not implemented yet - Task 4b-2');
+  // Fetch all system accounts in one query
+  const sysAccounts = await resolveSystemAccounts(tenantId, tx);
+  
+  // Build journal entry lines
+  const lines: JournalEntryLine[] = [];
+  
+  // DR Cash/Bank [amount]
+  lines.push({
+    accountId: sysAccounts.cash.id,
+    debitAmount: input.amount,
+    description: `Customer payment ${input.paymentNumber} - ${input.paymentMethod}`,
+  });
+  
+  // CR Accounts Receivable [amount]
+  lines.push({
+    accountId: sysAccounts.accountsReceivable.id,
+    creditAmount: input.amount,
+    description: `Customer payment ${input.paymentNumber} - Receipt from customer`,
+  });
+  
+  // Validate debits = credits
+  validateBalance(lines);
+  
+  return {
+    entryDate: input.paymentDate,
+    description: `Customer Payment ${input.paymentNumber}`,
+    referenceNumber: input.paymentNumber,
+    sourceDocumentType: 'customer_payment',
+    sourceDocumentId: input.id,
+    isAutoGenerated: true,
+    preparedBy: userId,
+    preparedAt: new Date(),
+    lines,
+  };
 }
 
 /**
@@ -794,6 +994,7 @@ export async function createCustomerPaymentJournalEntry(
  * 
  * @param input - Normalized vendor payment entry input
  * @param tenantId - Tenant ID for security isolation
+ * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
  * @returns Created journal entry
@@ -801,11 +1002,44 @@ export async function createCustomerPaymentJournalEntry(
 export async function createVendorPaymentJournalEntry(
   input: VendorPaymentEntryInput,
   tenantId: string,
+  userId: string,
   storage: IStorage,
   tx: DBTransaction
 ): Promise<CreateJournalEntry> {
-  // TODO: Implement in Task 4b-2
-  throw new Error('Not implemented yet - Task 4b-2');
+  // Fetch all system accounts in one query
+  const sysAccounts = await resolveSystemAccounts(tenantId, tx);
+  
+  // Build journal entry lines
+  const lines: JournalEntryLine[] = [];
+  
+  // DR Accounts Payable [amount]
+  lines.push({
+    accountId: sysAccounts.accountsPayable.id,
+    debitAmount: input.amount,
+    description: `Vendor payment ${input.paymentNumber} - Payment to vendor`,
+  });
+  
+  // CR Cash/Bank [amount]
+  lines.push({
+    accountId: sysAccounts.cash.id,
+    creditAmount: input.amount,
+    description: `Vendor payment ${input.paymentNumber} - ${input.paymentMethod}`,
+  });
+  
+  // Validate debits = credits
+  validateBalance(lines);
+  
+  return {
+    entryDate: input.paymentDate,
+    description: `Vendor Payment ${input.paymentNumber}`,
+    referenceNumber: input.paymentNumber,
+    sourceDocumentType: 'payment',
+    sourceDocumentId: input.id,
+    isAutoGenerated: true,
+    preparedBy: userId,
+    preparedAt: new Date(),
+    lines,
+  };
 }
 
 /**
@@ -820,6 +1054,7 @@ export async function createVendorPaymentJournalEntry(
  * 
  * @param input - Normalized credit note entry input
  * @param tenantId - Tenant ID for security isolation
+ * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
  * @returns Created journal entry
@@ -827,11 +1062,55 @@ export async function createVendorPaymentJournalEntry(
 export async function createCreditNoteJournalEntry(
   input: CreditNoteEntryInput,
   tenantId: string,
+  userId: string,
   storage: IStorage,
   tx: DBTransaction
 ): Promise<CreateJournalEntry> {
-  // TODO: Implement in Task 4b-2
-  throw new Error('Not implemented yet - Task 4b-2');
+  // Fetch all system accounts in one query
+  const sysAccounts = await resolveSystemAccounts(tenantId, tx);
+  
+  // Build journal entry lines (reverses invoice pattern)
+  const lines: JournalEntryLine[] = [];
+  
+  // DR Sales Revenue [subtotal]
+  if (parseFloat(input.subtotal) > 0) {
+    lines.push({
+      accountId: sysAccounts.revenue.id,
+      debitAmount: input.subtotal,
+      description: `Credit note ${input.creditNoteNumber} - Revenue reversal`,
+    });
+  }
+  
+  // DR Tax Payable [totalTax]
+  if (parseFloat(input.totalTax) > 0) {
+    lines.push({
+      accountId: sysAccounts.taxPayable.id,
+      debitAmount: input.totalTax,
+      description: `Credit note ${input.creditNoteNumber} - Tax reversal`,
+    });
+  }
+  
+  // CR Accounts Receivable [totalAmount]
+  lines.push({
+    accountId: sysAccounts.accountsReceivable.id,
+    creditAmount: input.totalAmount,
+    description: `Credit note ${input.creditNoteNumber} - Customer receivable reduction`,
+  });
+  
+  // Validate debits = credits
+  validateBalance(lines);
+  
+  return {
+    entryDate: input.creditDate,
+    description: `Credit Note ${input.creditNoteNumber}`,
+    referenceNumber: input.creditNoteNumber,
+    sourceDocumentType: 'credit_note',
+    sourceDocumentId: input.id,
+    isAutoGenerated: true,
+    preparedBy: userId,
+    preparedAt: new Date(),
+    lines,
+  };
 }
 
 /**
@@ -846,6 +1125,7 @@ export async function createCreditNoteJournalEntry(
  * 
  * @param input - Normalized debit note entry input
  * @param tenantId - Tenant ID for security isolation
+ * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
  * @returns Created journal entry
@@ -853,9 +1133,55 @@ export async function createCreditNoteJournalEntry(
 export async function createDebitNoteJournalEntry(
   input: DebitNoteEntryInput,
   tenantId: string,
+  userId: string,
   storage: IStorage,
   tx: DBTransaction
 ): Promise<CreateJournalEntry> {
-  // TODO: Implement in Task 4b-2
-  throw new Error('Not implemented yet - Task 4b-2');
+  // Fetch all system accounts in one query
+  const sysAccounts = await resolveSystemAccounts(tenantId, tx);
+  
+  // Build journal entry lines (reverses bill pattern)
+  const lines: JournalEntryLine[] = [];
+  
+  // DR Accounts Payable [totalAmount]
+  lines.push({
+    accountId: sysAccounts.accountsPayable.id,
+    debitAmount: input.totalAmount,
+    description: `Debit note ${input.debitNoteNumber} - Vendor payable reduction`,
+  });
+  
+  // CR Expense Account(s) per line item - uses expenseAccountId from each line
+  for (const lineItem of input.lineItems) {
+    if (parseFloat(lineItem.amount) > 0) {
+      lines.push({
+        accountId: lineItem.expenseAccountId,
+        creditAmount: lineItem.amount,
+        description: lineItem.description,
+      });
+    }
+  }
+  
+  // CR Tax Receivable (input tax reversal)
+  if (parseFloat(input.totalTax) > 0) {
+    lines.push({
+      accountId: sysAccounts.taxPayable.id,
+      creditAmount: input.totalTax,
+      description: `Debit note ${input.debitNoteNumber} - Input tax reversal`,
+    });
+  }
+  
+  // Validate debits = credits
+  validateBalance(lines);
+  
+  return {
+    entryDate: input.debitDate,
+    description: `Debit Note ${input.debitNoteNumber}`,
+    referenceNumber: input.debitNoteNumber,
+    sourceDocumentType: 'debit_note',
+    sourceDocumentId: input.id,
+    isAutoGenerated: true,
+    preparedBy: userId,
+    preparedAt: new Date(),
+    lines,
+  };
 }
