@@ -2014,6 +2014,168 @@ export const bankReconciliationPayloadSchema = z.object({
 export type BankReconciliationPayload = z.infer<typeof bankReconciliationPayloadSchema>;
 
 // ====================================
+// HISTORICAL BALANCE TRACKING (IAS 21 COMPLIANCE)
+// ====================================
+
+// Opening Balances (for period opening balances tracking)
+export const openingBalances = pgTable("opening_balances", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  accountId: varchar("account_id").notNull().references(() => accounts.id),
+  currencyCode: varchar("currency_code", { length: 3 }).notNull(),
+  amount: decimal("amount", { precision: 20, scale: 10 }).notNull(),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  source: varchar("source", { length: 50 }).notNull(), // 'manual', 'migration', 'period_close'
+  capturedAt: timestamp("captured_at").defaultNow().notNull(),
+  capturedBy: varchar("captured_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("opening_balances_tenant_idx").on(table.tenantId),
+  index("opening_balances_account_idx").on(table.accountId),
+  index("opening_balances_period_idx").on(table.periodStart, table.periodEnd),
+]);
+
+export const insertOpeningBalanceSchema = createInsertSchema(openingBalances, {
+  amount: decimalString,
+}).omit({
+  id: true,
+  capturedAt: true,
+  createdAt: true,
+});
+
+export type InsertOpeningBalance = z.infer<typeof insertOpeningBalanceSchema>;
+export type OpeningBalance = typeof openingBalances.$inferSelect;
+
+// Account Balance Snapshots (periodic balance snapshots for reporting)
+export const accountBalanceSnapshots = pgTable("account_balance_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  accountId: varchar("account_id").notNull().references(() => accounts.id),
+  periodKey: varchar("period_key", { length: 50 }).notNull(), // 'YYYY-MM' or 'YYYY-Q1', 'YYYY'
+  currencyCode: varchar("currency_code", { length: 3 }).notNull(),
+  openingBalance: decimal("opening_balance", { precision: 20, scale: 10 }).notNull(),
+  debitMovements: decimal("debit_movements", { precision: 20, scale: 10 }).default("0").notNull(),
+  creditMovements: decimal("credit_movements", { precision: 20, scale: 10 }).default("0").notNull(),
+  closingBalance: decimal("closing_balance", { precision: 20, scale: 10 }).notNull(),
+  baseCurrencyClosingBalance: decimal("base_currency_closing_balance", { precision: 20, scale: 10 }).notNull(),
+  snapshotDate: timestamp("snapshot_date").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  unique("unique_snapshot_per_account_period_currency").on(table.tenantId, table.accountId, table.periodKey, table.currencyCode),
+  index("account_balance_snapshots_tenant_idx").on(table.tenantId),
+  index("account_balance_snapshots_account_idx").on(table.accountId),
+  index("account_balance_snapshots_period_idx").on(table.periodKey),
+]);
+
+export const insertAccountBalanceSnapshotSchema = createInsertSchema(accountBalanceSnapshots, {
+  openingBalance: decimalString,
+  debitMovements: decimalString,
+  creditMovements: decimalString,
+  closingBalance: decimalString,
+  baseCurrencyClosingBalance: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAccountBalanceSnapshot = z.infer<typeof insertAccountBalanceSnapshotSchema>;
+export type AccountBalanceSnapshot = typeof accountBalanceSnapshots.$inferSelect;
+
+// Fiscal Periods (period management for accounting close)
+export const fiscalPeriods = pgTable("fiscal_periods", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  periodKey: varchar("period_key", { length: 50 }).notNull(), // 'YYYY-MM', 'YYYY-Q1', 'YYYY'
+  periodType: varchar("period_type", { length: 20 }).notNull(), // 'monthly', 'quarterly', 'yearly'
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date").notNull(),
+  status: varchar("status", { length: 20 }).default("open").notNull(), // 'open', 'closing', 'closed'
+  lockState: varchar("lock_state", { length: 20 }).default("unlocked").notNull(), // 'unlocked', 'locked', 'hard_locked'
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_period_per_tenant").on(table.tenantId, table.periodKey),
+  index("fiscal_periods_tenant_idx").on(table.tenantId),
+  index("fiscal_periods_status_idx").on(table.status),
+]);
+
+export const insertFiscalPeriodSchema = createInsertSchema(fiscalPeriods).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertFiscalPeriod = z.infer<typeof insertFiscalPeriodSchema>;
+export type FiscalPeriod = typeof fiscalPeriods.$inferSelect;
+
+// Period Closures (tracking period close/reopen actions)
+export const periodClosures = pgTable("period_closures", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  periodKey: varchar("period_key", { length: 50 }).notNull(),
+  fiscalPeriodId: varchar("fiscal_period_id").notNull().references(() => fiscalPeriods.id),
+  closedBy: varchar("closed_by").notNull().references(() => users.id),
+  closedAt: timestamp("closed_at").defaultNow().notNull(),
+  closingRateSetId: varchar("closing_rate_set_id"), // References batch of exchange rates used
+  reopenedBy: varchar("reopened_by").references(() => users.id),
+  reopenedAt: timestamp("reopened_at"),
+  reopenReason: text("reopen_reason"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("period_closures_tenant_idx").on(table.tenantId),
+  index("period_closures_period_idx").on(table.fiscalPeriodId),
+]);
+
+export const insertPeriodClosureSchema = createInsertSchema(periodClosures).omit({
+  id: true,
+  closedAt: true,
+  createdAt: true,
+});
+
+export type InsertPeriodClosure = z.infer<typeof insertPeriodClosureSchema>;
+export type PeriodClosure = typeof periodClosures.$inferSelect;
+
+// Exchange Difference Journals (FX gain/loss tracking for IAS 21)
+export const exchangeDifferenceJournals = pgTable("exchange_difference_journals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  journalEntryId: varchar("journal_entry_id").notNull().references(() => journalEntries.id),
+  differenceType: varchar("difference_type", { length: 20 }).notNull(), // 'realized', 'unrealized'
+  sourceTransactionId: varchar("source_transaction_id"), // Invoice/Bill/Payment ID
+  sourceTransactionType: varchar("source_transaction_type", { length: 50 }), // 'invoice', 'bill', 'payment'
+  accountId: varchar("account_id").notNull().references(() => accounts.id),
+  currencyCode: varchar("currency_code", { length: 3 }).notNull(),
+  originalAmount: decimal("original_amount", { precision: 20, scale: 10 }).notNull(),
+  originalRate: decimal("original_rate", { precision: 20, scale: 10 }).notNull(),
+  revaluationRate: decimal("revaluation_rate", { precision: 20, scale: 10 }).notNull(),
+  gainLossAmount: decimal("gain_loss_amount", { precision: 20, scale: 10 }).notNull(),
+  periodKey: varchar("period_key", { length: 50 }).notNull(),
+  calculatedAt: timestamp("calculated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("exchange_difference_journals_tenant_idx").on(table.tenantId),
+  index("exchange_difference_journals_journal_idx").on(table.journalEntryId),
+  index("exchange_difference_journals_period_idx").on(table.periodKey),
+  index("exchange_difference_journals_account_idx").on(table.accountId),
+]);
+
+export const insertExchangeDifferenceJournalSchema = createInsertSchema(exchangeDifferenceJournals, {
+  originalAmount: decimalString,
+  originalRate: decimalString,
+  revaluationRate: decimalString,
+  gainLossAmount: decimalString,
+}).omit({
+  id: true,
+  calculatedAt: true,
+  createdAt: true,
+});
+
+export type InsertExchangeDifferenceJournal = z.infer<typeof insertExchangeDifferenceJournalSchema>;
+export type ExchangeDifferenceJournal = typeof exchangeDifferenceJournals.$inferSelect;
+
+// ====================================
 // FINANCIAL REPORTS (READ-ONLY)
 // ====================================
 
