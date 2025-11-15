@@ -2900,6 +2900,9 @@ export const bankAccounts = pgTable("bank_accounts", {
   status: varchar("status", { length: 50 }).notNull().default("active"),
   // Values: 'active', 'inactive', 'closed', 'suspended'
   
+  // Transaction sync tracking
+  lastSyncedAt: timestamp("last_synced_at"), // Track last successful sync for incremental updates
+  
   // Provider-specific metadata
   metadata: jsonb("metadata"), // Additional provider-specific account data
   
@@ -3006,8 +3009,9 @@ export const bankTransactions = pgTable("bank_transactions", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
-  // Unique constraint: prevent duplicate transactions from same provider
-  unique("unique_provider_transaction").on(table.tenantId, table.providerTransactionId),
+  // Unique constraint: prevent duplicate transactions from same provider account
+  // Must include tenantId, accountId (provider's account ID), and providerTransactionId
+  unique("unique_provider_transaction").on(table.tenantId, table.accountId, table.providerTransactionId),
   
   // Performance indexes
   index("idx_bt_tenant_connection").on(table.tenantId, table.connectionId),

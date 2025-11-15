@@ -4,6 +4,7 @@ import { sendReportEmail } from './email-service';
 import * as XLSX from 'xlsx';
 import { db } from './db';
 import { tenants } from '@shared/schema';
+import { initializeTransactionSync } from './jobs/transaction-sync';
 
 const cronJobs = new Map<string, cron.ScheduledTask>();
 

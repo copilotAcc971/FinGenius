@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startFXRatesUpdateJob } from "./jobs/fx-rates-update";
 import { initializeScheduledReports } from "./cron";
+import { initializeTransactionSync } from "./jobs/transaction-sync";
 import { seedPermissions } from './scripts/seed-rbac';
 import { initializeRBACForAllTenants } from './scripts/update-owner-permissions';
 
@@ -89,6 +90,9 @@ app.use((req, res, next) => {
       
       // Initialize scheduled reports with proper await
       await initializeScheduledReports();
+      
+      // Initialize daily transaction sync job
+      initializeTransactionSync();
     } catch (error) {
       console.error('Error during server initialization:', error);
     }

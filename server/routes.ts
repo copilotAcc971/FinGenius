@@ -11,6 +11,7 @@ import { registerCronJob, unregisterCronJob, validateCronExpression } from "./cr
 import googleDriveRoutes from "./google-drive-routes";
 import { OpenBankingService, EncryptedPayloadValidationError, TokenRefreshError, nonceStore } from './open-banking';
 import { openBankingProviderFactory } from './open-banking/providers';
+import { TransactionSyncService } from './open-banking/transaction-sync-service';
 import { db } from './db';
 import { eq, and, desc, asc, sql, inArray, isNull, lt, gte, lte, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -6970,6 +6971,224 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('[Open Banking] Get capabilities error:', error);
       res.status(500).json({ 
         message: "Failed to get provider capabilities",
+        error: error.message 
+      });
+    }
+  });
+
+  // Zod validation schema for sync parameters
+  const syncParamsSchema = z.object({
+    startDate: z.string().datetime().optional(),
+    endDate: z.string().datetime().optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+  });
+
+  // POST /api/open-banking/bank-accounts/:accountId/sync-transactions
+  // Manually trigger transaction sync for a bank account
+  app.post('/api/open-banking/bank-accounts/:accountId/sync-transactions', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const tenantId = req.tenantId!; // Secure - from middleware
+      
+      // Validate request body
+      const { startDate, endDate, limit } = syncParamsSchema.parse(req.body);
+
+      console.log('[Open Banking] Sync transactions request', {
+        accountId,
+        tenantId,
+        startDate,
+        endDate,
+        limit,
+      });
+
+      // Verify bank account exists and belongs to tenant
+      const [account] = await db
+        .select()
+        .from(bankAccounts)
+        .where(
+          and(
+            eq(bankAccounts.id, accountId),
+            eq(bankAccounts.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!account) {
+        return res.status(404).json({ 
+          message: "Bank account not found" 
+        });
+      }
+
+      // Parse date parameters
+      const parsedStartDate = startDate ? new Date(startDate) : undefined;
+      const parsedEndDate = endDate ? new Date(endDate) : undefined;
+
+      // Create sync service and sync transactions
+      const syncService = new TransactionSyncService(tenantId);
+      const result = await syncService.syncAccountTransactions(
+        accountId,
+        parsedStartDate,
+        parsedEndDate,
+        limit
+      );
+
+      console.log('[Open Banking] Sync complete', {
+        accountId,
+        tenantId,
+        result,
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error('[Open Banking] Sync transactions error:', error);
+      
+      if (error instanceof TokenRefreshError) {
+        return res.status(401).json({ 
+          message: "Token refresh failed. Please reconnect your bank account.",
+          error: error.message 
+        });
+      }
+
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ 
+          message: "Invalid request parameters",
+          error: error.message 
+        });
+      }
+      
+      res.status(500).json({ 
+        message: "Failed to sync transactions",
+        error: error.message 
+      });
+    }
+  });
+
+  // Zod validation schema for list parameters
+  const listParamsSchema = z.object({
+    startDate: z.string().datetime().optional(),
+    endDate: z.string().datetime().optional(),
+    limit: z.coerce.number().int().min(1).max(500).default(100),
+    offset: z.coerce.number().int().min(0).default(0),
+  });
+
+  // GET /api/open-banking/bank-accounts/:accountId/transactions
+  // List all synced transactions for a bank account
+  app.get('/api/open-banking/bank-accounts/:accountId/transactions', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const tenantId = req.tenantId!; // Secure - from middleware
+      
+      // Validate query parameters
+      const { startDate, endDate, limit, offset } = listParamsSchema.parse(req.query);
+
+      console.log('[Open Banking] List transactions request', {
+        accountId,
+        tenantId,
+        startDate,
+        endDate,
+        limit,
+        offset,
+      });
+
+      // Verify bank account exists and belongs to tenant
+      const [account] = await db
+        .select()
+        .from(bankAccounts)
+        .where(
+          and(
+            eq(bankAccounts.id, accountId),
+            eq(bankAccounts.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!account) {
+        return res.status(404).json({ 
+          message: "Bank account not found" 
+        });
+      }
+
+      // Use the new listAccountTransactions service method
+      const syncService = new TransactionSyncService(tenantId);
+      const result = await syncService.listAccountTransactions(accountId, {
+        startDate: startDate ? new Date(startDate) : undefined,
+        endDate: endDate ? new Date(endDate) : undefined,
+        limit,
+        offset,
+      });
+
+      console.log('[Open Banking] Transactions retrieved', {
+        accountId,
+        tenantId,
+        count: result.transactions.length,
+        total: result.total,
+      });
+
+      res.json({
+        transactions: result.transactions,
+        pagination: {
+          limit,
+          offset,
+          total: result.total,
+        },
+      });
+    } catch (error: any) {
+      console.error('[Open Banking] List transactions error:', error);
+      
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ 
+          message: "Invalid request parameters",
+          error: error.message 
+        });
+      }
+      
+      res.status(500).json({ 
+        message: "Failed to list transactions",
+        error: error.message 
+      });
+    }
+  });
+
+  // GET /api/open-banking/transactions/:id
+  // Get single transaction detail
+  app.get('/api/open-banking/transactions/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!; // Secure - from middleware
+
+      console.log('[Open Banking] Get transaction detail request', {
+        id,
+        tenantId,
+      });
+
+      // Fetch transaction
+      const [transaction] = await db
+        .select()
+        .from(bankTransactions)
+        .where(
+          and(
+            eq(bankTransactions.id, id),
+            eq(bankTransactions.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!transaction) {
+        return res.status(404).json({ 
+          message: "Transaction not found" 
+        });
+      }
+
+      console.log('[Open Banking] Transaction retrieved', {
+        id,
+        tenantId,
+      });
+
+      res.json(transaction);
+    } catch (error: any) {
+      console.error('[Open Banking] Get transaction error:', error);
+      res.status(500).json({ 
+        message: "Failed to get transaction",
         error: error.message 
       });
     }
