@@ -1,5 +1,4 @@
 import {
-  Building2,
   LayoutDashboard,
   FileText,
   Users,
@@ -25,6 +24,7 @@ import {
   Workflow,
   PieChart,
 } from "lucide-react";
+import logoImage from "@assets/generated_images/Copilot_Accountant_app_logo_0a4d944c.png";
 import {
   Sidebar,
   SidebarContent,
@@ -99,13 +99,13 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-            <Building2 className="h-5 w-5 text-primary-foreground" />
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white p-1.5">
+            <img src={logoImage} alt="Copilot Accountant" className="h-full w-full object-contain" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold">AccounBooks</span>
-            <span className="text-xs text-muted-foreground">AI Accounting</span>
+            <span className="text-sm font-semibold">Copilot Accountant</span>
+            <span className="text-xs text-sidebar-foreground/70">AI-Powered Accounting</span>
           </div>
         </div>
       </SidebarHeader>

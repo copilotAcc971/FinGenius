@@ -7,6 +7,9 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { UserMenu } from "@/components/user-menu";
+import { CommandPalette } from "@/components/command-palette";
+import { Breadcrumbs } from "@/components/breadcrumbs";
+import { TenantBadge } from "@/components/tenant-badge";
 import { useAuth } from "@/hooks/useAuth";
 import { TenantProvider } from "@/contexts/TenantContext";
 import { RBACProvider } from "@/contexts/rbac-context";
@@ -127,6 +130,7 @@ function AppContent() {
     <>
       <TenantGate>
         <RBACProvider tenantId={currentTenant?.id || null}>
+          <CommandPalette />
           <SidebarProvider style={sidebarStyle as React.CSSProperties}>
             <div className="flex h-screen w-full">
               <AppSidebar />
@@ -137,9 +141,13 @@ function AppContent() {
                     <WorkspaceSwitcher />
                   </div>
                   <div className="flex items-center gap-4">
+                    <TenantBadge />
                     <UserMenu />
                   </div>
                 </header>
+                <div className="border-b bg-background px-6 py-3">
+                  <Breadcrumbs />
+                </div>
                 <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
                   <div className="mx-auto max-w-7xl">
                     <Router />
