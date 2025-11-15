@@ -147,6 +147,14 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
     description: 'Income from sources other than primary operations (interest, gains, etc.).',
     normalBalance: 'credit',
   },
+  {
+    code: '4910',
+    name: 'Foreign Exchange Gain',
+    type: 'income',
+    accountCategory: 'Revenue',
+    description: 'Gains from foreign currency translation and settlement. Per IFRS IAS 21 and IFRS for SMEs Section 30.',
+    normalBalance: 'credit',
+  },
 
   // ============================================
   // EXPENSES (5000-5999)
@@ -174,6 +182,14 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
     type: 'expense',
     accountCategory: 'Operating Expenses',
     description: 'Systematic allocation of fixed asset costs over their useful life. Non-cash expense.',
+    normalBalance: 'debit',
+  },
+  {
+    code: '5900',
+    name: 'Foreign Exchange Loss',
+    type: 'expense',
+    accountCategory: 'Operating Expenses',
+    description: 'Losses from foreign currency translation and settlement. Per IFRS IAS 21 and IFRS for SMEs Section 30.',
     normalBalance: 'debit',
   },
 ];
