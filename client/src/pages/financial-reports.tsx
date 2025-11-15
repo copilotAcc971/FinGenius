@@ -29,21 +29,39 @@ import {
 
 const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
 
-interface ProfitLossReport {
+interface ProfitLossResponse {
   revenue: Array<{ accountName: string; amount: number }>;
   expenses: Array<{ accountName: string; amount: number }>;
   totalRevenue: number;
   totalExpenses: number;
   netProfit: number;
+  baseCurrency: string;
+  fxTranslationStandard: string;
+  incomeExpenseMethod: string;
+  fxTranslationApplied: boolean;
+  exchangeDifferences: {
+    totalRevenueExchangeDifference: number;
+    totalExpenseExchangeDifference: number;
+    netExchangeDifference: number;
+  };
 }
 
-interface BalanceSheetReport {
+interface BalanceSheetResponse {
   assets: Array<{ accountName: string; amount: number }>;
   liabilities: Array<{ accountName: string; amount: number }>;
   equity: Array<{ accountName: string; amount: number }>;
   totalAssets: number;
   totalLiabilities: number;
   totalEquity: number;
+  baseCurrency: string;
+  fxTranslationStandard: string;
+  translationMethod: string;
+  fxTranslationApplied: boolean;
+  exchangeDifferences: {
+    totalAssetExchangeDifference: number;
+    totalLiabilityExchangeDifference: number;
+    netExchangeDifference: number;
+  };
 }
 
 interface TrialBalanceReport {
@@ -66,6 +84,120 @@ interface CashFlowReport {
   netInvesting: number;
   netFinancing: number;
   netCashFlow: number;
+}
+
+function FxDisclosure({ 
+  standard, 
+  method, 
+  baseCurrency, 
+  applied 
+}: { 
+  standard: string; 
+  method?: string; 
+  baseCurrency: string; 
+  applied: boolean;
+}) {
+  if (!applied) return null;
+
+  const standardLabel = standard === "full-ifrs" ? "Full IFRS (IAS 21)" : "IFRS for SMEs (Section 30)";
+  const methodLabel = method === "average-rate" ? "Average Rate" : "Transaction Date Rate";
+
+  return (
+    <div className="text-xs text-muted-foreground space-y-1 mt-2 p-3 bg-muted/50 rounded-md" data-testid="fx-disclosure">
+      <p className="font-medium">Foreign Currency Translation Applied:</p>
+      <p>Standard: {standardLabel}</p>
+      {method && <p>Income/Expense Method: {methodLabel}</p>}
+      <p>Presentation Currency: {baseCurrency}</p>
+      <p className="text-xs italic mt-2">
+        Note: Exchange difference tracking requires historical balance data. 
+        Differences will be displayed once multi-currency transactions are fully integrated.
+      </p>
+    </div>
+  );
+}
+
+function ExchangeDifferencesSummary({
+  differences,
+  reportType,
+  currencies,
+  baseCurrencyCode
+}: {
+  differences: {
+    totalRevenueExchangeDifference?: number;
+    totalExpenseExchangeDifference?: number;
+    totalAssetExchangeDifference?: number;
+    totalLiabilityExchangeDifference?: number;
+    netExchangeDifference: number;
+  };
+  reportType: "P&L" | "Balance Sheet";
+  currencies: Currency[];
+  baseCurrencyCode: string;
+}) {
+  // Check if ANY difference is non-zero
+  const hasSignificantDifferences = 
+    Math.abs(differences.netExchangeDifference) > 0.01 ||
+    (differences.totalRevenueExchangeDifference !== undefined && Math.abs(differences.totalRevenueExchangeDifference) > 0.01) ||
+    (differences.totalExpenseExchangeDifference !== undefined && Math.abs(differences.totalExpenseExchangeDifference) > 0.01) ||
+    (differences.totalAssetExchangeDifference !== undefined && Math.abs(differences.totalAssetExchangeDifference) > 0.01) ||
+    (differences.totalLiabilityExchangeDifference !== undefined && Math.abs(differences.totalLiabilityExchangeDifference) > 0.01);
+  
+  // Hide component entirely if no significant differences
+  // This prevents showing misleading "0" exchange differences
+  if (!hasSignificantDifferences) return null;
+
+  return (
+    <div className="mt-4 p-4 border rounded-md bg-card" data-testid="exchange-differences">
+      <h4 className="font-semibold mb-2 text-sm">Exchange Differences</h4>
+      <div className="space-y-1 text-sm">
+        {reportType === "P&L" && (
+          <>
+            {differences.totalRevenueExchangeDifference !== undefined && Math.abs(differences.totalRevenueExchangeDifference) > 0.01 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Revenue Translation:</span>
+                <span data-testid="text-revenue-fx-diff">
+                  {formatCurrency(differences.totalRevenueExchangeDifference, baseCurrencyCode, currencies)}
+                </span>
+              </div>
+            )}
+            {differences.totalExpenseExchangeDifference !== undefined && Math.abs(differences.totalExpenseExchangeDifference) > 0.01 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Expense Translation:</span>
+                <span data-testid="text-expense-fx-diff">
+                  {formatCurrency(differences.totalExpenseExchangeDifference, baseCurrencyCode, currencies)}
+                </span>
+              </div>
+            )}
+          </>
+        )}
+        {reportType === "Balance Sheet" && (
+          <>
+            {differences.totalAssetExchangeDifference !== undefined && Math.abs(differences.totalAssetExchangeDifference) > 0.01 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Asset Translation:</span>
+                <span data-testid="text-asset-fx-diff">
+                  {formatCurrency(differences.totalAssetExchangeDifference, baseCurrencyCode, currencies)}
+                </span>
+              </div>
+            )}
+            {differences.totalLiabilityExchangeDifference !== undefined && Math.abs(differences.totalLiabilityExchangeDifference) > 0.01 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Liability Translation:</span>
+                <span data-testid="text-liability-fx-diff">
+                  {formatCurrency(differences.totalLiabilityExchangeDifference, baseCurrencyCode, currencies)}
+                </span>
+              </div>
+            )}
+          </>
+        )}
+        <div className="flex justify-between font-semibold pt-2 border-t">
+          <span>Net Exchange Difference:</span>
+          <span data-testid="text-net-fx-diff">
+            {formatCurrency(differences.netExchangeDifference, baseCurrencyCode, currencies)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function FinancialReports() {
@@ -105,13 +237,13 @@ export default function FinancialReports() {
   }, [isAuthenticated, authLoading, toast]);
 
   // Profit & Loss Query
-  const { data: plReport, isLoading: plLoading } = useQuery<ProfitLossReport>({
+  const { data: profitLossData, isLoading: plLoading } = useQuery<ProfitLossResponse>({
     queryKey: ["/api/reports/profit-loss", { tenantId: currentTenant?.id, startDate: plStartDate, endDate: plEndDate }],
     enabled: !!currentTenant?.id && fetchPL,
   });
 
   // Balance Sheet Query
-  const { data: bsReport, isLoading: bsLoading } = useQuery<BalanceSheetReport>({
+  const { data: balanceSheetData, isLoading: bsLoading } = useQuery<BalanceSheetResponse>({
     queryKey: ["/api/reports/balance-sheet", { tenantId: currentTenant?.id, asOfDate: bsAsOfDate }],
     enabled: !!currentTenant?.id && fetchBS,
   });
@@ -222,7 +354,7 @@ export default function FinancialReports() {
             </div>
           )}
 
-          {plReport && !plLoading && (
+          {profitLossData && !plLoading && (
             <>
               <div className="grid gap-6 md:grid-cols-3">
                 <Card>
@@ -231,7 +363,7 @@ export default function FinancialReports() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-green-600" data-testid="text-total-revenue">
-                      {formatCurrency(plReport.totalRevenue, baseCurrency?.code || "USD", currencies)}
+                      {formatCurrency(profitLossData.totalRevenue, baseCurrency?.code || "USD", currencies)}
                     </div>
                   </CardContent>
                 </Card>
@@ -241,7 +373,7 @@ export default function FinancialReports() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-red-600" data-testid="text-total-expenses">
-                      {formatCurrency(plReport.totalExpenses, baseCurrency?.code || "USD", currencies)}
+                      {formatCurrency(profitLossData.totalExpenses, baseCurrency?.code || "USD", currencies)}
                     </div>
                   </CardContent>
                 </Card>
@@ -251,10 +383,10 @@ export default function FinancialReports() {
                   </CardHeader>
                   <CardContent>
                     <div 
-                      className={`text-2xl font-bold ${plReport.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                      className={`text-2xl font-bold ${profitLossData.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}
                       data-testid="text-net-profit"
                     >
-                      {formatCurrency(plReport.netProfit, baseCurrency?.code || "USD", currencies)}
+                      {formatCurrency(profitLossData.netProfit, baseCurrency?.code || "USD", currencies)}
                     </div>
                   </CardContent>
                 </Card>
@@ -268,9 +400,9 @@ export default function FinancialReports() {
                   <ResponsiveContainer width="100%" height={300}>
                     <BarChart
                       data={[
-                        { name: 'Revenue', amount: plReport.totalRevenue },
-                        { name: 'Expenses', amount: plReport.totalExpenses },
-                        { name: 'Net Profit', amount: plReport.netProfit },
+                        { name: 'Revenue', amount: profitLossData.totalRevenue },
+                        { name: 'Expenses', amount: profitLossData.totalExpenses },
+                        { name: 'Net Profit', amount: profitLossData.netProfit },
                       ]}
                     >
                       <CartesianGrid strokeDasharray="3 3" />
@@ -290,7 +422,7 @@ export default function FinancialReports() {
                     <CardTitle>Revenue Breakdown</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {plReport.revenue.length === 0 ? (
+                    {profitLossData.revenue.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No revenue accounts</p>
                     ) : (
                       <Table>
@@ -301,7 +433,7 @@ export default function FinancialReports() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {plReport.revenue.map((item, idx) => (
+                          {profitLossData.revenue.map((item, idx) => (
                             <TableRow key={idx} data-testid={`row-revenue-${idx}`}>
                               <TableCell>{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono">
@@ -312,7 +444,7 @@ export default function FinancialReports() {
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Revenue</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-revenue">
-                              {formatCurrency(plReport.totalRevenue, baseCurrency?.code || "USD", currencies)}
+                              {formatCurrency(profitLossData.totalRevenue, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -326,7 +458,7 @@ export default function FinancialReports() {
                     <CardTitle>Expense Breakdown</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {plReport.expenses.length === 0 ? (
+                    {profitLossData.expenses.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No expense accounts</p>
                     ) : (
                       <Table>
@@ -337,7 +469,7 @@ export default function FinancialReports() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {plReport.expenses.map((item, idx) => (
+                          {profitLossData.expenses.map((item, idx) => (
                             <TableRow key={idx} data-testid={`row-expense-${idx}`}>
                               <TableCell>{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono">
@@ -348,7 +480,7 @@ export default function FinancialReports() {
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Expenses</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-expenses">
-                              {formatCurrency(plReport.totalExpenses, baseCurrency?.code || "USD", currencies)}
+                              {formatCurrency(profitLossData.totalExpenses, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -357,6 +489,19 @@ export default function FinancialReports() {
                   </CardContent>
                 </Card>
               </div>
+
+              <FxDisclosure
+                standard={profitLossData.fxTranslationStandard}
+                method={profitLossData.incomeExpenseMethod}
+                baseCurrency={profitLossData.baseCurrency}
+                applied={profitLossData.fxTranslationApplied}
+              />
+              <ExchangeDifferencesSummary
+                differences={profitLossData.exchangeDifferences}
+                reportType="P&L"
+                currencies={currencies}
+                baseCurrencyCode={baseCurrency?.code || "USD"}
+              />
             </>
           )}
         </TabsContent>
@@ -399,7 +544,7 @@ export default function FinancialReports() {
             </div>
           )}
 
-          {bsReport && !bsLoading && (
+          {balanceSheetData && !bsLoading && (
             <>
               <Card>
                 <CardHeader>
@@ -410,9 +555,9 @@ export default function FinancialReports() {
                     <PieChart>
                       <Pie
                         data={[
-                          { name: 'Assets', value: bsReport.totalAssets },
-                          { name: 'Liabilities', value: bsReport.totalLiabilities },
-                          { name: 'Equity', value: bsReport.totalEquity },
+                          { name: 'Assets', value: balanceSheetData.totalAssets },
+                          { name: 'Liabilities', value: balanceSheetData.totalLiabilities },
+                          { name: 'Equity', value: balanceSheetData.totalEquity },
                         ]}
                         cx="50%"
                         cy="50%"
@@ -439,7 +584,7 @@ export default function FinancialReports() {
                     <CardTitle>Assets</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {bsReport.assets.length === 0 ? (
+                    {balanceSheetData.assets.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No asset accounts</p>
                     ) : (
                       <Table>
@@ -450,7 +595,7 @@ export default function FinancialReports() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {bsReport.assets.map((item, idx) => (
+                          {balanceSheetData.assets.map((item, idx) => (
                             <TableRow key={idx} data-testid={`row-asset-${idx}`}>
                               <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
@@ -461,7 +606,7 @@ export default function FinancialReports() {
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Assets</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-assets">
-                              {formatCurrency(bsReport.totalAssets, baseCurrency?.code || "USD", currencies)}
+                              {formatCurrency(balanceSheetData.totalAssets, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -475,7 +620,7 @@ export default function FinancialReports() {
                     <CardTitle>Liabilities</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {bsReport.liabilities.length === 0 ? (
+                    {balanceSheetData.liabilities.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No liability accounts</p>
                     ) : (
                       <Table>
@@ -486,7 +631,7 @@ export default function FinancialReports() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {bsReport.liabilities.map((item, idx) => (
+                          {balanceSheetData.liabilities.map((item, idx) => (
                             <TableRow key={idx} data-testid={`row-liability-${idx}`}>
                               <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
@@ -497,7 +642,7 @@ export default function FinancialReports() {
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Liabilities</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-liabilities">
-                              {formatCurrency(bsReport.totalLiabilities, baseCurrency?.code || "USD", currencies)}
+                              {formatCurrency(balanceSheetData.totalLiabilities, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -511,7 +656,7 @@ export default function FinancialReports() {
                     <CardTitle>Equity</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {bsReport.equity.length === 0 ? (
+                    {balanceSheetData.equity.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No equity accounts</p>
                     ) : (
                       <Table>
@@ -522,7 +667,7 @@ export default function FinancialReports() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {bsReport.equity.map((item, idx) => (
+                          {balanceSheetData.equity.map((item, idx) => (
                             <TableRow key={idx} data-testid={`row-equity-${idx}`}>
                               <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
@@ -533,7 +678,7 @@ export default function FinancialReports() {
                           <TableRow className="font-semibold bg-muted/50">
                             <TableCell>Total Equity</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-total-equity">
-                              {formatCurrency(bsReport.totalEquity, baseCurrency?.code || "USD", currencies)}
+                              {formatCurrency(balanceSheetData.totalEquity, baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -551,24 +696,24 @@ export default function FinancialReports() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="font-medium">Assets:</span>
-                      <span className="font-mono">{formatCurrency(bsReport.totalAssets, baseCurrency?.code || "USD", currencies)}</span>
+                      <span className="font-mono">{formatCurrency(balanceSheetData.totalAssets, baseCurrency?.code || "USD", currencies)}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="font-medium">Liabilities + Equity:</span>
                       <span className="font-mono">
-                        {formatCurrency(bsReport.totalLiabilities + bsReport.totalEquity, baseCurrency?.code || "USD", currencies)}
+                        {formatCurrency(balanceSheetData.totalLiabilities + balanceSheetData.totalEquity, baseCurrency?.code || "USD", currencies)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center pt-2 border-t font-semibold">
                       <span>Balance:</span>
                       <span 
-                        className={Math.abs(bsReport.totalAssets - (bsReport.totalLiabilities + bsReport.totalEquity)) < 0.01 
+                        className={Math.abs(balanceSheetData.totalAssets - (balanceSheetData.totalLiabilities + balanceSheetData.totalEquity)) < 0.01 
                           ? 'text-green-600' 
                           : 'text-red-600'
                         }
                         data-testid="text-balance-check"
                       >
-                        {Math.abs(bsReport.totalAssets - (bsReport.totalLiabilities + bsReport.totalEquity)) < 0.01 
+                        {Math.abs(balanceSheetData.totalAssets - (balanceSheetData.totalLiabilities + balanceSheetData.totalEquity)) < 0.01 
                           ? 'Balanced ✓' 
                           : 'Not Balanced ✗'
                         }
@@ -577,6 +722,19 @@ export default function FinancialReports() {
                   </div>
                 </CardContent>
               </Card>
+
+              <FxDisclosure
+                standard={balanceSheetData.fxTranslationStandard}
+                method={balanceSheetData.translationMethod}
+                baseCurrency={balanceSheetData.baseCurrency}
+                applied={balanceSheetData.fxTranslationApplied}
+              />
+              <ExchangeDifferencesSummary
+                differences={balanceSheetData.exchangeDifferences}
+                reportType="Balance Sheet"
+                currencies={currencies}
+                baseCurrencyCode={baseCurrency?.code || "USD"}
+              />
             </>
           )}
         </TabsContent>
