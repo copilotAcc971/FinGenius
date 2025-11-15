@@ -4434,6 +4434,47 @@ export class DatabaseStorage implements IStorage {
     asOfDate: Date, 
     comparisonDate?: Date
   ): Promise<EnhancedBalanceSheetReport> {
+    // ===============================================================================
+    // IAS 1 (Presentation of Financial Statements) - Balance Sheet Compliance
+    // ===============================================================================
+    // 
+    // This method generates an Enhanced Balance Sheet (Statement of Financial Position)
+    // in compliance with IAS 1 requirements:
+    //
+    // ✓ IAS 1.54 - Minimum Line Items:
+    //   - Implemented through flexible hierarchical account categories
+    //   - Specific line items (PPE, Intangible Assets, Inventories, Trade Receivables,
+    //     Cash, Trade Payables, Financial Liabilities, Provisions, Tax Assets/Liabilities,
+    //     Issued Capital, Reserves) depend on tenant's Chart of Accounts setup
+    //   - System supports all required line items via accountCategory field
+    //
+    // ✓ IAS 1.60-76 - Current vs. Non-current Classification:
+    //   - Assets and liabilities classified via accountCategory
+    //   - Common categories: Current Assets, Fixed Assets (Non-current),
+    //     Current Liabilities, Long-term Liabilities (Non-current)
+    //   - Alternative liquidity presentation also supported via category ordering
+    //
+    // ✓ IAS 1.38 - Comparative Information:
+    //   - At least one comparative period supported via comparisonDate parameter
+    //   - Variance analysis (amount and percentage) calculated for all line items
+    //   - Both current and comparative periods verified for accounting equation balance
+    //
+    // ✓ IAS 1.51 - Presentation Currency:
+    //   - baseCurrency clearly identified (added in route layer from currencies table)
+    //   - Multi-currency translation metadata included when IFRS compliance enabled
+    //   - FX translation standard and method disclosed (IAS 21 compliance)
+    //
+    // ✓ Accounting Equation Verification:
+    //   - isBalanced field verifies: Total Assets = Total Liabilities + Total Equity
+    //   - Ensures mathematical accuracy and double-entry bookkeeping integrity
+    //   - Verified for both current and comparative periods
+    //
+    // Note: Detailed disclosures (measurement bases, accounting policies, significant
+    //       judgments, key assumptions) are not included in this summary statement.
+    //       These should be presented in accompanying notes to financial statements.
+    //
+    // ===============================================================================
+
     // Helper function to calculate variance percentage
     const calculateVariancePercentage = (current: number, previous: number): number | "Infinity" | "-Infinity" => {
       if (previous === 0 && current === 0) return 0;
