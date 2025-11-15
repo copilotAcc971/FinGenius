@@ -30,6 +30,8 @@ import {
   ChevronDown,
   ChevronRight,
   FileBarChart,
+  FileSpreadsheet,
+  Calendar,
 } from "lucide-react";
 import logoImage from "@assets/generated_images/Copilot_Accountant_app_logo_0a4d944c.png";
 import {
@@ -96,6 +98,8 @@ const accountingItems = [
   { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
   { title: "Bank Connections", url: "/bank-connections", icon: Landmark },
   { title: "Financial Reports", url: "/financial-reports", icon: TrendingUp },
+  { title: "Custom Reports", url: "/custom-reports", icon: FileSpreadsheet },
+  { title: "Scheduled Reports", url: "/scheduled-reports", icon: Calendar },
   { title: "AR Aging Report", url: "/ar-aging", icon: Clock },
   { title: "AP Aging Report", url: "/ap-aging", icon: Clock },
 ];
@@ -141,6 +145,8 @@ function getIconName(IconComponent: any): string {
     [UserCog.name]: "UserCog",
     [Coins.name]: "Coins",
     [FileBarChart.name]: "FileBarChart",
+    [FileSpreadsheet.name]: "FileSpreadsheet",
+    [Calendar.name]: "Calendar",
   };
   return iconMap[IconComponent.name] || "FileText";
 }

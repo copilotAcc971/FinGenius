@@ -37,3 +37,51 @@ export function formatPercentage(value: number | "Infinity" | "-Infinity" | unde
   }
   return "";
 }
+
+export function exportToCSV(data: any[], filename: string) {
+  if (!data || data.length === 0) {
+    return;
+  }
+  
+  // Get headers from first object
+  const headers = Object.keys(data[0]);
+  
+  // Create CSV content
+  const csvContent = [
+    headers.join(','),
+    ...data.map(row => 
+      headers.map(header => {
+        const value = row[header];
+        // Handle values that need quoting (contain comma, quote, or newline)
+        if (value === null || value === undefined) return '';
+        const strValue = String(value);
+        if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
+          return `"${strValue.replace(/"/g, '""')}"`;
+        }
+        return strValue;
+      }).join(',')
+    )
+  ].join('\n');
+  
+  downloadCSV(csvContent, filename);
+}
+
+export function exportToExcel(data: any[], filename: string, sheetName: string = 'Report') {
+  if (!data || data.length === 0) {
+    return;
+  }
+  
+  // Get headers from first object
+  const headers = Object.keys(data[0]);
+  
+  // Convert data to 2D array format
+  const excelData = [
+    headers,
+    ...data.map(row => headers.map(header => row[header] ?? ''))
+  ];
+  
+  // Add .xlsx extension if not present
+  const excelFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  
+  downloadExcel(excelData, excelFilename, sheetName);
+}

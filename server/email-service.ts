@@ -92,3 +92,53 @@ export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<
     saveToSentItems: true
   });
 }
+
+export interface SendReportEmailParams {
+  recipients: string[];
+  subject: string;
+  body: string;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer;
+    contentType?: string;
+  }>;
+}
+
+export async function sendReportEmail(params: SendReportEmailParams): Promise<boolean> {
+  try {
+    const client = await getUncachableOutlookClient();
+    
+    const message: any = {
+      subject: params.subject,
+      body: {
+        contentType: 'HTML',
+        content: params.body
+      },
+      toRecipients: params.recipients.map(email => ({
+        emailAddress: {
+          address: email
+        }
+      }))
+    };
+
+    // Add attachments if provided
+    if (params.attachments && params.attachments.length > 0) {
+      message.attachments = params.attachments.map(attachment => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: attachment.filename,
+        contentType: attachment.contentType || 'application/octet-stream',
+        contentBytes: attachment.content.toString('base64')
+      }));
+    }
+
+    await client.api('/me/sendMail').post({
+      message,
+      saveToSentItems: true
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error sending report email:', error);
+    return false;
+  }
+}

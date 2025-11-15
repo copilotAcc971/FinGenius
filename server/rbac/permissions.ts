@@ -34,6 +34,7 @@ export const PERMISSION_MODULES = {
   AUDIT: 'audit',
   ENCUMBRANCES: 'encumbrances',
   INVENTORY: 'inventory',
+  SCHEDULED_REPORTS: 'scheduled_reports',
 } as const;
 
 export const PERMISSION_ACTIONS = {
@@ -206,6 +207,16 @@ export const PERMISSION_DEFINITIONS = [
   // Reports
   { module: 'reports', action: 'read', name: 'reports.read', description: 'View financial reports' },
   { module: 'reports', action: 'export', name: 'reports.export', description: 'Export financial reports' },
+  { module: 'reports', action: 'create', name: 'reports.create', description: 'Create custom reports' },
+  { module: 'reports', action: 'update', name: 'reports.update', description: 'Edit custom reports' },
+  { module: 'reports', action: 'delete', name: 'reports.delete', description: 'Delete custom reports' },
+
+  // Scheduled Reports
+  { module: 'scheduled_reports', action: 'read', name: 'scheduled_reports.view', description: 'View scheduled reports' },
+  { module: 'scheduled_reports', action: 'create', name: 'scheduled_reports.create', description: 'Create scheduled reports' },
+  { module: 'scheduled_reports', action: 'update', name: 'scheduled_reports.edit', description: 'Edit scheduled reports' },
+  { module: 'scheduled_reports', action: 'delete', name: 'scheduled_reports.delete', description: 'Delete scheduled reports' },
+  { module: 'scheduled_reports', action: 'execute', name: 'scheduled_reports.execute', description: 'Manually trigger reports' },
 
   // Company Profile
   { module: 'company_profile', action: 'read', name: 'company_profile.read', description: 'View company profile' },

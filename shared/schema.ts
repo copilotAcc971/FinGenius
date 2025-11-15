@@ -2524,6 +2524,12 @@ export const trialBalanceAccountLineSchema = z.object({
   accountType: z.string(),
   debit: z.string(),
   credit: z.string(),
+  
+  // Comparison period fields (optional)
+  comparisonDebit: z.string().optional(),
+  comparisonCredit: z.string().optional(),
+  varianceDebit: z.string().optional(),
+  varianceCredit: z.string().optional(),
 });
 
 export type TrialBalanceAccountLine = z.infer<typeof trialBalanceAccountLineSchema>;
@@ -2532,11 +2538,23 @@ export const trialBalanceReportSchema = z.object({
   tenantId: z.string(),
   asOfDate: z.date(),
   
+  // Optional comparison period
+  comparisonDate: z.date().optional(),
+  
   accounts: z.array(trialBalanceAccountLineSchema),
   
   totalDebits: z.string(),
   totalCredits: z.string(),
   isBalanced: z.boolean(),
+  
+  // Comparison totals (if comparison date provided)
+  comparisonTotalDebits: z.string().optional(),
+  comparisonTotalCredits: z.string().optional(),
+  comparisonIsBalanced: z.boolean().optional(),
+  
+  // Variance totals
+  totalDebitsVariance: z.string().optional(),
+  totalCreditsVariance: z.string().optional(),
   
   baseCurrency: z.string(),
   ifrsComplianceEnabled: z.boolean(),
@@ -3453,6 +3471,110 @@ export const debitNoteSequences = pgTable("debit_note_sequences", {
 });
 
 export type DebitNoteSequence = typeof debitNoteSequences.$inferSelect;
+
+// ============================================================================
+// CUSTOM REPORT CONFIGS
+// ============================================================================
+
+export const REPORT_TYPES = ['general_ledger', 'transaction_list', 'invoice_list', 'bill_list', 'account_details'] as const;
+
+export const customReportConfigs = pgTable("custom_report_configs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  reportType: varchar("report_type", { length: 50 }).notNull(), // 'general_ledger', 'transaction_list', etc.
+  selectedColumns: jsonb("selected_columns").notNull().$type<string[]>(), // Array of column IDs
+  filters: jsonb("filters").notNull().$type<Record<string, any>>(), // Filter criteria object
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("custom_report_configs_tenant_idx").on(table.tenantId),
+  index("custom_report_configs_created_by_idx").on(table.createdBy),
+]);
+
+export const insertCustomReportConfigSchema = createInsertSchema(customReportConfigs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCustomReportConfig = z.infer<typeof insertCustomReportConfigSchema>;
+export type CustomReportConfig = typeof customReportConfigs.$inferSelect;
+
+// Type for custom report result
+export interface CustomReportResult {
+  columns: string[];
+  rows: any[];
+  totalRows: number;
+}
+
+// ============================================================================
+// SCHEDULED REPORTS
+// ============================================================================
+
+export const SCHEDULED_REPORT_TYPES = ['profit_loss', 'balance_sheet', 'cash_flow', 'trial_balance', 'custom'] as const;
+export const SCHEDULED_REPORT_RUN_STATUS = ['success', 'failed'] as const;
+
+export const scheduledReports = pgTable("scheduled_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  reportType: varchar("report_type", { length: 50 }).notNull(), // 'profit_loss', 'balance_sheet', 'cash_flow', 'trial_balance', 'custom'
+  customReportId: varchar("custom_report_id").references(() => customReportConfigs.id), // null if not custom
+  schedule: varchar("schedule", { length: 100 }).notNull(), // cron expression: '0 9 * * 1'
+  recipients: text("recipients").array().notNull(), // array of email addresses
+  emailSubject: varchar("email_subject", { length: 500 }).notNull(),
+  emailBody: text("email_body"), // optional text
+  includeComparison: boolean("include_comparison").default(false).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  lastRunAt: timestamp("last_run_at"),
+  nextRunAt: timestamp("next_run_at"),
+}, (table) => [
+  index("scheduled_reports_tenant_idx").on(table.tenantId),
+  index("scheduled_reports_created_by_idx").on(table.createdBy),
+  index("scheduled_reports_is_active_idx").on(table.isActive),
+]);
+
+export const insertScheduledReportSchema = createInsertSchema(scheduledReports, {
+  recipients: z.array(z.string().email()),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastRunAt: true,
+  nextRunAt: true,
+});
+
+export type InsertScheduledReport = z.infer<typeof insertScheduledReportSchema>;
+export type ScheduledReport = typeof scheduledReports.$inferSelect;
+
+export const scheduledReportRuns = pgTable("scheduled_report_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  scheduledReportId: varchar("scheduled_report_id").notNull().references(() => scheduledReports.id, { onDelete: 'cascade' }),
+  runAt: timestamp("run_at").notNull().defaultNow(),
+  status: varchar("status", { length: 20 }).notNull(), // 'success', 'failed'
+  errorMessage: text("error_message"),
+  reportData: jsonb("report_data"), // cached report results
+  emailSent: boolean("email_sent").default(false).notNull(),
+  recipientCount: integer("recipient_count").default(0).notNull(),
+}, (table) => [
+  index("scheduled_report_runs_tenant_idx").on(table.tenantId),
+  index("scheduled_report_runs_scheduled_report_id_idx").on(table.scheduledReportId),
+  index("scheduled_report_runs_run_at_idx").on(table.runAt),
+  index("scheduled_report_runs_status_idx").on(table.status),
+]);
+
+export const insertScheduledReportRunSchema = createInsertSchema(scheduledReportRuns).omit({
+  id: true,
+});
+
+export type InsertScheduledReportRun = z.infer<typeof insertScheduledReportRunSchema>;
+export type ScheduledReportRun = typeof scheduledReportRuns.$inferSelect;
 
 // ============================================================================
 // AUDIT LOGS (immutable audit trail for all entities)

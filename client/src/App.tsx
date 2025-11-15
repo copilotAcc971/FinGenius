@@ -56,6 +56,8 @@ import PendingApprovals from "@/pages/pending-approvals";
 import Workflows from "@/pages/workflows";
 import WorkflowForm from "@/pages/workflow-form";
 import ChartOfAccountsReport from "@/pages/chart-of-accounts-report";
+import CustomReportBuilder from "@/pages/custom-report-builder";
+import ScheduledReports from "@/pages/scheduled-reports";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -95,6 +97,8 @@ function Router() {
           <Route path="/documents" component={Documents} />
           <Route path="/reports" component={Reports} />
           <Route path="/reports/chart-of-accounts" component={ChartOfAccountsReport} />
+          <Route path="/custom-reports" component={CustomReportBuilder} />
+          <Route path="/scheduled-reports" component={ScheduledReports} />
           <Route path="/financial-reports" component={FinancialReports} />
           <Route path="/ar-aging" component={ARAgingReport} />
           <Route path="/ap-aging" component={APAgingReport} />

@@ -165,15 +165,29 @@ interface EnhancedBalanceSheetResponse {
 }
 
 interface TrialBalanceReport {
+  tenantId: string;
+  asOfDate: string;
+  comparisonDate?: string;
   accounts: Array<{ 
+    accountId: string;
     accountName: string; 
     accountCode: string; 
+    accountType: string;
     debit: number; 
     credit: number;
+    comparisonDebit?: number;
+    comparisonCredit?: number;
+    varianceDebit?: number;
+    varianceCredit?: number;
   }>;
   totalDebits: number;
   totalCredits: number;
   isBalanced: boolean;
+  comparisonTotalDebits?: number;
+  comparisonTotalCredits?: number;
+  comparisonIsBalanced?: boolean;
+  totalDebitsVariance?: number;
+  totalCreditsVariance?: number;
   baseCurrency?: string;
   ifrsComplianceEnabled?: boolean;
   fxTranslationStandard?: string | null;
@@ -492,20 +506,39 @@ function exportTrialBalanceCSV(
   asOfDate: string
 ) {
   const rows: string[] = [];
+  const hasComparison = !!report.comparisonDate;
   
-  rows.push(`Trial Balance,As of ${asOfDate}`);
-  rows.push('');
-  rows.push('Account Code,Account Name,Debit,Credit');
+  if (hasComparison) {
+    rows.push(`Trial Balance Comparison,Current: ${asOfDate},Comparison: ${report.comparisonDate}`);
+    rows.push('');
+    rows.push('Account Code,Account Name,Current Debit,Current Credit,Comparison Debit,Comparison Credit,Variance Debit,Variance Credit');
+    
+    report.accounts.forEach(account => {
+      rows.push(`"${account.accountCode}","${account.accountName}","${baseCurrency} ${account.debit.toFixed(2)}","${baseCurrency} ${account.credit.toFixed(2)}","${baseCurrency} ${(account.comparisonDebit || 0).toFixed(2)}","${baseCurrency} ${(account.comparisonCredit || 0).toFixed(2)}","${baseCurrency} ${(account.varianceDebit || 0).toFixed(2)}","${baseCurrency} ${(account.varianceCredit || 0).toFixed(2)}"`);
+    });
+    
+    rows.push('');
+    rows.push(`"Total","","${baseCurrency} ${report.totalDebits.toFixed(2)}","${baseCurrency} ${report.totalCredits.toFixed(2)}","${baseCurrency} ${(report.comparisonTotalDebits || 0).toFixed(2)}","${baseCurrency} ${(report.comparisonTotalCredits || 0).toFixed(2)}","${baseCurrency} ${(report.totalDebitsVariance || 0).toFixed(2)}","${baseCurrency} ${(report.totalCreditsVariance || 0).toFixed(2)}"`);
+  } else {
+    rows.push(`Trial Balance,As of ${asOfDate}`);
+    rows.push('');
+    rows.push('Account Code,Account Name,Debit,Credit');
+    
+    report.accounts.forEach(account => {
+      rows.push(`"${account.accountCode}","${account.accountName}","${baseCurrency} ${account.debit.toFixed(2)}","${baseCurrency} ${account.credit.toFixed(2)}"`);
+    });
+    
+    rows.push('');
+    rows.push(`"Total","","${baseCurrency} ${report.totalDebits.toFixed(2)}","${baseCurrency} ${report.totalCredits.toFixed(2)}"`);
+  }
   
-  report.accounts.forEach(account => {
-    rows.push(`"${account.accountCode}","${account.accountName}","${baseCurrency} ${account.debit.toFixed(2)}","${baseCurrency} ${account.credit.toFixed(2)}"`);
-  });
-  
-  rows.push('');
-  rows.push(`"Total","","${baseCurrency} ${report.totalDebits.toFixed(2)}","${baseCurrency} ${report.totalCredits.toFixed(2)}"`);
   rows.push(`"Balanced","${report.isBalanced ? 'Yes' : 'No'}"`);
   
-  downloadCSV(rows.join('\n'), `trial-balance-${asOfDate}.csv`);
+  const filename = hasComparison 
+    ? `trial-balance-comparison-${report.comparisonDate}-to-${asOfDate}.csv`
+    : `trial-balance-${asOfDate}.csv`;
+  
+  downloadCSV(rows.join('\n'), filename);
 }
 
 function exportPLComparisonExcel(
@@ -738,25 +771,62 @@ function exportTrialBalanceExcel(
   asOfDate: string
 ) {
   const data: any[][] = [];
+  const hasComparison = !!report.comparisonDate;
   
-  data.push(['Trial Balance', `As of ${asOfDate}`, '', `Currency: ${baseCurrency}`]);
-  data.push([]);
-  data.push(['Account Code', 'Account Name', 'Debit', 'Credit']);
-  
-  report.accounts.forEach(account => {
+  if (hasComparison) {
+    data.push(['Trial Balance Comparison', `Current: ${asOfDate}`, `Comparison: ${report.comparisonDate}`, '', '', '', '', `Currency: ${baseCurrency}`]);
+    data.push([]);
+    data.push(['Account Code', 'Account Name', 'Current Debit', 'Current Credit', 'Comparison Debit', 'Comparison Credit', 'Variance Debit', 'Variance Credit']);
+    
+    report.accounts.forEach(account => {
+      data.push([
+        account.accountCode,
+        account.accountName,
+        parseFloat(account.debit.toFixed(2)),
+        parseFloat(account.credit.toFixed(2)),
+        parseFloat((account.comparisonDebit || 0).toFixed(2)),
+        parseFloat((account.comparisonCredit || 0).toFixed(2)),
+        parseFloat((account.varianceDebit || 0).toFixed(2)),
+        parseFloat((account.varianceCredit || 0).toFixed(2))
+      ]);
+    });
+    
+    data.push([]);
     data.push([
-      account.accountCode,
-      account.accountName,
-      parseFloat(account.debit.toFixed(2)),
-      parseFloat(account.credit.toFixed(2))
+      'Total',
+      '',
+      parseFloat(report.totalDebits.toFixed(2)),
+      parseFloat(report.totalCredits.toFixed(2)),
+      parseFloat((report.comparisonTotalDebits || 0).toFixed(2)),
+      parseFloat((report.comparisonTotalCredits || 0).toFixed(2)),
+      parseFloat((report.totalDebitsVariance || 0).toFixed(2)),
+      parseFloat((report.totalCreditsVariance || 0).toFixed(2))
     ]);
-  });
+  } else {
+    data.push(['Trial Balance', `As of ${asOfDate}`, '', '', `Currency: ${baseCurrency}`]);
+    data.push([]);
+    data.push(['Account Code', 'Account Name', 'Debit', 'Credit']);
+    
+    report.accounts.forEach(account => {
+      data.push([
+        account.accountCode,
+        account.accountName,
+        parseFloat(account.debit.toFixed(2)),
+        parseFloat(account.credit.toFixed(2))
+      ]);
+    });
+    
+    data.push([]);
+    data.push(['Total', '', parseFloat(report.totalDebits.toFixed(2)), parseFloat(report.totalCredits.toFixed(2))]);
+  }
   
-  data.push([]);
-  data.push(['Total', '', parseFloat(report.totalDebits.toFixed(2)), parseFloat(report.totalCredits.toFixed(2))]);
   data.push(['Balanced', report.isBalanced ? 'Yes' : 'No']);
   
-  downloadExcel(data, `trial-balance-${asOfDate}.xlsx`, 'Trial Balance');
+  const filename = hasComparison
+    ? `trial-balance-comparison-${report.comparisonDate}-to-${asOfDate}.xlsx`
+    : `trial-balance-${asOfDate}.xlsx`;
+  
+  downloadExcel(data, filename, 'Trial Balance');
 }
 
 export default function FinancialReports() {
@@ -779,6 +849,10 @@ export default function FinancialReports() {
   const [bsComparisonDate, setBsComparisonDate] = useState("");
   const [bsShowComparison, setBsShowComparison] = useState(false);
   const [tbAsOfDate, setTbAsOfDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [tbShowComparison, setTbShowComparison] = useState(false);
+  const [tbComparisonDate, setTbComparisonDate] = useState(
+    format(new Date(new Date().getFullYear() - 1, new Date().getMonth(), new Date().getDate()), "yyyy-MM-dd")
+  );
   const [cfStartDate, setCfStartDate] = useState(
     format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd")
   );
@@ -843,7 +917,11 @@ export default function FinancialReports() {
 
   // Trial Balance Query
   const { data: tbReport, isLoading: tbLoading } = useQuery<TrialBalanceReport>({
-    queryKey: ["/api/reports/trial-balance", { tenantId: currentTenant?.id, asOfDate: tbAsOfDate }],
+    queryKey: ["/api/reports/trial-balance", { 
+      tenantId: currentTenant?.id, 
+      asOfDate: tbAsOfDate,
+      ...(tbShowComparison && tbComparisonDate ? { comparisonDate: tbComparisonDate } : {})
+    }],
     enabled: !!currentTenant?.id && fetchTB,
   });
 
@@ -2038,6 +2116,35 @@ export default function FinancialReports() {
                   </Button>
                 </div>
               </div>
+
+              <div className="border-t pt-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="tb-comparison"
+                    checked={tbShowComparison}
+                    onChange={(e) => setTbShowComparison(e.target.checked)}
+                    className="h-4 w-4"
+                    data-testid="checkbox-tb-comparison"
+                  />
+                  <label htmlFor="tb-comparison" className="text-sm font-medium">
+                    Enable Comparison Period
+                  </label>
+                </div>
+
+                {tbShowComparison && (
+                  <div>
+                    <label className="text-sm font-medium mb-1.5 block">Comparison As of Date</label>
+                    <input
+                      type="date"
+                      value={tbComparisonDate}
+                      onChange={(e) => setTbComparisonDate(e.target.value)}
+                      className="w-full h-10 px-3 py-2 border rounded-md"
+                      data-testid="input-tb-comparison-date"
+                    />
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -2116,8 +2223,16 @@ export default function FinancialReports() {
                         <TableRow>
                           <TableHead>Account Code</TableHead>
                           <TableHead>Account Name</TableHead>
-                          <TableHead className="text-right">Debit</TableHead>
-                          <TableHead className="text-right">Credit</TableHead>
+                          <TableHead className="text-right">Current Debit</TableHead>
+                          <TableHead className="text-right">Current Credit</TableHead>
+                          {tbShowComparison && tbReport.comparisonDate && (
+                            <>
+                              <TableHead className="text-right">Comparison Debit</TableHead>
+                              <TableHead className="text-right">Comparison Credit</TableHead>
+                              <TableHead className="text-right">Variance Debit</TableHead>
+                              <TableHead className="text-right">Variance Credit</TableHead>
+                            </>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2131,6 +2246,30 @@ export default function FinancialReports() {
                             <TableCell className="text-right font-mono">
                               {account.credit > 0 ? formatCurrency(account.credit, baseCurrency?.code || "USD", currencies) : '-'}
                             </TableCell>
+                            {tbShowComparison && tbReport.comparisonDate && (
+                              <>
+                                <TableCell className="text-right font-mono">
+                                  {account.comparisonDebit && account.comparisonDebit > 0 
+                                    ? formatCurrency(account.comparisonDebit, baseCurrency?.code || "USD", currencies) 
+                                    : '-'}
+                                </TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {account.comparisonCredit && account.comparisonCredit > 0 
+                                    ? formatCurrency(account.comparisonCredit, baseCurrency?.code || "USD", currencies) 
+                                    : '-'}
+                                </TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {account.varianceDebit && account.varianceDebit !== 0
+                                    ? formatCurrency(account.varianceDebit, baseCurrency?.code || "USD", currencies)
+                                    : '-'}
+                                </TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {account.varianceCredit && account.varianceCredit !== 0
+                                    ? formatCurrency(account.varianceCredit, baseCurrency?.code || "USD", currencies)
+                                    : '-'}
+                                </TableCell>
+                              </>
+                            )}
                           </TableRow>
                         ))}
                         <TableRow className="font-semibold bg-muted/50">
@@ -2141,6 +2280,22 @@ export default function FinancialReports() {
                           <TableCell className="text-right font-mono" data-testid="cell-total-credits">
                             {formatCurrency(tbReport.totalCredits, baseCurrency?.code || "USD", currencies)}
                           </TableCell>
+                          {tbShowComparison && tbReport.comparisonDate && (
+                            <>
+                              <TableCell className="text-right font-mono" data-testid="cell-comparison-total-debits">
+                                {formatCurrency(tbReport.comparisonTotalDebits || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono" data-testid="cell-comparison-total-credits">
+                                {formatCurrency(tbReport.comparisonTotalCredits || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono" data-testid="cell-variance-total-debits">
+                                {formatCurrency(tbReport.totalDebitsVariance || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono" data-testid="cell-variance-total-credits">
+                                {formatCurrency(tbReport.totalCreditsVariance || 0, baseCurrency?.code || "USD", currencies)}
+                              </TableCell>
+                            </>
+                          )}
                         </TableRow>
                       </TableBody>
                     </Table>

@@ -2,6 +2,9 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startFXRatesUpdateJob } from "./jobs/fx-rates-update";
+import { initializeScheduledReports } from "./cron";
+import { seedPermissions } from './scripts/seed-rbac';
+import { initializeRBACForAllTenants } from './scripts/update-owner-permissions';
 
 const app = express();
 
@@ -76,8 +79,19 @@ app.use((req, res, next) => {
     port,
     host: "0.0.0.0",
     reusePort: true,
-  }, () => {
+  }, async () => {
     log(`serving on port ${port}`);
+    
+    // Initialize RBAC and scheduled reports
+    try {
+      await seedPermissions();
+      await initializeRBACForAllTenants();
+      
+      // Initialize scheduled reports with proper await
+      await initializeScheduledReports();
+    } catch (error) {
+      console.error('Error during server initialization:', error);
+    }
     
     // Initialize FX rates scheduled job
     startFXRatesUpdateJob();

@@ -137,6 +137,16 @@ import {
   type APAgingReport,
   type FXConfig,
   type InsertFXConfig,
+  customReportConfigs,
+  type CustomReportConfig,
+  type InsertCustomReportConfig,
+  type CustomReportResult,
+  scheduledReports,
+  type ScheduledReport,
+  type InsertScheduledReport,
+  scheduledReportRuns,
+  type ScheduledReportRun,
+  type InsertScheduledReportRun,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
@@ -355,7 +365,7 @@ export interface IStorage {
   getProfitLossReport(tenantId: string, startDate: Date, endDate: Date): Promise<ProfitLossReport>;
   getBalanceSheetReport(tenantId: string, asOfDate: Date): Promise<BalanceSheetReport>;
   getEnhancedBalanceSheetReport(tenantId: string, asOfDate: Date, comparisonDate?: Date): Promise<EnhancedBalanceSheetReport>;
-  getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport>;
+  getTrialBalanceReport(tenantId: string, asOfDate: Date, comparisonDate?: Date): Promise<TrialBalanceReport>;
   getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport>;
   getEnhancedCashFlowReport(tenantId: string, startDate: Date, endDate: Date, comparisonStartDate?: Date, comparisonEndDate?: Date): Promise<EnhancedCashFlowReport>;
   getARAgingReport(tenantId: string, groupBy?: 'customer' | 'invoice' | 'project'): Promise<ARAgingReport>;
@@ -394,6 +404,24 @@ export interface IStorage {
   // FX Configuration
   getFXConfig(tenantId: string): Promise<FXConfig | null>;
   updateFXConfig(tenantId: string, data: Partial<InsertFXConfig>): Promise<FXConfig>;
+
+  // Custom Reports
+  getCustomReports(tenantId: string): Promise<CustomReportConfig[]>;
+  getCustomReport(tenantId: string, reportId: string): Promise<CustomReportConfig | null>;
+  createCustomReport(config: InsertCustomReportConfig & { tenantId: string }): Promise<CustomReportConfig>;
+  updateCustomReport(tenantId: string, reportId: string, config: Partial<InsertCustomReportConfig>): Promise<CustomReportConfig>;
+  deleteCustomReport(tenantId: string, reportId: string): Promise<void>;
+  generateCustomReport(tenantId: string, config: { reportType: string; selectedColumns: string[]; filters: Record<string, any> }): Promise<CustomReportResult>;
+
+  // Scheduled Reports
+  getScheduledReports(tenantId: string): Promise<ScheduledReport[]>;
+  getScheduledReport(tenantId: string, id: string): Promise<ScheduledReport | null>;
+  createScheduledReport(config: InsertScheduledReport & { tenantId: string }): Promise<ScheduledReport>;
+  updateScheduledReport(tenantId: string, id: string, config: Partial<InsertScheduledReport>): Promise<ScheduledReport>;
+  deleteScheduledReport(tenantId: string, id: string): Promise<void>;
+  toggleScheduledReport(tenantId: string, id: string, isActive: boolean): Promise<ScheduledReport>;
+  getScheduledReportRuns(tenantId: string, reportId: string, limit?: number): Promise<ScheduledReportRun[]>;
+  createScheduledReportRun(run: InsertScheduledReportRun): Promise<ScheduledReportRun>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4694,29 +4722,35 @@ export class DatabaseStorage implements IStorage {
     return report;
   }
 
-  async getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport> {
-    // Get all active accounts for tenant
-    const allAccounts = await db
-      .select()
-      .from(accounts)
-      .where(
-        and(
-          eq(accounts.tenantId, tenantId),
-          eq(accounts.isActive, true)
+  async getTrialBalanceReport(tenantId: string, asOfDate: Date, comparisonDate?: Date): Promise<TrialBalanceReport> {
+    // Helper function to get balance at a specific date
+    const getBalanceAtDate = async (accountId: string, date: Date): Promise<number> => {
+      const result = await db
+        .select({
+          balance: accountTransactionHistory.runningBalance
+        })
+        .from(accountTransactionHistory)
+        .where(
+          and(
+            eq(accountTransactionHistory.tenantId, tenantId),
+            eq(accountTransactionHistory.accountId, accountId),
+            lte(accountTransactionHistory.transactionDate, date)
+          )
         )
-      );
+        .orderBy(desc(accountTransactionHistory.transactionDate))
+        .limit(1);
 
-    // Map accounts to trial balance format
-    const accountLines = allAccounts.map((account) => {
-      const balance = parseFloat(account.currentBalance);
-      
-      // Determine debit/credit based on account type and balance
+      return result[0]?.balance ? parseFloat(result[0].balance) : 0;
+    };
+
+    // Helper to convert balance to debit/credit based on account type
+    const getDebitCredit = (balance: number, accountType: string): { debit: string; credit: string } => {
       // Assets and Expenses have debit normal balance
       // Liabilities, Equity, and Income have credit normal balance
       let debit = '0.00';
       let credit = '0.00';
 
-      if (account.type === 'asset' || account.type === 'expense') {
+      if (accountType === 'asset' || accountType === 'expense') {
         if (balance >= 0) {
           debit = balance.toFixed(2);
         } else {
@@ -4730,17 +4764,57 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      return {
-        accountId: account.id,
-        accountCode: account.code,
-        accountName: account.name,
-        accountType: account.type,
-        debit,
-        credit,
-      };
-    });
+      return { debit, credit };
+    };
 
-    // Calculate totals
+    // Get all active accounts for tenant
+    const allAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Map accounts to trial balance format with comparison support
+    const accountLines = await Promise.all(
+      allAccounts.map(async (account) => {
+        // Get current period balance
+        const currentBalance = await getBalanceAtDate(account.id, asOfDate);
+        const currentDebitCredit = getDebitCredit(currentBalance, account.type);
+
+        const accountLine: any = {
+          accountId: account.id,
+          accountCode: account.code,
+          accountName: account.name,
+          accountType: account.type,
+          debit: currentDebitCredit.debit,
+          credit: currentDebitCredit.credit,
+        };
+
+        // If comparison date provided, add comparison and variance fields
+        if (comparisonDate) {
+          const comparisonBalance = await getBalanceAtDate(account.id, comparisonDate);
+          const comparisonDebitCredit = getDebitCredit(comparisonBalance, account.type);
+
+          accountLine.comparisonDebit = comparisonDebitCredit.debit;
+          accountLine.comparisonCredit = comparisonDebitCredit.credit;
+
+          // Calculate variance (current - comparison)
+          const varianceDebit = parseFloat(currentDebitCredit.debit) - parseFloat(comparisonDebitCredit.debit);
+          const varianceCredit = parseFloat(currentDebitCredit.credit) - parseFloat(comparisonDebitCredit.credit);
+
+          accountLine.varianceDebit = varianceDebit.toFixed(2);
+          accountLine.varianceCredit = varianceCredit.toFixed(2);
+        }
+
+        return accountLine;
+      })
+    );
+
+    // Calculate current period totals
     const totalDebits = accountLines.reduce((sum, line) => sum + parseFloat(line.debit), 0);
     const totalCredits = accountLines.reduce((sum, line) => sum + parseFloat(line.credit), 0);
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
@@ -4763,7 +4837,8 @@ export class DatabaseStorage implements IStorage {
 
     const profile = companyProfile[0];
 
-    return {
+    // Build the response
+    const report: TrialBalanceReport = {
       tenantId,
       asOfDate,
       accounts: accountLines,
@@ -4776,6 +4851,30 @@ export class DatabaseStorage implements IStorage {
       translationMethod: profile?.fxIncomeExpenseMethod || undefined,
       fxTranslationApplied: false,
     };
+
+    // Add comparison data if comparison date provided
+    if (comparisonDate) {
+      report.comparisonDate = comparisonDate;
+
+      const comparisonTotalDebits = accountLines.reduce(
+        (sum, line) => sum + parseFloat(line.comparisonDebit || '0'),
+        0
+      );
+      const comparisonTotalCredits = accountLines.reduce(
+        (sum, line) => sum + parseFloat(line.comparisonCredit || '0'),
+        0
+      );
+      const comparisonIsBalanced = Math.abs(comparisonTotalDebits - comparisonTotalCredits) < 0.01;
+
+      report.comparisonTotalDebits = comparisonTotalDebits.toFixed(2);
+      report.comparisonTotalCredits = comparisonTotalCredits.toFixed(2);
+      report.comparisonIsBalanced = comparisonIsBalanced;
+
+      report.totalDebitsVariance = (totalDebits - comparisonTotalDebits).toFixed(2);
+      report.totalCreditsVariance = (totalCredits - comparisonTotalCredits).toFixed(2);
+    }
+
+    return report;
   }
 
   async getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport> {
@@ -5912,6 +6011,289 @@ export class DatabaseStorage implements IStorage {
       return created;
     }
   }
+
+  // Custom Reports
+  async getCustomReports(tenantId: string): Promise<CustomReportConfig[]> {
+    return await db.select()
+      .from(customReportConfigs)
+      .where(eq(customReportConfigs.tenantId, tenantId))
+      .orderBy(desc(customReportConfigs.createdAt));
+  }
+
+  async getCustomReport(tenantId: string, reportId: string): Promise<CustomReportConfig | null> {
+    const [report] = await db.select()
+      .from(customReportConfigs)
+      .where(and(
+        eq(customReportConfigs.id, reportId),
+        eq(customReportConfigs.tenantId, tenantId)
+      ));
+    return report || null;
+  }
+
+  async createCustomReport(config: InsertCustomReportConfig & { tenantId: string }): Promise<CustomReportConfig> {
+    const [report] = await db.insert(customReportConfigs)
+      .values(config)
+      .returning();
+    return report;
+  }
+
+  async updateCustomReport(tenantId: string, reportId: string, config: Partial<InsertCustomReportConfig>): Promise<CustomReportConfig> {
+    const [updated] = await db.update(customReportConfigs)
+      .set({ ...config, updatedAt: new Date() })
+      .where(and(
+        eq(customReportConfigs.id, reportId),
+        eq(customReportConfigs.tenantId, tenantId)
+      ))
+      .returning();
+    
+    if (!updated) {
+      throw new Error('Custom report not found');
+    }
+    
+    return updated;
+  }
+
+  async deleteCustomReport(tenantId: string, reportId: string): Promise<void> {
+    await db.delete(customReportConfigs)
+      .where(and(
+        eq(customReportConfigs.id, reportId),
+        eq(customReportConfigs.tenantId, tenantId)
+      ));
+  }
+
+  async generateCustomReport(tenantId: string, config: { reportType: string; selectedColumns: string[]; filters: Record<string, any> }): Promise<CustomReportResult> {
+    const { reportType, selectedColumns, filters } = config;
+    
+    // Build query based on report type
+    let query: any;
+    let rows: any[] = [];
+    
+    switch (reportType) {
+      case 'general_ledger': {
+        // Query journal entry legs with account information
+        query = db.select({
+          id: journalEntryLegs.id,
+          date: journalEntries.entryDate,
+          account: accounts.name,
+          accountCode: accounts.code,
+          reference: journalEntries.referenceNumber,
+          description: journalEntryLegs.description,
+          debit: journalEntryLegs.debitAmount,
+          credit: journalEntryLegs.creditAmount,
+        })
+        .from(journalEntryLegs)
+        .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+        .innerJoin(accounts, eq(journalEntryLegs.accountId, accounts.id))
+        .where(and(
+          eq(journalEntryLegs.tenantId, tenantId),
+          filters.dateRange?.start ? gte(journalEntries.entryDate, new Date(filters.dateRange.start)) : undefined,
+          filters.dateRange?.end ? lte(journalEntries.entryDate, new Date(filters.dateRange.end)) : undefined,
+          filters.accounts?.length > 0 ? sql`${journalEntryLegs.accountId} = ANY(${filters.accounts})` : undefined
+        ))
+        .orderBy(journalEntries.entryDate);
+        
+        rows = await query;
+        break;
+      }
+      
+      case 'transaction_list': {
+        query = db.select({
+          id: journalEntries.id,
+          date: journalEntries.entryDate,
+          type: journalEntries.sourceType,
+          reference: journalEntries.referenceNumber,
+          description: journalEntries.description,
+          status: journalEntries.status,
+        })
+        .from(journalEntries)
+        .where(and(
+          eq(journalEntries.tenantId, tenantId),
+          filters.dateRange?.start ? gte(journalEntries.entryDate, new Date(filters.dateRange.start)) : undefined,
+          filters.dateRange?.end ? lte(journalEntries.entryDate, new Date(filters.dateRange.end)) : undefined,
+          filters.status?.length > 0 ? sql`${journalEntries.status} = ANY(${filters.status})` : undefined
+        ))
+        .orderBy(desc(journalEntries.entryDate));
+        
+        rows = await query;
+        break;
+      }
+      
+      case 'invoice_list': {
+        query = db.select({
+          id: invoices.id,
+          invoiceNumber: invoices.invoiceNumber,
+          customer: customers.name,
+          date: invoices.invoiceDate,
+          dueDate: invoices.dueDate,
+          amount: invoices.total,
+          status: invoices.status,
+          balanceDue: invoices.balanceDue,
+        })
+        .from(invoices)
+        .leftJoin(customers, eq(invoices.customerId, customers.id))
+        .where(and(
+          eq(invoices.tenantId, tenantId),
+          filters.dateRange?.start ? gte(invoices.invoiceDate, new Date(filters.dateRange.start)) : undefined,
+          filters.dateRange?.end ? lte(invoices.invoiceDate, new Date(filters.dateRange.end)) : undefined,
+          filters.customers?.length > 0 ? sql`${invoices.customerId} = ANY(${filters.customers})` : undefined,
+          filters.status?.length > 0 ? sql`${invoices.status} = ANY(${filters.status})` : undefined
+        ))
+        .orderBy(desc(invoices.invoiceDate));
+        
+        rows = await query;
+        break;
+      }
+      
+      case 'bill_list': {
+        query = db.select({
+          id: bills.id,
+          billNumber: bills.billNumber,
+          vendor: vendors.name,
+          date: bills.billDate,
+          dueDate: bills.dueDate,
+          amount: bills.total,
+          status: bills.status,
+          balanceDue: bills.balanceDue,
+        })
+        .from(bills)
+        .leftJoin(vendors, eq(bills.vendorId, vendors.id))
+        .where(and(
+          eq(bills.tenantId, tenantId),
+          filters.dateRange?.start ? gte(bills.billDate, new Date(filters.dateRange.start)) : undefined,
+          filters.dateRange?.end ? lte(bills.billDate, new Date(filters.dateRange.end)) : undefined,
+          filters.vendors?.length > 0 ? sql`${bills.vendorId} = ANY(${filters.vendors})` : undefined,
+          filters.status?.length > 0 ? sql`${bills.status} = ANY(${filters.status})` : undefined
+        ))
+        .orderBy(desc(bills.billDate));
+        
+        rows = await query;
+        break;
+      }
+      
+      case 'account_details': {
+        query = db.select({
+          id: accounts.id,
+          accountCode: accounts.code,
+          accountName: accounts.name,
+          type: accounts.type,
+          currentBalance: accounts.currentBalance,
+        })
+        .from(accounts)
+        .where(and(
+          eq(accounts.tenantId, tenantId),
+          filters.accountTypes?.length > 0 ? sql`${accounts.type} = ANY(${filters.accountTypes})` : undefined,
+          filters.accounts?.length > 0 ? sql`${accounts.id} = ANY(${filters.accounts})` : undefined
+        ))
+        .orderBy(accounts.code);
+        
+        rows = await query;
+        break;
+      }
+      
+      default:
+        throw new Error(`Unsupported report type: ${reportType}`);
+    }
+    
+    // Filter rows to only include selected columns
+    const filteredRows = rows.map(row => {
+      const filtered: any = {};
+      selectedColumns.forEach(col => {
+        if (col in row) {
+          filtered[col] = row[col];
+        }
+      });
+      return filtered;
+    });
+    
+    return {
+      columns: selectedColumns,
+      rows: filteredRows,
+      totalRows: filteredRows.length,
+    };
+  }
+
+  // Scheduled Reports
+  async getScheduledReports(tenantId: string): Promise<ScheduledReport[]> {
+    return await db.select()
+      .from(scheduledReports)
+      .where(eq(scheduledReports.tenantId, tenantId))
+      .orderBy(desc(scheduledReports.createdAt));
+  }
+
+  async getScheduledReport(tenantId: string, id: string): Promise<ScheduledReport | null> {
+    const [report] = await db.select()
+      .from(scheduledReports)
+      .where(and(
+        eq(scheduledReports.id, id),
+        eq(scheduledReports.tenantId, tenantId)
+      ));
+    return report || null;
+  }
+
+  async createScheduledReport(config: InsertScheduledReport & { tenantId: string }): Promise<ScheduledReport> {
+    const [created] = await db.insert(scheduledReports)
+      .values(config)
+      .returning();
+    return created;
+  }
+
+  async updateScheduledReport(tenantId: string, id: string, config: Partial<InsertScheduledReport>): Promise<ScheduledReport> {
+    const [updated] = await db.update(scheduledReports)
+      .set({ ...config, updatedAt: new Date() })
+      .where(and(
+        eq(scheduledReports.id, id),
+        eq(scheduledReports.tenantId, tenantId)
+      ))
+      .returning();
+    
+    if (!updated) {
+      throw new Error('Scheduled report not found');
+    }
+    
+    return updated;
+  }
+
+  async deleteScheduledReport(tenantId: string, id: string): Promise<void> {
+    await db.delete(scheduledReports)
+      .where(and(
+        eq(scheduledReports.id, id),
+        eq(scheduledReports.tenantId, tenantId)
+      ));
+  }
+
+  async toggleScheduledReport(tenantId: string, id: string, isActive: boolean): Promise<ScheduledReport> {
+    const [updated] = await db.update(scheduledReports)
+      .set({ isActive, updatedAt: new Date() })
+      .where(and(
+        eq(scheduledReports.id, id),
+        eq(scheduledReports.tenantId, tenantId)
+      ))
+      .returning();
+    
+    if (!updated) {
+      throw new Error('Scheduled report not found');
+    }
+    
+    return updated;
+  }
+
+  async getScheduledReportRuns(tenantId: string, reportId: string, limit: number = 50): Promise<ScheduledReportRun[]> {
+    return await db.select()
+      .from(scheduledReportRuns)
+      .where(and(
+        eq(scheduledReportRuns.scheduledReportId, reportId),
+        eq(scheduledReportRuns.tenantId, tenantId)
+      ))
+      .orderBy(desc(scheduledReportRuns.runAt))
+      .limit(limit);
+  }
+
+  async createScheduledReportRun(run: InsertScheduledReportRun): Promise<ScheduledReportRun> {
+    const [created] = await db.insert(scheduledReportRuns)
+      .values(run)
+      .returning();
+    return created;
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -6862,7 +7244,7 @@ export class MemStorage implements IStorage {
     throw new Error('Enhanced Balance Sheet Report not implemented in MemStorage');
   }
 
-  async getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport> {
+  async getTrialBalanceReport(tenantId: string, asOfDate: Date, comparisonDate?: Date): Promise<TrialBalanceReport> {
     throw new Error('Reports not implemented in MemStorage');
   }
 
