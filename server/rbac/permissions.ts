@@ -141,6 +141,7 @@ export const PERMISSION_DEFINITIONS = [
   { module: 'credit_notes', action: 'read', name: 'credit_notes.read', description: 'View credit notes' },
   { module: 'credit_notes', action: 'update', name: 'credit_notes.update', description: 'Edit credit notes' },
   { module: 'credit_notes', action: 'delete', name: 'credit_notes.delete', description: 'Delete credit notes' },
+  { module: 'credit_notes', action: 'approve', name: 'credit_notes.approve', description: 'Approve credit notes for posting' },
 
   // Customer Payments
   { module: 'customer_payments', action: 'create', name: 'customer_payments.create', description: 'Record customer payments' },

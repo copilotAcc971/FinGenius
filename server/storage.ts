@@ -245,7 +245,7 @@ export interface IStorage {
 
   // Payment operations
   getPaymentsByTenant(tenantId: string): Promise<Payment[]>;
-  createPayment(payment: InsertPayment): Promise<Payment>;
+  createPayment(payment: InsertPayment, tx?: typeof db): Promise<Payment>;
   updatePayment(id: string, tenantId: string, payment: Partial<InsertPayment>): Promise<Payment>;
 
   // Document operations
@@ -283,7 +283,7 @@ export interface IStorage {
   // Customer Payment operations
   getCustomerPayments(tenantId: string): Promise<CustomerPayment[]>;
   getCustomerPaymentById(id: string, tenantId: string): Promise<CustomerPayment | null>;
-  createCustomerPayment(payment: InsertCustomerPayment): Promise<CustomerPayment>;
+  createCustomerPayment(payment: InsertCustomerPayment, tx?: typeof db): Promise<CustomerPayment>;
   updateCustomerPayment(id: string, tenantId: string, payment: Partial<InsertCustomerPayment>): Promise<CustomerPayment>;
   deleteCustomerPayment(id: string, tenantId: string): Promise<void>;
   getNextCustomerPaymentNumber(tenantId: string): Promise<string>;
@@ -314,7 +314,7 @@ export interface IStorage {
   createJournalEntryWithLegs(payload: JournalEntryPayload): Promise<JournalEntry>;
   updateJournalEntryWithLegs(id: string, tenantId: string, payload: JournalEntryPayload): Promise<JournalEntry>;
   deleteJournalEntry(id: string, tenantId: string): Promise<void>;
-  getNextJournalEntryNumber(tenantId: string): Promise<string>;
+  getNextJournalEntryNumber(tenantId: string, tx?: typeof db): Promise<string>;
   
   // Transaction-enabled journal entry methods (Phase 3)
   createJournalEntry(
@@ -1708,8 +1708,9 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(payments.createdAt));
   }
 
-  async createPayment(paymentData: InsertPayment): Promise<Payment> {
-    const [payment] = await db
+  async createPayment(paymentData: InsertPayment, tx?: typeof db): Promise<Payment> {
+    const client = tx || db;
+    const [payment] = await client
       .insert(payments)
       .values(paymentData)
       .returning();
@@ -2802,12 +2803,12 @@ export class DatabaseStorage implements IStorage {
     return payment || null;
   }
 
-  async createCustomerPayment(paymentData: InsertCustomerPayment): Promise<CustomerPayment> {
-    return await db.transaction(async (tx) => {
+  async createCustomerPayment(paymentData: InsertCustomerPayment, tx?: typeof db): Promise<CustomerPayment> {
+    const operation = async (txClient: typeof db) => {
       const tenantId = paymentData.tenantId;
       const paymentNumber = await this.getNextCustomerPaymentNumber(tenantId);
       
-      const [payment] = await tx
+      const [payment] = await txClient
         .insert(customerPayments)
         .values({
           ...paymentData,
@@ -2817,7 +2818,7 @@ export class DatabaseStorage implements IStorage {
 
       // If payment is linked to an invoice, update invoice balance
       if (payment.invoiceId) {
-        const [invoice] = await tx
+        const [invoice] = await txClient
           .select()
           .from(invoices)
           .where(and(
@@ -2832,7 +2833,7 @@ export class DatabaseStorage implements IStorage {
           const paymentAmount = parseFloat(payment.amount);
           const newBalance = Math.max(0, currentBalance - paymentAmount);
 
-          await tx
+          await txClient
             .update(invoices)
             .set({
               status: newBalance === 0 ? 'paid' : invoice.status,
@@ -2843,7 +2844,14 @@ export class DatabaseStorage implements IStorage {
       }
 
       return payment;
-    });
+    };
+
+    // If transaction is provided, use it; otherwise create a new transaction
+    if (tx) {
+      return await operation(tx);
+    } else {
+      return await db.transaction(operation);
+    }
   }
 
   async updateCustomerPayment(id: string, tenantId: string, paymentData: Partial<InsertCustomerPayment>): Promise<CustomerPayment> {
@@ -3764,41 +3772,53 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getNextJournalEntryNumber(tenantId: string): Promise<string> {
-    return await db.transaction(async (tx) => {
-      // Get or create sequence record (transaction provides basic isolation)
-      let [sequence] = await tx
-        .select()
-        .from(journalEntrySequences)
-        .where(eq(journalEntrySequences.tenantId, tenantId))
-        .limit(1);
+  async getNextJournalEntryNumber(tenantId: string, tx?: typeof db): Promise<string> {
+    const client = tx || db;
+    
+    // If no transaction provided, create one for sequence isolation
+    if (!tx) {
+      return await db.transaction(async (innerTx) => {
+        return await this._getNextJournalEntryNumberImpl(tenantId, innerTx);
+      });
+    }
+    
+    // Use provided transaction
+    return await this._getNextJournalEntryNumberImpl(tenantId, client);
+  }
+  
+  private async _getNextJournalEntryNumberImpl(tenantId: string, tx: typeof db): Promise<string> {
+    // Get or create sequence record (transaction provides basic isolation)
+    let [sequence] = await tx
+      .select()
+      .from(journalEntrySequences)
+      .where(eq(journalEntrySequences.tenantId, tenantId))
+      .limit(1);
 
-      if (!sequence) {
-        // Create initial sequence
-        [sequence] = await tx
-          .insert(journalEntrySequences)
-          .values({
-            tenantId,
-            lastNumber: 1,
-            prefix: "JE-",
-          })
-          .returning();
-        
-        return `JE-${String(1).padStart(4, '0')}`;
+    if (!sequence) {
+      // Create initial sequence
+      [sequence] = await tx
+        .insert(journalEntrySequences)
+        .values({
+          tenantId,
+          lastNumber: 1,
+          prefix: "JE-",
+        })
+        .returning();
+      
+      return `JE-${String(1).padStart(4, '0')}`;
       }
 
-      // Increment and update
-      const nextNumber = sequence.lastNumber + 1;
-      await tx
-        .update(journalEntrySequences)
-        .set({
-          lastNumber: nextNumber,
-          updatedAt: new Date(),
-        })
-        .where(eq(journalEntrySequences.tenantId, tenantId));
+    // Increment and update
+    const nextNumber = sequence.lastNumber + 1;
+    await tx
+      .update(journalEntrySequences)
+      .set({
+        lastNumber: nextNumber,
+        updatedAt: new Date(),
+      })
+      .where(eq(journalEntrySequences.tenantId, tenantId));
 
-      return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
-    });
+    return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
   }
 
   // Transaction-enabled journal entry methods (Phase 3)
@@ -5887,7 +5907,7 @@ export class MemStorage implements IStorage {
     return this.payments.filter(p => p.tenantId === tenantId);
   }
 
-  async createPayment(payment: InsertPayment): Promise<Payment> {
+  async createPayment(payment: InsertPayment, tx?: typeof db): Promise<Payment> {
     const now = new Date();
     const id = `payment-${Date.now()}-${Math.random()}`;
     const newPayment: Payment = { ...payment, id, createdAt: now, updatedAt: now };
@@ -6027,7 +6047,8 @@ export class MemStorage implements IStorage {
     return payment || null;
   }
 
-  async createCustomerPayment(paymentData: InsertCustomerPayment): Promise<CustomerPayment> {
+  async createCustomerPayment(paymentData: InsertCustomerPayment, tx?: typeof db): Promise<CustomerPayment> {
+    // MemStorage doesn't support transactions, just ignore the tx parameter
     const now = new Date();
     const paymentId = `payment-${Date.now()}-${Math.random()}`;
     const paymentNumber = await this.getNextCustomerPaymentNumber(paymentData.tenantId);
@@ -6046,6 +6067,14 @@ export class MemStorage implements IStorage {
       deletedAt: null,
       createdAt: now,
       updatedAt: now,
+      currencyCode: paymentData.currencyCode || 'USD',
+      exchangeRate: paymentData.exchangeRate || '1.0',
+      baseCurrencyAmount: paymentData.baseCurrencyAmount || null,
+      transactionCurrencyCode: paymentData.transactionCurrencyCode || null,
+      transactionRateValue: paymentData.transactionRateValue || null,
+      transactionAmount: paymentData.transactionAmount || null,
+      baseAmount: paymentData.baseAmount || null,
+      exchangeRateId: paymentData.exchangeRateId || null,
     };
 
     this.customerPayments.push(newPayment);
