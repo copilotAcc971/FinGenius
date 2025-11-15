@@ -5845,7 +5845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/reports/cash-flow', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
-      const { startDate, endDate } = req.query;
+      const { startDate, endDate, comparisonStartDate, comparisonEndDate, enhanced } = req.query;
 
       if (!startDate || !endDate) {
         return res.status(400).json({ message: "startDate and endDate are required" });
@@ -5858,6 +5858,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid date format" });
       }
 
+      // Check if enhanced version is requested
+      if (enhanced === 'true') {
+        let comparisonStart: Date | undefined;
+        let comparisonEnd: Date | undefined;
+
+        if (comparisonStartDate && comparisonEndDate) {
+          const compStartStr = comparisonStartDate as string;
+          const compEndStr = comparisonEndDate as string;
+          
+          // Only process if non-empty strings
+          if (compStartStr.trim() !== '' && compEndStr.trim() !== '') {
+            comparisonStart = new Date(compStartStr);
+            comparisonEnd = new Date(compEndStr);
+
+            // Validate dates are valid
+            if (isNaN(comparisonStart.getTime()) || isNaN(comparisonEnd.getTime())) {
+              return res.status(400).json({ message: "Invalid comparison date format" });
+            }
+          }
+        }
+
+        const report = await storage.getEnhancedCashFlowReport(tenantId, start, end, comparisonStart, comparisonEnd);
+        return res.json(report);
+      }
+
+      // Fall back to basic cash flow report
       const report = await storage.getCashFlowReport(tenantId, start, end);
       res.json(report);
     } catch (error: any) {

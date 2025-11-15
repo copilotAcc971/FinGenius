@@ -175,14 +175,37 @@ interface TrialBalanceReport {
   isBalanced: boolean;
 }
 
-interface CashFlowReport {
+interface EnhancedCashFlowReport {
+  tenantId: string;
+  startDate: string;
+  endDate: string;
   operating: Array<{ activity: string; amount: number }>;
-  investing: Array<{ activity: string; amount: number }>;
-  financing: Array<{ activity: string; amount: number }>;
   netOperating: number;
+  investing: Array<{ activity: string; amount: number }>;
   netInvesting: number;
+  financing: Array<{ activity: string; amount: number }>;
   netFinancing: number;
   netCashFlow: number;
+  comparisonStartDate?: string;
+  comparisonEndDate?: string;
+  comparisonData?: {
+    operating: Array<{ activity: string; amount: number }>;
+    netOperating: number;
+    investing: Array<{ activity: string; amount: number }>;
+    netInvesting: number;
+    financing: Array<{ activity: string; amount: number }>;
+    netFinancing: number;
+    netCashFlow: number;
+  };
+  operatingVariance?: number;
+  investingVariance?: number;
+  financingVariance?: number;
+  netVariance?: number;
+  baseCurrency?: string;
+  ifrsComplianceEnabled?: boolean;
+  fxTranslationStandard?: string | null;
+  translationMethod?: string;
+  fxTranslationApplied?: boolean;
 }
 
 function FxDisclosure({ 
@@ -408,6 +431,9 @@ export default function FinancialReports() {
     format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd")
   );
   const [cfEndDate, setCfEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [cfShowComparison, setCfShowComparison] = useState(false);
+  const [cfComparisonStartDate, setCfComparisonStartDate] = useState("");
+  const [cfComparisonEndDate, setCfComparisonEndDate] = useState("");
 
   // Control when to fetch reports
   const [fetchPLComparison, setFetchPLComparison] = useState(false);
@@ -469,9 +495,17 @@ export default function FinancialReports() {
     enabled: !!currentTenant?.id && fetchTB,
   });
 
-  // Cash Flow Query
-  const { data: cfReport, isLoading: cfLoading } = useQuery<CashFlowReport>({
-    queryKey: ["/api/reports/cash-flow", { tenantId: currentTenant?.id, startDate: cfStartDate, endDate: cfEndDate }],
+  // Cash Flow Query - Enhanced with Comparison
+  const { data: cfReport, isLoading: cfLoading } = useQuery<EnhancedCashFlowReport>({
+    queryKey: ["/api/reports/cash-flow", { 
+      tenantId: currentTenant?.id, 
+      startDate: cfStartDate, 
+      endDate: cfEndDate,
+      enhanced: 'true',
+      ...(cfShowComparison && cfComparisonStartDate && cfComparisonEndDate 
+        ? { comparisonStartDate: cfComparisonStartDate, comparisonEndDate: cfComparisonEndDate } 
+        : {})
+    }],
     enabled: !!currentTenant?.id && fetchCF,
   });
 
@@ -1768,7 +1802,7 @@ export default function FinancialReports() {
         <TabsContent value="cash-flow" className="space-y-6" data-testid="content-cash-flow">
           <Card>
             <CardHeader>
-              <CardTitle>Cash Flow Statement</CardTitle>
+              <CardTitle>Cash Flow Statement (Indirect Method)</CardTitle>
               <CardDescription>Cash movements for the selected period</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1802,6 +1836,47 @@ export default function FinancialReports() {
                     Generate Report
                   </Button>
                 </div>
+              </div>
+
+              <div className="border-t pt-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="cf-comparison"
+                    checked={cfShowComparison}
+                    onChange={(e) => setCfShowComparison(e.target.checked)}
+                    className="h-4 w-4"
+                    data-testid="checkbox-cf-comparison"
+                  />
+                  <label htmlFor="cf-comparison" className="text-sm font-medium">
+                    Enable Period Comparison
+                  </label>
+                </div>
+
+                {cfShowComparison && (
+                  <div className="grid gap-4 md:grid-cols-2 pl-6">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Comparison Start Date</label>
+                      <input
+                        type="date"
+                        value={cfComparisonStartDate}
+                        onChange={(e) => setCfComparisonStartDate(e.target.value)}
+                        className="w-full h-10 px-3 py-2 border rounded-md"
+                        data-testid="input-cf-comparison-start"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Comparison End Date</label>
+                      <input
+                        type="date"
+                        value={cfComparisonEndDate}
+                        onChange={(e) => setCfComparisonEndDate(e.target.value)}
+                        className="w-full h-10 px-3 py-2 border rounded-md"
+                        data-testid="input-cf-comparison-end"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1950,22 +2025,97 @@ export default function FinancialReports() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Net Cash Flow</CardTitle>
+                  <CardTitle>Net Cash Flow Summary</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-center">
-                    <div className="text-sm font-medium text-muted-foreground mb-2">
-                      Total Net Cash Flow
+                  <div className="space-y-4">
+                    <div className="text-center">
+                      <div className="text-sm font-medium text-muted-foreground mb-2">
+                        Total Net Cash Flow
+                      </div>
+                      <div 
+                        className={`text-3xl font-bold ${cfReport.netCashFlow >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                        data-testid="text-net-cash-flow"
+                      >
+                        {formatCurrency(cfReport.netCashFlow, cfReport.baseCurrency || baseCurrency?.code || "USD", currencies)}
+                      </div>
                     </div>
-                    <div 
-                      className={`text-3xl font-bold ${cfReport.netCashFlow >= 0 ? 'text-green-600' : 'text-red-600'}`}
-                      data-testid="text-net-cash-flow"
-                    >
-                      {formatCurrency(cfReport.netCashFlow, baseCurrency?.code || "USD", currencies)}
-                    </div>
+
+                    {cfReport.comparisonData && (
+                      <div className="border-t pt-4">
+                        <h3 className="text-sm font-semibold mb-3">Period Comparison & Variance</h3>
+                        <div className="grid gap-3">
+                          <div className="flex justify-between items-center text-sm">
+                            <span className="text-muted-foreground">Operating Activities</span>
+                            <div className="flex items-center gap-2">
+                              {cfReport.operatingVariance !== undefined && (
+                                <>
+                                  <span className={cfReport.operatingVariance >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                    {cfReport.operatingVariance >= 0 ? <ArrowUp className="h-3 w-3 inline" /> : <ArrowDown className="h-3 w-3 inline" />}
+                                    {formatCurrency(Math.abs(cfReport.operatingVariance), cfReport.baseCurrency || baseCurrency?.code || "USD", currencies)}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex justify-between items-center text-sm">
+                            <span className="text-muted-foreground">Investing Activities</span>
+                            <div className="flex items-center gap-2">
+                              {cfReport.investingVariance !== undefined && (
+                                <>
+                                  <span className={cfReport.investingVariance >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                    {cfReport.investingVariance >= 0 ? <ArrowUp className="h-3 w-3 inline" /> : <ArrowDown className="h-3 w-3 inline" />}
+                                    {formatCurrency(Math.abs(cfReport.investingVariance), cfReport.baseCurrency || baseCurrency?.code || "USD", currencies)}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex justify-between items-center text-sm">
+                            <span className="text-muted-foreground">Financing Activities</span>
+                            <div className="flex items-center gap-2">
+                              {cfReport.financingVariance !== undefined && (
+                                <>
+                                  <span className={cfReport.financingVariance >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                    {cfReport.financingVariance >= 0 ? <ArrowUp className="h-3 w-3 inline" /> : <ArrowDown className="h-3 w-3 inline" />}
+                                    {formatCurrency(Math.abs(cfReport.financingVariance), cfReport.baseCurrency || baseCurrency?.code || "USD", currencies)}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex justify-between items-center text-sm font-semibold border-t pt-2">
+                            <span>Net Cash Flow Change</span>
+                            <div className="flex items-center gap-2">
+                              {cfReport.netVariance !== undefined && (
+                                <>
+                                  <span className={cfReport.netVariance >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                    {cfReport.netVariance >= 0 ? <ArrowUp className="h-4 w-4 inline" /> : <ArrowDown className="h-4 w-4 inline" />}
+                                    {formatCurrency(Math.abs(cfReport.netVariance), cfReport.baseCurrency || baseCurrency?.code || "USD", currencies)}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
+
+              {/* IFRS Disclosure for Cash Flow Statement (IAS 7) */}
+              {cfReport.ifrsComplianceEnabled && (
+                <FxDisclosure
+                  standard={cfReport.fxTranslationStandard!}
+                  method={cfReport.translationMethod}
+                  baseCurrency={cfReport.baseCurrency || "USD"}
+                  applied={cfReport.fxTranslationApplied || false}
+                />
+              )}
             </>
           )}
         </TabsContent>

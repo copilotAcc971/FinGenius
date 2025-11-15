@@ -2569,6 +2569,63 @@ export const cashFlowReportSchema = z.object({
 
 export type CashFlowReport = z.infer<typeof cashFlowReportSchema>;
 
+// Enhanced Cash Flow Report (Indirect Method)
+export const cashFlowActivitySchema = z.object({
+  activity: z.string(),
+  amount: z.number(),
+});
+
+export type CashFlowActivity = z.infer<typeof cashFlowActivitySchema>;
+
+export const enhancedCashFlowReportSchema = z.object({
+  tenantId: z.string(),
+  startDate: z.string(),
+  endDate: z.string(),
+  
+  // Operating Activities (Indirect Method)
+  operating: z.array(cashFlowActivitySchema),
+  netOperating: z.number(),
+  
+  // Investing Activities
+  investing: z.array(cashFlowActivitySchema),
+  netInvesting: z.number(),
+  
+  // Financing Activities
+  financing: z.array(cashFlowActivitySchema),
+  netFinancing: z.number(),
+  
+  // Net Cash Flow
+  netCashFlow: z.number(),
+  
+  // Comparison period (optional)
+  comparisonStartDate: z.string().optional(),
+  comparisonEndDate: z.string().optional(),
+  comparisonData: z.object({
+    operating: z.array(cashFlowActivitySchema),
+    netOperating: z.number(),
+    investing: z.array(cashFlowActivitySchema),
+    netInvesting: z.number(),
+    financing: z.array(cashFlowActivitySchema),
+    netFinancing: z.number(),
+    netCashFlow: z.number(),
+  }).optional(),
+  
+  // Variance calculations
+  operatingVariance: z.number().optional(),
+  investingVariance: z.number().optional(),
+  financingVariance: z.number().optional(),
+  netVariance: z.number().optional(),
+  
+  // IFRS Compliance & FX Translation (IAS 7)
+  baseCurrency: z.string(),
+  ifrsComplianceEnabled: z.boolean(),
+  fxTranslationStandard: z.string().nullable(),
+  translationMethod: z.string().optional(),
+  fxTranslationApplied: z.boolean(),
+});
+
+export type EnhancedCashFlowReport = z.infer<typeof enhancedCashFlowReportSchema>;
+
 // AR/AP Aging Report Customer/Vendor Line
 export const agingReportLineSchema = z.object({
   entityId: z.string(),

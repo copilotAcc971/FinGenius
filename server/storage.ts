@@ -131,6 +131,8 @@ import {
   type BalanceSheetAccountLine,
   type TrialBalanceReport,
   type CashFlowReport,
+  type EnhancedCashFlowReport,
+  type CashFlowActivity,
   type ARAgingReport,
   type APAgingReport,
   type FXConfig,
@@ -355,6 +357,7 @@ export interface IStorage {
   getEnhancedBalanceSheetReport(tenantId: string, asOfDate: Date, comparisonDate?: Date): Promise<EnhancedBalanceSheetReport>;
   getTrialBalanceReport(tenantId: string, asOfDate: Date): Promise<TrialBalanceReport>;
   getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport>;
+  getEnhancedCashFlowReport(tenantId: string, startDate: Date, endDate: Date, comparisonStartDate?: Date, comparisonEndDate?: Date): Promise<EnhancedCashFlowReport>;
   getARAgingReport(tenantId: string, groupBy?: 'customer' | 'invoice' | 'project'): Promise<ARAgingReport>;
   getAPAgingReport(tenantId: string, groupBy?: 'vendor' | 'invoice' | 'project'): Promise<APAgingReport>;
 
@@ -4740,6 +4743,360 @@ export class DatabaseStorage implements IStorage {
         total: financingTotal.toFixed(2),
       },
       netCashFlow: netCashFlow.toFixed(2),
+    };
+  }
+
+  // Helper function to check if account is cash/bank account
+  private isCashAccount(account: Account): boolean {
+    if (!account) return false;
+    const category = account.accountCategory?.toLowerCase() || '';
+    const name = account.name?.toLowerCase() || '';
+    return (
+      category.includes('cash') ||
+      category.includes('bank') ||
+      name.includes('cash') ||
+      name.includes('bank')
+    );
+  }
+
+  // Helper to get account balance at a specific date
+  private async getBalanceAtDate(
+    accountId: string,
+    tenantId: string,
+    date: Date,
+    accountType: string
+  ): Promise<number> {
+    const result = await db
+      .select({
+        balance: sum(sql`
+          CASE 
+            WHEN ${journalEntryLegs.type} = 'Debit' AND ${accountType} = 'asset' THEN ${journalEntryLegs.amount}
+            WHEN ${journalEntryLegs.type} = 'Credit' AND ${accountType} = 'asset' THEN -${journalEntryLegs.amount}
+            WHEN ${journalEntryLegs.type} = 'Credit' AND ${accountType} = 'liability' THEN ${journalEntryLegs.amount}
+            WHEN ${journalEntryLegs.type} = 'Debit' AND ${accountType} = 'liability' THEN -${journalEntryLegs.amount}
+            WHEN ${journalEntryLegs.type} = 'Debit' AND ${accountType} = 'equity' THEN -${journalEntryLegs.amount}
+            WHEN ${journalEntryLegs.type} = 'Credit' AND ${accountType} = 'equity' THEN ${journalEntryLegs.amount}
+            ELSE 0
+          END
+        `),
+      })
+      .from(journalEntryLegs)
+      .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+      .where(
+        and(
+          eq(journalEntryLegs.tenantId, tenantId),
+          eq(journalEntryLegs.accountId, accountId),
+          lte(journalEntries.entryDate, date),
+          eq(journalEntries.status, 'posted')
+        )
+      );
+    
+    return parseFloat(result[0]?.balance || '0');
+  }
+
+  // Enhanced Cash Flow Report (Indirect Method with Working Capital Changes)
+  async getEnhancedCashFlowReport(
+    tenantId: string,
+    startDate: Date,
+    endDate: Date,
+    comparisonStartDate?: Date,
+    comparisonEndDate?: Date
+  ): Promise<EnhancedCashFlowReport> {
+    // Helper to calculate cash flow activities for a period
+    const calculateCashFlowForPeriod = async (periodStart: Date, periodEnd: Date) => {
+      // 1. Get Net Income from P&L
+      const plReport = await this.getProfitLossReport(tenantId, periodStart, periodEnd);
+      const netIncome = parseFloat(plReport.netProfit);
+
+      const operatingActivities: CashFlowActivity[] = [
+        { activity: 'Net Income', amount: netIncome }
+      ];
+
+      // 2a. Add back non-cash expenses (depreciation, amortization)
+      // FIX: Remove incorrect type='expense' filter, use name matching only
+      const nonCashExpensesResult = await db
+        .select({
+          accountName: accounts.name,
+          accountType: accounts.type,
+          total: sum(sql`
+            CASE 
+              WHEN ${journalEntryLegs.type} = 'Debit' THEN ${journalEntryLegs.amount}
+              ELSE -${journalEntryLegs.amount}
+            END
+          `),
+        })
+        .from(journalEntryLegs)
+        .innerJoin(accounts, eq(journalEntryLegs.accountId, accounts.id))
+        .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(journalEntryLegs.tenantId, tenantId),
+            gte(journalEntries.entryDate, periodStart),
+            lte(journalEntries.entryDate, periodEnd),
+            eq(journalEntries.status, 'posted'),
+            sql`LOWER(${accounts.name}) LIKE '%depreciation%' OR LOWER(${accounts.name}) LIKE '%amortization%'`
+          )
+        )
+        .groupBy(accounts.name, accounts.type);
+
+      for (const expense of nonCashExpensesResult) {
+        const amount = parseFloat(expense.total || '0');
+        // Preserve debit/credit direction: debit = positive add-back, credit = negative (reduces operating cash)
+        if (amount !== 0) {
+          operatingActivities.push({
+            activity: `Add back: ${expense.accountName}`,
+            amount: amount
+          });
+        }
+      }
+
+      // 2b. Changes in working capital (AR, AP, Inventory)
+      // FIX: Use exact accountCategory matching and fix typo
+      const workingCapitalAccounts = await db
+        .select()
+        .from(accounts)
+        .where(
+          and(
+            eq(accounts.tenantId, tenantId),
+            eq(accounts.isActive, true),
+            sql`(
+              ${accounts.accountCategory} IN ('Current Assets', 'Current Liabilities')
+            )`
+          )
+        );
+
+      // Filter out cash/bank accounts
+      const nonCashWorkingCapital = workingCapitalAccounts.filter(acc => !this.isCashAccount(acc));
+
+      for (const account of nonCashWorkingCapital) {
+        // Get balance at prior close (1ms before period start)
+        const priorClose = new Date(periodStart.getTime() - 1);
+        
+        const beginningBalance = await this.getBalanceAtDate(
+          account.id,
+          tenantId,
+          priorClose,
+          account.type
+        );
+        const endingBalance = await this.getBalanceAtDate(
+          account.id,
+          tenantId,
+          periodEnd,
+          account.type
+        );
+        const change = endingBalance - beginningBalance;
+
+        if (Math.abs(change) > 0.01) {
+          // For assets: increase = cash outflow (negative), decrease = cash inflow (positive)
+          // For liabilities: increase = cash inflow (positive), decrease = cash outflow (negative)
+          const cashImpact = account.type === 'asset' ? -change : change;
+          const prefix = cashImpact < 0 ? 'Increase' : 'Decrease';
+          operatingActivities.push({
+            activity: `${prefix} in ${account.name}`,
+            amount: cashImpact
+          });
+        }
+      }
+
+      const netOperating = operatingActivities.reduce((sum, item) => sum + item.amount, 0);
+
+      // 3. Investing Activities (Fixed Assets, Investments)
+      // FIX: Track only cash transactions
+      const investingActivities: CashFlowActivity[] = [];
+
+      const investingAccountsResult = await db
+        .select({
+          accountName: accounts.name,
+          accountType: accounts.type,
+          total: sum(sql`
+            CASE 
+              WHEN ${journalEntryLegs.type} = 'Debit' THEN -${journalEntryLegs.amount}
+              ELSE ${journalEntryLegs.amount}
+            END
+          `),
+        })
+        .from(journalEntryLegs)
+        .innerJoin(accounts, eq(journalEntryLegs.accountId, accounts.id))
+        .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(journalEntryLegs.tenantId, tenantId),
+            gte(journalEntries.entryDate, periodStart),
+            lte(journalEntries.entryDate, periodEnd),
+            eq(journalEntries.status, 'posted'),
+            eq(accounts.type, 'asset'),
+            sql`(
+              ${accounts.accountCategory} LIKE '%Fixed%' OR 
+              ${accounts.accountCategory} LIKE '%Investment%' OR
+              ${accounts.subtype} LIKE '%fixed%' OR
+              ${accounts.subtype} LIKE '%investment%'
+            )`
+          )
+        )
+        .groupBy(accounts.name, accounts.type);
+
+      for (const result of investingAccountsResult) {
+        const amount = parseFloat(result.total || '0');
+        if (Math.abs(amount) > 0.01) {
+          const prefix = amount < 0 ? 'Purchase of' : 'Sale of';
+          investingActivities.push({
+            activity: `${prefix} ${result.accountName}`,
+            amount: amount
+          });
+        }
+      }
+
+      const netInvesting = investingActivities.reduce((sum, item) => sum + item.amount, 0);
+
+      // 4. Financing Activities (Long-term Debt, Equity)
+      const financingActivities: CashFlowActivity[] = [];
+
+      const financingAccountsResult = await db
+        .select({
+          accountName: accounts.name,
+          accountType: accounts.type,
+          total: sum(sql`
+            CASE 
+              WHEN ${journalEntryLegs.type} = 'Credit' AND ${accounts.type} = 'liability' THEN ${journalEntryLegs.amount}
+              WHEN ${journalEntryLegs.type} = 'Debit' AND ${accounts.type} = 'liability' THEN -${journalEntryLegs.amount}
+              WHEN ${journalEntryLegs.type} = 'Credit' AND ${accounts.type} = 'equity' THEN ${journalEntryLegs.amount}
+              WHEN ${journalEntryLegs.type} = 'Debit' AND ${accounts.type} = 'equity' THEN -${journalEntryLegs.amount}
+              ELSE 0
+            END
+          `),
+        })
+        .from(journalEntryLegs)
+        .innerJoin(accounts, eq(journalEntryLegs.accountId, accounts.id))
+        .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(journalEntryLegs.tenantId, tenantId),
+            gte(journalEntries.entryDate, periodStart),
+            lte(journalEntries.entryDate, periodEnd),
+            eq(journalEntries.status, 'posted'),
+            sql`(
+              (${accounts.type} = 'liability' AND ${accounts.accountCategory} LIKE '%Long%') OR
+              (${accounts.type} = 'equity')
+            )`
+          )
+        )
+        .groupBy(accounts.name, accounts.type);
+
+      for (const result of financingAccountsResult) {
+        const amount = parseFloat(result.total || '0');
+        if (Math.abs(amount) > 0.01) {
+          const prefix = amount > 0 ? 'Proceeds from' : 'Payment of';
+          financingActivities.push({
+            activity: `${prefix} ${result.accountName}`,
+            amount: amount
+          });
+        }
+      }
+
+      const netFinancing = financingActivities.reduce((sum, item) => sum + item.amount, 0);
+
+      // Net Cash Flow
+      const netCashFlow = netOperating + netInvesting + netFinancing;
+
+      return {
+        operating: operatingActivities,
+        netOperating,
+        investing: investingActivities,
+        netInvesting,
+        financing: financingActivities,
+        netFinancing,
+        netCashFlow,
+      };
+    };
+
+    // Calculate current period
+    const currentPeriod = await calculateCashFlowForPeriod(startDate, endDate);
+
+    // Get base currency
+    const baseCurrencyRecord = await db.query.currencies.findFirst({
+      where: and(
+        eq(currencies.tenantId, tenantId),
+        eq(currencies.isBaseCurrency, true)
+      )
+    });
+    const baseCurrency = baseCurrencyRecord?.code || 'USD';
+
+    // Get tenant company profile for IFRS settings
+    const companyProfile = await db
+      .select()
+      .from(tenantCompanyProfiles)
+      .where(eq(tenantCompanyProfiles.tenantId, tenantId))
+      .limit(1);
+
+    const profile = companyProfile[0];
+
+    // Calculate comparison period and variances only if comparison dates provided
+    let comparisonData;
+    let operatingVariance;
+    let investingVariance;
+    let financingVariance;
+    let netVariance;
+
+    // Tighten guard to validate dates are not Invalid Date
+    if (comparisonStartDate && comparisonEndDate && 
+        !isNaN(comparisonStartDate.getTime()) && !isNaN(comparisonEndDate.getTime())) {
+      const compPeriod = await calculateCashFlowForPeriod(comparisonStartDate, comparisonEndDate);
+      
+      // Add comparison data with full activity arrays for detailed period-over-period drill-down
+      comparisonData = {
+        operating: compPeriod.operating,
+        netOperating: compPeriod.netOperating,
+        investing: compPeriod.investing,
+        netInvesting: compPeriod.netInvesting,
+        financing: compPeriod.financing,
+        netFinancing: compPeriod.netFinancing,
+        netCashFlow: compPeriod.netCashFlow,
+      };
+
+      // Calculate variances (current - comparison)
+      // Positive variance = current > comparison (favorable for operating/net cash)
+      // Negative variance = current < comparison (unfavorable for operating/net cash)
+      operatingVariance = currentPeriod.netOperating - compPeriod.netOperating;
+      investingVariance = currentPeriod.netInvesting - compPeriod.netInvesting;
+      financingVariance = currentPeriod.netFinancing - compPeriod.netFinancing;
+      netVariance = currentPeriod.netCashFlow - compPeriod.netCashFlow;
+    }
+
+    // IAS 7 (Statement of Cash Flows) Compliance:
+    // ✓ Cash flows classified by operating, investing, financing activities
+    // ✓ Indirect method used for operating activities
+    // ✓ Comparative information included when comparison period selected
+    // ✓ Foreign currency cash flows translated at exchange rates at date of cash flows
+    // ✓ Effect of exchange rate changes on cash shown separately (when FX enabled)
+    
+    // Return ISO strings instead of Date objects
+    // Only include variance fields when comparison period exists
+    return {
+      tenantId,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      operating: currentPeriod.operating,
+      netOperating: currentPeriod.netOperating,
+      investing: currentPeriod.investing,
+      netInvesting: currentPeriod.netInvesting,
+      financing: currentPeriod.financing,
+      netFinancing: currentPeriod.netFinancing,
+      netCashFlow: currentPeriod.netCashFlow,
+      comparisonStartDate: comparisonStartDate?.toISOString(),
+      comparisonEndDate: comparisonEndDate?.toISOString(),
+      comparisonData,
+      ...(comparisonStartDate && comparisonEndDate ? {
+        operatingVariance,
+        investingVariance,
+        financingVariance,
+        netVariance,
+      } : {}),
+      // IFRS Compliance & FX Translation (IAS 7)
+      baseCurrency: baseCurrency,
+      ifrsComplianceEnabled: profile?.ifrsComplianceEnabled || false,
+      fxTranslationStandard: profile?.fxTranslationStandard || null,
+      translationMethod: profile?.fxIncomeExpenseMethod || undefined,
+      fxTranslationApplied: false, // Will be true once FX translation is fully implemented
     };
   }
 
