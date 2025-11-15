@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
-import { type RecurringInvoice } from "@shared/schema";
+import { type RecurringInvoice, type Currency } from "@shared/schema";
 import { RecurringInvoiceDialog } from "@/components/recurring-invoice-dialog";
 import { useState } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { formatCurrency } from "@/lib/currency-utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,6 +33,11 @@ export default function RecurringInvoicesPage() {
 
   const { data: recurringInvoices, isLoading } = useQuery<RecurringInvoice[]>({
     queryKey: ["/api/recurring-invoices", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [] } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -191,7 +197,7 @@ export default function RecurringInvoicesPage() {
                     {getFrequencyBadge(recurring.frequency)}
                     {getStatusBadge(recurring.status)}
                     <span className="text-lg font-semibold" data-testid={`text-recurring-total-${recurring.id}`}>
-                      ${parseFloat(recurring.total).toFixed(2)}
+                      {formatCurrency(parseFloat(recurring.total), recurring.currency, currencies)}
                     </span>
                   </div>
                 </div>

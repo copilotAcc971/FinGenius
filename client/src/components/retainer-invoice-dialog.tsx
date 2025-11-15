@@ -11,9 +11,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { type RetainerInvoice, type Customer, type Item, type Tax, insertRetainerInvoiceSchema, type RetainerInvoiceLineItem, type TenantCompanyProfile } from "@shared/schema";
+import { type RetainerInvoice, type Customer, type Item, type Tax, insertRetainerInvoiceSchema, type RetainerInvoiceLineItem, type TenantCompanyProfile, type Currency } from "@shared/schema";
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { formatCurrency } from "@/lib/currency-utils";
 
 const retainerInvoiceFormSchema = insertRetainerInvoiceSchema.extend({
   invoiceDate: z.string(),
@@ -51,6 +52,24 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
     enabled: !!currentTenant?.id && open,
   });
 
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id && open,
+  });
+
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
+  const availableCurrencies = useMemo(() => {
+    if (!open || retainerInvoice) return currencies;
+    if (currenciesLoading) return [{ code: 'USD', name: 'US Dollar', symbol: '$', isActive: true, decimalPlaces: 2 }];
+    return currencies;
+  }, [currencies, currenciesLoading, open, retainerInvoice]);
+
   const { data: existingLineItems } = useQuery<RetainerInvoiceLineItem[]>({
     queryKey: ["/api/retainer-invoices", retainerInvoice?.id, "line-items", { tenantId: currentTenant?.id }],
     queryFn: async () => {
@@ -69,6 +88,7 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
     defaultValues: {
       tenantId: currentTenant?.id || "",
       customerId: "",
+      currency: "",
       invoiceDate: new Date().toISOString().split('T')[0],
       invoiceSubject: "",
       issuerTaxId: "",
@@ -83,10 +103,13 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
   });
 
   useEffect(() => {
+    if (!open || (!retainerInvoice && currenciesLoading)) return;
+
     if (retainerInvoice) {
       form.reset({
         tenantId: retainerInvoice.tenantId,
         customerId: retainerInvoice.customerId,
+        currency: retainerInvoice.currency || baseCurrency?.code || "USD",
         invoiceDate: new Date(retainerInvoice.invoiceDate).toISOString().split('T')[0],
         invoiceSubject: retainerInvoice.invoiceSubject || "",
         issuerTaxId: retainerInvoice.issuerTaxId || "",
@@ -102,6 +125,7 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
       form.reset({
         tenantId: currentTenant?.id || "",
         customerId: "",
+        currency: baseCurrency?.code || "USD",
         invoiceDate: new Date().toISOString().split('T')[0],
         invoiceSubject: "",
         issuerTaxId: companyProfile?.taxRegistrationNumber || "",
@@ -134,7 +158,7 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
         taxId: "",
       }]);
     }
-  }, [retainerInvoice, existingLineItems, currentTenant, companyProfile, form]);
+  }, [retainerInvoice, existingLineItems, currentTenant, companyProfile, baseCurrency, currenciesLoading, open, form]);
 
   const addLineItem = () => {
     setLineItems([...lineItems, {
@@ -296,6 +320,49 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
                 )}
               />
 
+              <FormField
+                control={form.control}
+                name="currency"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Currency *</FormLabel>
+                    <Select 
+                      onValueChange={field.onChange} 
+                      value={field.value}
+                      disabled={currenciesLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger data-testid="select-currency">
+                          <SelectValue placeholder="Select currency" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {availableCurrencies
+                          .sort((a, b) => {
+                            if (a.isActive && !b.isActive) return -1;
+                            if (!a.isActive && b.isActive) return 1;
+                            return a.code.localeCompare(b.code);
+                          })
+                          .map((curr) => (
+                            <SelectItem key={curr.code} value={curr.code}>
+                              {curr.code} - {curr.name}
+                              {!curr.isActive && ' (Inactive)'}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    {currenciesError && (
+                      <div className="text-destructive text-sm mt-1">
+                        Failed to load currencies. Please refresh the page.
+                      </div>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
                 name="invoiceDate"
@@ -468,15 +535,15 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
             <div className="bg-muted p-4 rounded-lg space-y-2">
               <div className="flex justify-between">
                 <span>Subtotal:</span>
-                <span data-testid="text-subtotal">${totals.subtotal}</span>
+                <span data-testid="text-subtotal">{formatCurrency(parseFloat(totals.subtotal), form.watch("currency") || baseCurrency?.code || "USD", currencies)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Tax Amount:</span>
-                <span data-testid="text-tax-amount">${totals.taxAmount}</span>
+                <span data-testid="text-tax-amount">{formatCurrency(parseFloat(totals.taxAmount), form.watch("currency") || baseCurrency?.code || "USD", currencies)}</span>
               </div>
               <div className="flex justify-between text-lg font-bold">
                 <span>Total:</span>
-                <span data-testid="text-total">${totals.total}</span>
+                <span data-testid="text-total">{formatCurrency(parseFloat(totals.total), form.watch("currency") || baseCurrency?.code || "USD", currencies)}</span>
               </div>
             </div>
 
@@ -537,7 +604,7 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting} data-testid="button-submit">
+              <Button type="submit" disabled={currenciesLoading || currenciesError || isSubmitting} data-testid="button-submit">
                 {isSubmitting ? "Saving..." : retainerInvoice ? "Update" : "Create"}
               </Button>
             </div>

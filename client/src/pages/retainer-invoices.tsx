@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
-import { type RetainerInvoice } from "@shared/schema";
+import { type RetainerInvoice, type Currency } from "@shared/schema";
 import { RetainerInvoiceDialog } from "@/components/retainer-invoice-dialog";
 import { useState } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { formatCurrency } from "@/lib/currency-utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,11 @@ export default function RetainerInvoicesPage() {
 
   const { data: retainerInvoices, isLoading } = useQuery<RetainerInvoice[]>({
     queryKey: ["/api/retainer-invoices", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const { data: currencies = [] } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
@@ -124,7 +130,7 @@ export default function RetainerInvoicesPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold" data-testid="text-total-retainers">
-                ${totals.totalAmount.toFixed(2)}
+                {retainerInvoices && retainerInvoices.length > 0 ? formatCurrency(totals.totalAmount, retainerInvoices[0].currency, currencies) : '$0.00'}
               </div>
               <p className="text-xs text-muted-foreground">
                 {retainerInvoices.length} retainer invoice{retainerInvoices.length !== 1 ? 's' : ''}
@@ -137,7 +143,7 @@ export default function RetainerInvoicesPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold" data-testid="text-total-remaining">
-                ${totals.totalRemaining.toFixed(2)}
+                {retainerInvoices && retainerInvoices.length > 0 ? formatCurrency(totals.totalRemaining, retainerInvoices[0].currency, currencies) : '$0.00'}
               </div>
               <p className="text-xs text-muted-foreground">
                 Available for future invoices
@@ -178,19 +184,19 @@ export default function RetainerInvoicesPage() {
                   <div>
                     <p className="text-sm text-muted-foreground">Total Amount</p>
                     <p className="text-lg font-semibold" data-testid={`text-retainer-total-${retainer.id}`}>
-                      ${parseFloat(retainer.total).toFixed(2)}
+                      {formatCurrency(parseFloat(retainer.total), retainer.currency, currencies)}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Amount Used</p>
                     <p className="text-lg font-semibold" data-testid={`text-retainer-used-${retainer.id}`}>
-                      ${parseFloat(retainer.amountUsed).toFixed(2)}
+                      {formatCurrency(parseFloat(retainer.amountUsed), retainer.currency, currencies)}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Remaining Balance</p>
                     <p className="text-lg font-semibold" data-testid={`text-retainer-remaining-${retainer.id}`}>
-                      ${parseFloat(retainer.remainingBalance).toFixed(2)}
+                      {formatCurrency(parseFloat(retainer.remainingBalance), retainer.currency, currencies)}
                     </p>
                   </div>
                 </div>

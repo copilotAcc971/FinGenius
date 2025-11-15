@@ -11,9 +11,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTenant } from "@/hooks/useTenant";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { type RecurringInvoice, type Customer, type Item, type Tax, insertRecurringInvoiceSchema, type RecurringInvoiceLineItem, type TenantCompanyProfile } from "@shared/schema";
+import { type RecurringInvoice, type Customer, type Item, type Tax, insertRecurringInvoiceSchema, type RecurringInvoiceLineItem, type TenantCompanyProfile, type Currency } from "@shared/schema";
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { formatCurrency } from "@/lib/currency-utils";
 
 const recurringInvoiceFormSchema = insertRecurringInvoiceSchema.extend({
   startDate: z.string(),
@@ -52,6 +53,24 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
     enabled: !!currentTenant?.id && open,
   });
 
+  const { 
+    data: currencies = [], 
+    isLoading: currenciesLoading,
+    isError: currenciesError 
+  } = useQuery<Currency[]>({
+    queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id && open,
+  });
+
+  const activeCurrencies = currencies.filter(c => c.isActive);
+  const baseCurrency = currencies.find(c => c.isBaseCurrency);
+
+  const availableCurrencies = useMemo(() => {
+    if (!open || recurringInvoice) return currencies;
+    if (currenciesLoading) return [{ code: 'USD', name: 'US Dollar', symbol: '$', isActive: true, decimalPlaces: 2 }];
+    return currencies;
+  }, [currencies, currenciesLoading, open, recurringInvoice]);
+
   const { data: existingLineItems } = useQuery<RecurringInvoiceLineItem[]>({
     queryKey: ["/api/recurring-invoices", recurringInvoice?.id, "line-items", { tenantId: currentTenant?.id }],
     queryFn: async () => {
@@ -70,6 +89,7 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
     defaultValues: {
       tenantId: currentTenant?.id || "",
       customerId: "",
+      currency: "",
       frequency: "monthly",
       startDate: new Date().toISOString().split('T')[0],
       endDate: "",
@@ -86,10 +106,13 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
   });
 
   useEffect(() => {
+    if (!open || (!recurringInvoice && currenciesLoading)) return;
+
     if (recurringInvoice) {
       form.reset({
         tenantId: recurringInvoice.tenantId,
         customerId: recurringInvoice.customerId,
+        currency: recurringInvoice.currency || baseCurrency?.code || "USD",
         frequency: recurringInvoice.frequency,
         startDate: new Date(recurringInvoice.startDate).toISOString().split('T')[0],
         endDate: recurringInvoice.endDate ? new Date(recurringInvoice.endDate).toISOString().split('T')[0] : "",
@@ -107,6 +130,7 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
       form.reset({
         tenantId: currentTenant?.id || "",
         customerId: "",
+        currency: baseCurrency?.code || "USD",
         frequency: "monthly",
         startDate: new Date().toISOString().split('T')[0],
         endDate: "",
@@ -141,7 +165,7 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
         taxId: "",
       }]);
     }
-  }, [recurringInvoice, existingLineItems, currentTenant, companyProfile, form]);
+  }, [recurringInvoice, existingLineItems, currentTenant, companyProfile, baseCurrency, currenciesLoading, open, form]);
 
   const addLineItem = () => {
     setLineItems([...lineItems, {
@@ -303,6 +327,49 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
                 )}
               />
 
+              <FormField
+                control={form.control}
+                name="currency"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Currency *</FormLabel>
+                    <Select 
+                      onValueChange={field.onChange} 
+                      value={field.value}
+                      disabled={currenciesLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger data-testid="select-currency">
+                          <SelectValue placeholder="Select currency" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {availableCurrencies
+                          .sort((a, b) => {
+                            if (a.isActive && !b.isActive) return -1;
+                            if (!a.isActive && b.isActive) return 1;
+                            return a.code.localeCompare(b.code);
+                          })
+                          .map((curr) => (
+                            <SelectItem key={curr.code} value={curr.code}>
+                              {curr.code} - {curr.name}
+                              {!curr.isActive && ' (Inactive)'}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    {currenciesError && (
+                      <div className="text-destructive text-sm mt-1">
+                        Failed to load currencies. Please refresh the page.
+                      </div>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
                 name="frequency"
@@ -512,15 +579,15 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
               <div className="w-64 space-y-2">
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Subtotal:</span>
-                  <span className="font-semibold" data-testid="text-subtotal">${totals.subtotal}</span>
+                  <span className="font-semibold" data-testid="text-subtotal">{formatCurrency(parseFloat(totals.subtotal), form.watch("currency") || baseCurrency?.code || "USD", currencies)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Tax:</span>
-                  <span className="font-semibold" data-testid="text-tax-amount">${totals.taxAmount}</span>
+                  <span className="font-semibold" data-testid="text-tax-amount">{formatCurrency(parseFloat(totals.taxAmount), form.watch("currency") || baseCurrency?.code || "USD", currencies)}</span>
                 </div>
                 <div className="flex justify-between pt-2 border-t">
                   <span className="font-semibold">Total:</span>
-                  <span className="font-semibold text-lg" data-testid="text-total">${totals.total}</span>
+                  <span className="font-semibold text-lg" data-testid="text-total">{formatCurrency(parseFloat(totals.total), form.watch("currency") || baseCurrency?.code || "USD", currencies)}</span>
                 </div>
               </div>
             </div>
@@ -557,7 +624,7 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting} data-testid="button-submit">
+              <Button type="submit" disabled={currenciesLoading || currenciesError || isSubmitting} data-testid="button-submit">
                 {isSubmitting ? "Saving..." : recurringInvoice ? "Update" : "Create"}
               </Button>
             </div>
