@@ -21,6 +21,7 @@ import {
   Shield,
   UserCog,
   Coins,
+  CheckCircle,
 } from "lucide-react";
 import {
   Sidebar,
@@ -36,6 +37,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Link, useLocation } from "wouter";
 import { useRBAC } from "@/contexts/rbac-context";
+import { ApprovalBadge } from "@/components/approval-badge";
 
 const salesItems = [
   { title: "Invoices", url: "/invoices", icon: FileText },
@@ -64,6 +66,7 @@ const paymentsItems = [
 const accountingItems = [
   { title: "Chart of Accounts", url: "/accounts", icon: BookOpen },
   { title: "Journal Entries", url: "/journal-entries", icon: FileText },
+  { title: "Approvals", url: "/approvals", icon: CheckCircle },
   { title: "Fixed Assets", url: "/assets", icon: Package },
   { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
   { title: "Bank Connections", url: "/bank-connections", icon: Landmark },
@@ -182,6 +185,7 @@ export function AppSidebar() {
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
+                  {item.title === "Approvals" && <ApprovalBadge />}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>

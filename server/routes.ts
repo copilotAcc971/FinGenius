@@ -2972,7 +2972,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           // Approval step details
           stepOrder: approvalSteps.stepOrder,
-          stepName: approvalSteps.stepName,
           approverRole: approvalSteps.approverRole,
           approverUserId: approvalSteps.approverUserId,
           
@@ -3048,19 +3047,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
       );
 
-      // Get total steps for each workflow
-      const workflowStepCounts = await db
-        .select({
-          workflowId: approvalSteps.workflowId,
-          totalSteps: sql<number>`count(distinct ${approvalSteps.stepOrder})`.as('total_steps'),
-        })
-        .from(approvalSteps)
-        .where(eq(approvalSteps.tenantId, tenantId))
-        .groupBy(approvalSteps.workflowId);
+      // Get unique workflowIds from pending approvals (filter out null values)
+      const allWorkflowIds = pendingApprovalsWithAmounts.map(a => a.workflowId);
+      const uniqueWorkflowIds = [...new Set(allWorkflowIds.filter(id => id !== null))] as string[];
 
-      const workflowStepMap = new Map(
-        workflowStepCounts.map(w => [w.workflowId, w.totalSteps])
-      );
+      // Build map with proper null handling
+      const workflowStepMap = new Map<string | null, number>();
+
+      // Get total steps for each workflow (only if we have non-null workflowIds)
+      if (uniqueWorkflowIds.length > 0) {
+        const workflowStepCounts = await db
+          .select({
+            workflowId: approvalSteps.workflowId,
+            totalSteps: sql<number>`count(distinct ${approvalSteps.stepOrder})`.as('total_steps'),
+          })
+          .from(approvalSteps)
+          .where(
+            and(
+              eq(approvalSteps.tenantId, tenantId),
+              inArray(approvalSteps.workflowId, uniqueWorkflowIds)
+            )
+          )
+          .groupBy(approvalSteps.workflowId);
+
+        // Populate map with workflow step counts
+        for (const step of workflowStepCounts) {
+          workflowStepMap.set(step.workflowId, step.totalSteps);
+        }
+      }
+
+      // For null workflowIds (ad-hoc approvals), count steps separately
+      if (allWorkflowIds.includes(null)) {
+        const nullWorkflowSteps = await db
+          .select({
+            totalSteps: sql<number>`count(distinct ${approvalSteps.stepOrder})`.as('total_steps'),
+          })
+          .from(approvalSteps)
+          .where(
+            and(
+              eq(approvalSteps.tenantId, tenantId),
+              sql`${approvalSteps.workflowId} IS NULL`
+            )
+          );
+        
+        if (nullWorkflowSteps.length > 0 && nullWorkflowSteps[0].totalSteps > 0) {
+          workflowStepMap.set(null, nullWorkflowSteps[0].totalSteps);
+        }
+      }
 
       // Format response
       const formattedApprovals = pendingApprovalsWithAmounts.map(approval => ({
@@ -3068,6 +3101,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         entityType: approval.entityType,
         entityId: approval.entityId,
         currentStep: approval.currentStep || 1,
+        stepOrder: approval.stepOrder,
         requestedBy: approval.requestedBy,
         createdAt: approval.approvalRequestCreatedAt,
         approvalDeadline: approval.approvalDeadline,
@@ -3085,8 +3119,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         workflow: {
           id: approval.workflowId,
           name: approval.workflowName,
-          totalSteps: workflowStepMap.get(approval.workflowId || '') || 1,
-          currentStepName: approval.stepName || `Step ${approval.currentStep}`,
+          totalSteps: workflowStepMap.get(approval.workflowId) || 1,
+          currentStepName: approval.approverRole || `Step ${approval.stepOrder || approval.currentStep}`,
         },
         
         // Requester details

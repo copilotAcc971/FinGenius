@@ -42,38 +42,7 @@ import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/currency-utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-
-interface PendingApproval {
-  id: string;
-  entityType: string;
-  entityId: string;
-  currentStep: number;
-  requestedBy: string;
-  createdAt: string;
-  approvalDeadline: string | null;
-  
-  entity: {
-    journalEntryNumber: string | null;
-    entryDate: string | null;
-    description: string | null;
-    totalAmount: string;
-    currencyCode: string | null;
-  };
-  
-  workflow: {
-    id: string | null;
-    name: string | null;
-    totalSteps: number;
-    currentStepName: string;
-  };
-  
-  requester: {
-    id: string;
-    firstName: string | null;
-    lastName: string | null;
-    email: string | null;
-  };
-}
+import type { PendingApproval } from "@/types/approvals";
 
 export default function PendingApprovals() {
   const { currentTenant } = useTenant();
@@ -94,17 +63,11 @@ export default function PendingApprovals() {
   // Approve mutation
   const approveMutation = useMutation({
     mutationFn: async ({ entityId, comments }: { entityId: string; comments?: string }) => {
-      if (!currentTenant?.id) {
-        throw new Error("No tenant selected");
-      }
-      return apiRequest(`/api/journal-entries/${entityId}/approve`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "x-tenant-id": currentTenant.id 
-        },
-        body: JSON.stringify({ comments }),
-      });
+      return apiRequest(
+        `/api/journal-entries/${entityId}/approve`,
+        "POST",
+        { comments }
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/approvals/pending", { tenantId: currentTenant?.id }] });
@@ -129,17 +92,11 @@ export default function PendingApprovals() {
   // Reject mutation
   const rejectMutation = useMutation({
     mutationFn: async ({ entityId, rejectionReason }: { entityId: string; rejectionReason: string }) => {
-      if (!currentTenant?.id) {
-        throw new Error("No tenant selected");
-      }
-      return apiRequest(`/api/journal-entries/${entityId}/reject`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "x-tenant-id": currentTenant.id 
-        },
-        body: JSON.stringify({ rejectionReason }),
-      });
+      return apiRequest(
+        `/api/journal-entries/${entityId}/reject`,
+        "POST",
+        { rejectionReason }
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/approvals/pending", { tenantId: currentTenant?.id }] });
