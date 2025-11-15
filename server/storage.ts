@@ -4232,6 +4232,55 @@ export class DatabaseStorage implements IStorage {
   // FINANCIAL REPORTS (READ-ONLY)
   // ====================================
 
+  /**
+   * FINANCIAL REPORTING - IAS 1 COMPLIANCE SUMMARY
+   * 
+   * IAS 1.38 - Comparative Information:
+   * ✓ P&L Statement: Supports comparative period with variance analysis
+   * ✓ Balance Sheet: Supports comparative date with full variance metrics
+   * ✓ Cash Flow Statement: Supports comparative period with variance analysis
+   * ○ Trial Balance: Single period report (comparative not typically required for trial balances)
+   * 
+   * All comparative reports include:
+   * - Side-by-side presentation of current and comparative periods/dates
+   * - Variance analysis (absolute amount and percentage changes)
+   * - Clear period labels and date ranges
+   * - Presentation currency identified (baseCurrency from tenant company profile)
+   * - Infinity handling for percentage changes when comparative period is zero
+   * - Favorable/unfavorable indicators for P&L variances
+   * 
+   * Minimum requirement of two complete sets of financial statements is met
+   * when comparison periods are selected by the user in the UI.
+   * 
+   * Reclassification disclosure (IAS 1.40-41): Not applicable - account structure changes
+   * would require manual adjustment of comparative period account mappings. Future enhancement
+   * opportunity to track and disclose account reclassifications between periods.
+   * 
+   * Implementation Details:
+   * - P&L: Dedicated comparison endpoint (/api/reports/profit-loss-comparison) provides
+   *   account-level and total-level variances with favorable/unfavorable indicators
+   * - Balance Sheet: Enhanced endpoint supports optional comparisonDate parameter with
+   *   category-level and total-level variance calculations
+   * - Cash Flow: Enhanced endpoint supports optional comparison period parameters with
+   *   activity-level variance calculations across operating, investing, and financing sections
+   * - Trial Balance: Standard single-period report showing debit/credit balances as of a date
+   * 
+   * Comparative Period Support Matrix:
+   * 
+   * Report              | Comparison | Variance | Period Type  | IAS 1 Requirement
+   * --------------------|------------|----------|--------------|------------------
+   * P&L Statement       | ✓ Yes      | ✓ Yes    | Date Range   | Required (IAS 1.38)
+   * Balance Sheet       | ✓ Yes      | ✓ Yes    | As of Date   | Required (IAS 1.38)
+   * Cash Flow           | ✓ Yes      | ✓ Yes    | Date Range   | Required (IAS 1.38)
+   * Trial Balance       | ✗ No       | N/A      | As of Date   | Not Required
+   * Chart of Accounts   | N/A        | N/A      | Current Only | Not Applicable
+   * 
+   * Note: Trial Balance is an internal working document used to verify accounting equation
+   * balance before preparing financial statements. IAS 1 does not require comparative
+   * information for trial balances as they are not part of the complete set of financial
+   * statements presented to users. Trial balance serves as a control/verification tool.
+   */
+
   async getProfitLossReport(tenantId: string, startDate: Date, endDate: Date): Promise<ProfitLossReport> {
     // IAS 1 (Presentation of Financial Statements) Compliance:
     // ✓ Minimum line items presented: Revenue (income accounts), Expenses (expense accounts), Profit/Loss (netProfit)
@@ -5119,24 +5168,35 @@ export class DatabaseStorage implements IStorage {
         !isNaN(comparisonStartDate.getTime()) && !isNaN(comparisonEndDate.getTime())) {
       const compPeriod = await calculateCashFlowForPeriod(comparisonStartDate, comparisonEndDate);
       
-      // Add comparison data with full activity arrays for detailed period-over-period drill-down
-      comparisonData = {
-        operating: compPeriod.operating,
-        netOperating: compPeriod.netOperating,
-        investing: compPeriod.investing,
-        netInvesting: compPeriod.netInvesting,
-        financing: compPeriod.financing,
-        netFinancing: compPeriod.netFinancing,
-        netCashFlow: compPeriod.netCashFlow,
-      };
+      // Validate comparison data is usable (has finite values)
+      const hasValidComparison = (
+        isFinite(compPeriod.netOperating) &&
+        isFinite(compPeriod.netInvesting) &&
+        isFinite(compPeriod.netFinancing) &&
+        isFinite(compPeriod.netCashFlow)
+      );
+      
+      // Only populate comparison data and variances if valid
+      if (hasValidComparison) {
+        // Add comparison data with full activity arrays for detailed period-over-period drill-down
+        comparisonData = {
+          operating: compPeriod.operating,
+          netOperating: compPeriod.netOperating,
+          investing: compPeriod.investing,
+          netInvesting: compPeriod.netInvesting,
+          financing: compPeriod.financing,
+          netFinancing: compPeriod.netFinancing,
+          netCashFlow: compPeriod.netCashFlow,
+        };
 
-      // Calculate variances (current - comparison)
-      // Positive variance = current > comparison (favorable for operating/net cash)
-      // Negative variance = current < comparison (unfavorable for operating/net cash)
-      operatingVariance = currentPeriod.netOperating - compPeriod.netOperating;
-      investingVariance = currentPeriod.netInvesting - compPeriod.netInvesting;
-      financingVariance = currentPeriod.netFinancing - compPeriod.netFinancing;
-      netVariance = currentPeriod.netCashFlow - compPeriod.netCashFlow;
+        // Calculate variances (current - comparison)
+        // Positive variance = current > comparison (favorable for operating/net cash)
+        // Negative variance = current < comparison (unfavorable for operating/net cash)
+        operatingVariance = currentPeriod.netOperating - compPeriod.netOperating;
+        investingVariance = currentPeriod.netInvesting - compPeriod.netInvesting;
+        financingVariance = currentPeriod.netFinancing - compPeriod.netFinancing;
+        netVariance = currentPeriod.netCashFlow - compPeriod.netCashFlow;
+      }
     }
 
     // IAS 7 (Statement of Cash Flows) Compliance:

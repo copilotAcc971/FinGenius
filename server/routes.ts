@@ -5864,19 +5864,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let comparisonEnd: Date | undefined;
 
         if (comparisonStartDate && comparisonEndDate) {
-          const compStartStr = comparisonStartDate as string;
-          const compEndStr = comparisonEndDate as string;
+          const compStartStr = (comparisonStartDate as string).trim();
+          const compEndStr = (comparisonEndDate as string).trim();
           
-          // Only process if non-empty strings
-          if (compStartStr.trim() !== '' && compEndStr.trim() !== '') {
-            comparisonStart = new Date(compStartStr);
-            comparisonEnd = new Date(compEndStr);
-
-            // Validate dates are valid
-            if (isNaN(comparisonStart.getTime()) || isNaN(comparisonEnd.getTime())) {
-              return res.status(400).json({ message: "Invalid comparison date format" });
+          // Only process if non-empty strings after trim
+          if (compStartStr !== '' && compEndStr !== '') {
+            const tempStartDate = new Date(compStartStr);
+            const tempEndDate = new Date(compEndStr);
+            
+            // Validate dates are valid before assigning
+            if (!isNaN(tempStartDate.getTime()) && !isNaN(tempEndDate.getTime())) {
+              comparisonStart = tempStartDate;
+              comparisonEnd = tempEndDate;
+            } else {
+              // Invalid dates - return error
+              return res.status(400).json({ message: 'Invalid comparison dates provided' });
             }
           }
+          // If empty strings, comparisonStart/comparisonEnd remain undefined
         }
 
         const report = await storage.getEnhancedCashFlowReport(tenantId, start, end, comparisonStart, comparisonEnd);
