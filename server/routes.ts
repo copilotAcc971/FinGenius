@@ -27,9 +27,10 @@ import { triggerManualFXRatesUpdate } from './jobs/fx-rates-update';
 import { getClosingRate, getAverageRate, getHistoricalRate, translateAmount } from './fx-translation';
 import { assessRateVolatility } from './fx-volatility';
 import { fetchInvoiceEntryData, createInvoiceJournalEntry, fetchBillEntryData, createBillJournalEntry, fetchCustomerPaymentEntryData, createCustomerPaymentJournalEntry, fetchVendorPaymentEntryData, createVendorPaymentJournalEntry } from './accounting/entry-creators';
-import { ValidationError as AccountingValidationError } from './accounting/errors';
+import { ValidationError as AccountingValidationError, NotFoundError, AuthorizationError } from './accounting/errors';
 import { withTransaction } from './accounting/service';
 import { getAccountBalance, updateHistoricalBalances } from './accounting/historical-balance-service';
+import { submitJournalEntryForApproval, approveJournalEntryStep, rejectJournalEntry, autoPostApprovedEntry } from './accounting/workflow-engine';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -96,6 +97,15 @@ const openai = process.env.OPENAI_API_KEY
 // Schema for send-email endpoint
 const sendEmailSchema = z.object({
   message: z.string().optional()
+});
+
+// Schema for journal entry approval workflow endpoints
+const approveJournalEntrySchema = z.object({
+  comments: z.string().optional()
+});
+
+const rejectJournalEntrySchema = z.object({
+  rejectionReason: z.string().min(1, "Rejection reason is required")
 });
 
 // Middleware to verify tenant membership
@@ -3432,6 +3442,307 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error deleting journal entry:', error);
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  /**
+   * Submit a journal entry for approval workflow
+   * 
+   * @testid button-submit-for-approval
+   * @route POST /api/journal-entries/:id/submit-for-approval
+   */
+  app.post("/api/journal-entries/:id/submit-for-approval", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+
+      // Use transaction for atomicity
+      const result = await withTransaction(async (tx) => {
+        // Submit journal entry for approval
+        const approvalRequest = await submitJournalEntryForApproval(
+          tenantId,
+          id,
+          userId,
+          tx
+        );
+
+        // Fetch updated journal entry
+        const [journalEntry] = await tx
+          .select()
+          .from(journalEntries)
+          .where(and(
+            eq(journalEntries.id, id),
+            eq(journalEntries.tenantId, tenantId)
+          ))
+          .limit(1);
+
+        if (!journalEntry) {
+          throw new NotFoundError('Journal entry not found', { journalEntryId: id });
+        }
+
+        return {
+          journalEntry: {
+            id: journalEntry.id,
+            status: journalEntry.status,
+            workflowRequestId: journalEntry.workflowRequestId,
+          },
+          approvalRequest: {
+            id: approvalRequest.id,
+            workflowId: approvalRequest.workflowId,
+            status: approvalRequest.status,
+            currentStepOrder: approvalRequest.currentStep || 1,
+            assignedApprovers: approvalRequest.assignedApprovers,
+          },
+        };
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error('Error submitting journal entry for approval:', error);
+      
+      if (error instanceof NotFoundError) {
+        return res.status(404).json({ message: error.message });
+      }
+      
+      if (error instanceof AccountingValidationError) {
+        // Check if it's a "no workflow configured" error
+        if (error.message.includes('No active approval workflows') || 
+            error.message.includes('No matching workflow')) {
+          return res.status(400).json({ message: 'No approval workflow configured' });
+        }
+        return res.status(400).json({ message: error.message });
+      }
+      
+      res.status(500).json({ message: error.message || 'Failed to submit journal entry for approval' });
+    }
+  });
+
+  /**
+   * Approve a journal entry at current workflow step
+   * 
+   * @testid button-approve-journal-entry
+   * @route POST /api/journal-entries/:id/approve
+   */
+  app.post("/api/journal-entries/:id/approve", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+
+      // Validate request body
+      const { comments } = approveJournalEntrySchema.parse(req.body);
+
+      // Use transaction for atomicity
+      const result = await withTransaction(async (tx) => {
+        // Approve journal entry at current step
+        const approvalRequest = await approveJournalEntryStep(
+          tenantId,
+          id,
+          userId,
+          comments,
+          tx
+        );
+
+        // Fetch updated journal entry
+        const [journalEntry] = await tx
+          .select()
+          .from(journalEntries)
+          .where(and(
+            eq(journalEntries.id, id),
+            eq(journalEntries.tenantId, tenantId)
+          ))
+          .limit(1);
+
+        if (!journalEntry) {
+          throw new NotFoundError('Journal entry not found', { journalEntryId: id });
+        }
+
+        // If approval request is now fully approved, check for auto-posting
+        if (approvalRequest.status === 'approved') {
+          try {
+            await autoPostApprovedEntry(tenantId, id, tx);
+            // Re-fetch journal entry after auto-posting
+            const [postedEntry] = await tx
+              .select()
+              .from(journalEntries)
+              .where(and(
+                eq(journalEntries.id, id),
+                eq(journalEntries.tenantId, tenantId)
+              ))
+              .limit(1);
+            
+            if (postedEntry) {
+              // Update historical balances if entry was posted
+              if (postedEntry.status === 'posted') {
+                await updateHistoricalBalances(tenantId, id, tx);
+              }
+            }
+          } catch (autoPostError: any) {
+            // Auto-posting not enabled or failed - this is acceptable
+            // Entry remains in 'approved' status
+            console.log('Auto-posting not enabled or failed:', autoPostError.message);
+          }
+        }
+
+        // Re-fetch journal entry to get final status
+        const [finalJournalEntry] = await tx
+          .select()
+          .from(journalEntries)
+          .where(and(
+            eq(journalEntries.id, id),
+            eq(journalEntries.tenantId, tenantId)
+          ))
+          .limit(1);
+
+        // Fetch the most recent approval history entry
+        const [latestApprovalHistory] = await tx
+          .select()
+          .from(approvalHistory)
+          .where(and(
+            eq(approvalHistory.approvalRequestId, approvalRequest.id),
+            eq(approvalHistory.approverUserId, userId)
+          ))
+          .orderBy(desc(approvalHistory.createdAt))
+          .limit(1);
+
+        return {
+          journalEntry: {
+            id: finalJournalEntry!.id,
+            status: finalJournalEntry!.status,
+            workflowRequestId: finalJournalEntry!.workflowRequestId,
+          },
+          approvalRequest: {
+            id: approvalRequest.id,
+            status: approvalRequest.status,
+            currentStepOrder: approvalRequest.currentStep || 1,
+            isComplete: approvalRequest.status === 'approved',
+            nextApprovers: approvalRequest.assignedApprovers,
+          },
+          approvalHistory: latestApprovalHistory ? {
+            id: latestApprovalHistory.id,
+            approverUserId: latestApprovalHistory.approverUserId,
+            action: latestApprovalHistory.decision,
+            comments: latestApprovalHistory.comments,
+            timestamp: latestApprovalHistory.createdAt,
+          } : undefined,
+        };
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error('Error approving journal entry:', error);
+      
+      if (error instanceof NotFoundError) {
+        return res.status(404).json({ message: error.message });
+      }
+      
+      if (error instanceof AuthorizationError) {
+        return res.status(403).json({ message: error.message });
+      }
+      
+      if (error instanceof AccountingValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
+      
+      res.status(500).json({ message: error.message || 'Failed to approve journal entry' });
+    }
+  });
+
+  /**
+   * Reject a journal entry in workflow
+   * 
+   * @testid button-reject-journal-entry
+   * @route POST /api/journal-entries/:id/reject
+   */
+  app.post("/api/journal-entries/:id/reject", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+
+      // Validate request body - rejectionReason is REQUIRED
+      const { rejectionReason } = rejectJournalEntrySchema.parse(req.body);
+
+      // Use transaction for atomicity
+      const result = await withTransaction(async (tx) => {
+        // Reject journal entry
+        const approvalRequest = await rejectJournalEntry(
+          tenantId,
+          id,
+          userId,
+          rejectionReason,
+          tx
+        );
+
+        // Fetch updated journal entry
+        const [journalEntry] = await tx
+          .select()
+          .from(journalEntries)
+          .where(and(
+            eq(journalEntries.id, id),
+            eq(journalEntries.tenantId, tenantId)
+          ))
+          .limit(1);
+
+        if (!journalEntry) {
+          throw new NotFoundError('Journal entry not found', { journalEntryId: id });
+        }
+
+        // Fetch the rejection history entry
+        const [latestApprovalHistory] = await tx
+          .select()
+          .from(approvalHistory)
+          .where(and(
+            eq(approvalHistory.approvalRequestId, approvalRequest.id),
+            eq(approvalHistory.approverUserId, userId),
+            eq(approvalHistory.decision, 'rejected')
+          ))
+          .orderBy(desc(approvalHistory.createdAt))
+          .limit(1);
+
+        return {
+          journalEntry: {
+            id: journalEntry.id,
+            status: journalEntry.status,
+            workflowRequestId: journalEntry.workflowRequestId,
+          },
+          approvalRequest: {
+            id: approvalRequest.id,
+            status: approvalRequest.status,
+          },
+          approvalHistory: latestApprovalHistory ? {
+            id: latestApprovalHistory.id,
+            approverUserId: latestApprovalHistory.approverUserId,
+            action: latestApprovalHistory.decision,
+            comments: latestApprovalHistory.comments,
+            timestamp: latestApprovalHistory.createdAt,
+          } : undefined,
+        };
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error('Error rejecting journal entry:', error);
+      
+      if (error instanceof NotFoundError) {
+        return res.status(404).json({ message: error.message });
+      }
+      
+      if (error instanceof AuthorizationError) {
+        return res.status(403).json({ message: error.message });
+      }
+      
+      if (error instanceof AccountingValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
+      
+      // Handle Zod validation errors (e.g., missing rejectionReason)
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Rejection reason is required', errors: error.errors });
+      }
+      
+      res.status(500).json({ message: error.message || 'Failed to reject journal entry' });
     }
   });
 
