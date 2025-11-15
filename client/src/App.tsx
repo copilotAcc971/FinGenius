@@ -37,6 +37,7 @@ import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
 import CompanyProfile from "@/pages/company-profile";
 import JournalEntries from "@/pages/journal-entries";
+import JournalEntryDetailPage from "@/pages/JournalEntryDetailPage";
 import Assets from "@/pages/assets";
 import PurchaseOrders from "@/pages/purchase-orders";
 import BankReconciliations from "@/pages/bank-reconciliations";
@@ -63,6 +64,7 @@ function Router() {
           <Route path="/items" component={Items} />
           <Route path="/taxes" component={Taxes} />
           <Route path="/accounts" component={Accounts} />
+          <Route path="/journal-entries/:id" component={JournalEntryDetailPage} />
           <Route path="/journal-entries" component={JournalEntries} />
           <Route path="/assets" component={Assets} />
           <Route path="/bank-reconciliations" component={BankReconciliations} />
