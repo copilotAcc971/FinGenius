@@ -44,19 +44,25 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - **IFRS Compliance:** Adherence to IAS 1 (Presentation of Financial Statements), IAS 7 (Statement of Cash Flows - Indirect Method), and IAS 21 (Foreign Currency Translation).
 - **Employee Expense Management & Reimbursement:** Expense submission with receipt upload, permission-based access (6 new RBAC permissions), approval workflow, and reimbursement processing.
 - **Bills Form Enhancement:** Displays vendor tax registration number conditionally.
-- **Open Banking Integration - Lean Technologies:**
-    - Provider-agnostic architecture with current implementation for Lean Technologies (UAE).
-    - OAuth2 authentication flow with secure token storage and refresh.
-    - Lean Provider SDK for account management, transaction retrieval, balance queries, and payment initiation.
-    - Secure webhook handler (`/webhooks/lean`) with HMAC-SHA256 verification for real-time updates.
-    - UI for bank connection management.
-    - Automated daily transaction sync system with 90-day backfill and duplicate detection.
-    - AI-Powered Bank Reconciliation using OpenAI GPT-4o-mini with confidence scoring and graceful fallback to rule-based matching.
-    - Payment Initiation API routes with database persistence and webhook-based status updates.
-    - 8 new Open Banking RBAC permissions (total 151).
-    - Database schema includes 4 tables with encryption for sensitive data, indexing, foreign keys, and multi-tenant isolation.
-    - Security Features: AES-256-GCM token encryption, HMAC webhook verification, buffer length validation, and multi-tenant data isolation.
-    - Data Integrity: Unique constraints, atomic database transactions, incremental sync, and comprehensive error handling.
+- **Open Banking Integration - Lean Technologies (Phase 3 - PRODUCTION READY ✅):**
+    - **Status:** Architect approved, production-ready deployment
+    - **Provider-Agnostic Architecture:** Abstracted provider interface supporting Lean Technologies (current), Mastercard, card issuers, marketplace connectors (future)
+    - **OAuth2 Authentication:** Complete flow with secure token storage (AES-256-GCM encryption), automatic refresh, multi-tenant isolation
+    - **Lean Provider SDK:** Full-featured 576-line implementation covering all Lean API endpoints
+    - **Webhook Handler:** Secure `/webhooks/lean` endpoint with HMAC-SHA256 verification, timing-safe comparison, buffer validation, raw body middleware isolation
+    - **UI Components:** Bank connection dialog, account management page, transaction display, reconciliation interface
+    - **Transaction Sync:** Automated daily sync (2 AM UTC cron), 90-day backfill, pagination (500/request), incremental via lastSyncedAt, duplicate detection
+    - **AI Reconciliation:** OpenAI GPT-4o-mini with confidence scoring (0-100), graceful fallback to rule-based matching, atomic transaction handling
+    - **Payment Initiation:** Full API routes with database persistence, webhook status updates, payment lifecycle tracking
+    - **RBAC:** 8 new permissions (connect, disconnect, view_connections, view_transactions, sync_transactions, reconcile, initiate_payment, view_payments). **Total: 157 permissions**
+    - **Database:** 4 tables (open_banking_connections, bank_accounts, bank_transactions, open_banking_payments) with encryption, 11 foreign keys, unique constraints, multi-tenant isolation
+    - **Security:** AES-256-GCM token encryption with key rotation, HMAC webhook verification, buffer DoS prevention, 1MB payload limit, sandbox/production mode handling
+    - **Data Integrity:** 3-column unique constraint prevents duplicates, atomic db.transaction() operations, incremental sync, comprehensive error handling
+    - **Critical Bug Fixes (Nov 16, 2024):**
+      - ✅ RBAC Route Ordering: Fixed `/api/rbac/roles/me` returning 404 by moving /me routes before /:id routes
+      - ✅ Duplicate Email Handling: Enhanced upsertUser() to gracefully handle existing users, preventing server crashes on re-login
+    - **Documentation:** Complete setup guide in `LEAN_INTEGRATION_GUIDE.md` with deployment checklist, troubleshooting, monitoring
+    - **Configuration:** Requires LEAN_APP_TOKEN, LEAN_CLIENT_ID, LEAN_CLIENT_SECRET (sandbox: LEAN_SANDBOX_MODE='true', production: LEAN_WEBHOOK_SECRET required)
 
 ## External Dependencies
 - **OpenAI GPT-5:** For AI-powered document data extraction and categorization.
