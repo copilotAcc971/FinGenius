@@ -2934,6 +2934,48 @@ export type InsertBankAccount = z.infer<typeof insertBankAccountSchema>;
 export type BankAccount = typeof bankAccounts.$inferSelect;
 
 // ============================================================================
+// OPEN BANKING PAYMENTS
+// ============================================================================
+
+export const openBankingPayments = pgTable('open_banking_payments', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id),
+  connectionId: varchar('connection_id').notNull().references(() => openBankingConnections.id),
+  provider: varchar('provider', { length: 50 }).notNull(), // 'lean', etc
+  providerPaymentId: varchar('provider_payment_id').notNull(), // Lean payment ID
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  currency: varchar('currency', { length: 3 }).notNull().default('AED'),
+  recipientAccountId: varchar('recipient_account_id').notNull(),
+  reference: text('reference'),
+  status: varchar('status', { length: 50 }).notNull(), // 'pending', 'completed', 'failed', etc
+  invoiceId: varchar('invoice_id').references(() => invoices.id),
+  billId: varchar('bill_id').references(() => bills.id),
+  initiatedAt: timestamp('initiated_at').notNull().defaultNow(),
+  completedAt: timestamp('completed_at'),
+  failedAt: timestamp('failed_at'),
+  errorMessage: text('error_message'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  tenantIdx: index('open_banking_payments_tenant_idx').on(table.tenantId),
+  connectionIdx: index('open_banking_payments_connection_idx').on(table.connectionId),
+  statusIdx: index('open_banking_payments_status_idx').on(table.status),
+  uniqueProviderPayment: unique('unique_provider_payment').on(table.tenantId, table.provider, table.providerPaymentId),
+}));
+
+export const insertOpenBankingPaymentSchema = createInsertSchema(openBankingPayments, {
+  amount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type OpenBankingPayment = typeof openBankingPayments.$inferSelect;
+export type InsertOpenBankingPayment = z.infer<typeof insertOpenBankingPaymentSchema>;
+
+// ============================================================================
 // BANK TRANSACTIONS
 // ============================================================================
 
@@ -2994,6 +3036,7 @@ export const bankTransactions = pgTable("bank_transactions", {
   matchedInvoiceId: varchar("matched_invoice_id").references(() => invoices.id),
   matchedBillId: varchar("matched_bill_id").references(() => bills.id),
   matchedPaymentId: varchar("matched_payment_id"), // Link to customer_payments or payment_intents
+  matchedJournalEntryId: varchar("matched_journal_entry_id").references(() => journalEntries.id), // Link to journal entry for reconciliation
   
   // AI confidence and matching
   matchConfidence: decimal("match_confidence", { precision: 5, scale: 2 }), // 0.00 to 100.00

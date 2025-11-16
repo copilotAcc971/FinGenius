@@ -6,19 +6,15 @@ import { initializeScheduledReports } from "./cron";
 import { initializeTransactionSync } from "./jobs/transaction-sync";
 import { seedPermissions } from './scripts/seed-rbac';
 import { initializeRBACForAllTenants } from './scripts/update-owner-permissions';
+import { webhookRouter } from './routes-webhook';
 
 const app = express();
 
-declare module 'http' {
-  interface IncomingMessage {
-    rawBody: unknown
-  }
-}
-app.use(express.json({
-  verify: (req, _res, buf) => {
-    req.rawBody = buf;
-  }
-}));
+// CRITICAL: Mount webhook router BEFORE express.json() to preserve raw body for HMAC
+app.use('/api/open-banking/webhooks', webhookRouter);
+
+// Parse JSON for all other routes
+app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 app.use((req, res, next) => {

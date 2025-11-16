@@ -12,6 +12,7 @@ import googleDriveRoutes from "./google-drive-routes";
 import { OpenBankingService, EncryptedPayloadValidationError, TokenRefreshError, nonceStore } from './open-banking';
 import { openBankingProviderFactory } from './open-banking/providers';
 import { TransactionSyncService } from './open-banking/transaction-sync-service';
+import { ReconciliationService } from './open-banking/reconciliation-service';
 import { db } from './db';
 import { eq, and, desc, asc, sql, inArray, isNull, lt, gte, lte, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -74,7 +75,9 @@ import {
   insertCustomReportConfigSchema,
   insertScheduledReportSchema,
   openBankingConnections,
+  openBankingPayments,
   bankAccounts,
+  bankTransactions,
   customers,
   vendors,
   currencies,
@@ -7194,58 +7197,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // POST /api/open-banking/webhooks/lean
-  // Handle Lean webhook events (unauthenticated - external callbacks)
-  app.post('/api/open-banking/webhooks/lean', async (req, res) => {
-    try {
-      const signature = req.headers['lean-signature'] as string;
-      const payload = req.body;
-      
-      // TODO: Verify webhook signature using LEAN_WEBHOOK_SECRET when available
-      // For now, just log and accept in sandbox mode
-      
-      console.log('[Lean Webhook] Received event:', {
-        type: payload.event_type,
-        entityId: payload.entity_id,
-        timestamp: payload.timestamp,
-      });
-
-      // Handle different event types
-      switch (payload.event_type) {
-        case 'ACCOUNT_CONNECTED':
-          // Account successfully connected
-          console.log('[Lean Webhook] Account connected:', payload);
-          break;
-        
-        case 'ACCOUNT_DISCONNECTED':
-          // Account disconnected
-          console.log('[Lean Webhook] Account disconnected:', payload);
-          // Update connection status in database
-          break;
-        
-        case 'TRANSACTION_UPDATE':
-          // New transactions available
-          console.log('[Lean Webhook] Transaction update:', payload);
-          // Trigger transaction sync
-          break;
-        
-        case 'PAYMENT_STATUS_CHANGED':
-          // Payment status updated
-          console.log('[Lean Webhook] Payment status changed:', payload);
-          break;
-        
-        default:
-          console.log('[Lean Webhook] Unknown event type:', payload.event_type);
-      }
-
-      // Always respond 200 to acknowledge receipt
-      res.status(200).json({ received: true });
-    } catch (error) {
-      console.error('[Lean Webhook] Error processing webhook:', error);
-      res.status(500).json({ error: 'Webhook processing failed' });
-    }
-  });
-
   // POST /api/open-banking/payments/initiate
   // Initiate an A2A payment via Lean
   app.post('/api/open-banking/payments/initiate', isAuthenticated, verifyTenantAccess, requirePermission('open_banking.initiate_payment'), async (req: any, res) => {
@@ -7292,9 +7243,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         metadata: { invoiceId, billId },
       });
 
-      // TODO: Store payment record in database for tracking
+      // Store payment in database
+      const [payment] = await db.insert(openBankingPayments).values({
+        tenantId,
+        connectionId,
+        provider: connection.provider,
+        providerPaymentId: paymentResult.paymentId,
+        amount: amount.toString(),
+        currency: currency || 'AED',
+        recipientAccountId,
+        reference: reference || `Payment from Copilot Accountant`,
+        status: paymentResult.status,
+        invoiceId,
+        billId,
+        metadata: { ...paymentResult },
+      }).returning();
 
-      res.json(paymentResult);
+      res.json({ ...paymentResult, localPaymentId: payment.id });
     } catch (error: any) {
       console.error('[Open Banking] Payment initiation error:', error);
       res.status(500).json({ 
@@ -7350,6 +7315,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+
+  // ===== BANK RECONCILIATION ROUTES =====
+
+  // GET /api/open-banking/bank-transactions/:id/match-suggestions
+  // Get AI-powered match suggestions for a bank transaction
+  app.get('/api/open-banking/bank-transactions/:id/match-suggestions', 
+    isAuthenticated, 
+    verifyTenantAccess, 
+    requirePermission('open_banking.reconcile'),
+    async (req: any, res) => {
+      try {
+        const { id } = req.params;
+        const tenantId = req.tenantId!;
+
+        const reconciliationService = new ReconciliationService(tenantId);
+        const suggestions = await reconciliationService.getSuggestedMatches(id);
+
+        res.json({ suggestions });
+      } catch (error: any) {
+        console.error('[Reconciliation] Error getting match suggestions:', error);
+        res.status(500).json({ 
+          message: 'Failed to get match suggestions',
+          error: error.message 
+        });
+      }
+    }
+  );
+
+  // POST /api/open-banking/bank-transactions/:id/match
+  // Manually match a transaction with a journal entry
+  app.post('/api/open-banking/bank-transactions/:id/match',
+    isAuthenticated,
+    verifyTenantAccess,
+    requirePermission('open_banking.reconcile'),
+    async (req: any, res) => {
+      try {
+        const { id } = req.params;
+        const { journalEntryId } = req.body;
+        const tenantId = req.tenantId!;
+
+        if (!journalEntryId) {
+          return res.status(400).json({ message: 'journalEntryId required' });
+        }
+
+        const reconciliationService = new ReconciliationService(tenantId);
+        await reconciliationService.matchTransaction(id, journalEntryId);
+
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('[Reconciliation] Error matching transaction:', error);
+        res.status(500).json({ 
+          message: 'Failed to match transaction',
+          error: error.message 
+        });
+      }
+    }
+  );
+
+  // DELETE /api/open-banking/bank-transactions/:id/match
+  // Unmatch a transaction
+  app.delete('/api/open-banking/bank-transactions/:id/match',
+    isAuthenticated,
+    verifyTenantAccess,
+    requirePermission('open_banking.reconcile'),
+    async (req: any, res) => {
+      try {
+        const { id } = req.params;
+        const tenantId = req.tenantId!;
+
+        const reconciliationService = new ReconciliationService(tenantId);
+        await reconciliationService.unmatchTransaction(id);
+
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('[Reconciliation] Error unmatching transaction:', error);
+        res.status(500).json({ 
+          message: 'Failed to unmatch transaction',
+          error: error.message 
+        });
+      }
+    }
+  );
+
+  // GET /api/open-banking/bank-accounts/:accountId/reconciliation-summary
+  // Get reconciliation summary for an account
+  app.get('/api/open-banking/bank-accounts/:accountId/reconciliation-summary',
+    isAuthenticated,
+    verifyTenantAccess,
+    requirePermission('open_banking.view_transactions'),
+    async (req: any, res) => {
+      try {
+        const { accountId } = req.params;
+        const tenantId = req.tenantId!;
+
+        const reconciliationService = new ReconciliationService(tenantId);
+        const summary = await reconciliationService.getReconciliationSummary(accountId);
+
+        res.json(summary);
+      } catch (error: any) {
+        console.error('[Reconciliation] Error getting summary:', error);
+        res.status(500).json({ 
+          message: 'Failed to get reconciliation summary',
+          error: error.message 
+        });
+      }
+    }
+  );
 
   // ===== EXCHANGE RATE ROUTES =====
 
