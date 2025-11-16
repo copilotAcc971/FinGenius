@@ -30,7 +30,20 @@ import {
 import { triggerManualFXRatesUpdate } from './jobs/fx-rates-update';
 import { getClosingRate, getAverageRate, getHistoricalRate, translateAmount } from './fx-translation';
 import { assessRateVolatility } from './fx-volatility';
-import { fetchInvoiceEntryData, createInvoiceJournalEntry, fetchBillEntryData, createBillJournalEntry, fetchCustomerPaymentEntryData, createCustomerPaymentJournalEntry, fetchVendorPaymentEntryData, createVendorPaymentJournalEntry } from './accounting/entry-creators';
+import { 
+  fetchInvoiceEntryData, 
+  createInvoiceJournalEntry, 
+  fetchBillEntryData, 
+  createBillJournalEntry, 
+  fetchCustomerPaymentEntryData, 
+  createCustomerPaymentJournalEntry, 
+  fetchVendorPaymentEntryData, 
+  createVendorPaymentJournalEntry,
+  createStockAdjustmentJournalEntry,
+  createOpeningStockJournalEntry,
+  createExpenseApprovalJournalEntry,
+  createExpenseReimbursementJournalEntry
+} from './accounting/entry-creators';
 import { ValidationError as AccountingValidationError, NotFoundError, AuthorizationError } from './accounting/errors';
 import { withTransaction } from './accounting/service';
 import { getAccountBalance, updateHistoricalBalances } from './accounting/historical-balance-service';
@@ -1049,13 +1062,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('items.create'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
       
       // Parse req.body - insertItemSchema.omit strips tenantId
       const parsed = insertItemSchema.parse(req.body);
       
-      // Add verified tenantId back AFTER parsing
-      const item = await storage.createItem({ ...parsed, tenantId });
-      res.status(201).json(item);
+      // Check if opening stock > 0 to create journal entry
+      const hasOpeningStock = parsed.openingStock && parseFloat(parsed.openingStock) > 0;
+      
+      if (hasOpeningStock) {
+        // Create item and journal entry atomically
+        const result = await withTransaction(async (tx) => {
+          // 1. Create item
+          const item = await storage.createItem({ ...parsed, tenantId }, tx);
+          
+          // 2. Create opening stock journal entry
+          const totalValue = (parseFloat(parsed.openingStock!) * parseFloat(parsed.openingStockRate || '0')).toFixed(2);
+          const entryInput = {
+            itemId: item.id,
+            itemName: item.name,
+            openingQuantity: parsed.openingStock!,
+            openingRate: parsed.openingStockRate || '0.00',
+            totalValue,
+          };
+          
+          // 3. Create journal entry structure
+          const journalEntryData = await createOpeningStockJournalEntry(
+            entryInput,
+            tenantId,
+            userId,
+            storage,
+            tx
+          );
+          
+          // 4. Persist journal entry to database
+          const journalEntryNumber = await storage.getNextJournalEntryNumber(tenantId, tx);
+          const journalEntry = await storage.createJournalEntry(tenantId, {
+            ...journalEntryData,
+            entryNumber: journalEntryNumber,
+            status: 'posted', // Auto-post opening stock entry
+          }, tx);
+          
+          // 5. Update historical balances
+          await updateHistoricalBalances(
+            tenantId,
+            journalEntry.id,
+            journalEntryData.lines,
+            journalEntryData.entryDate,
+            tx
+          );
+          
+          return item;
+        });
+        
+        res.status(201).json(result);
+      } else {
+        // No opening stock, create item without journal entry
+        const item = await storage.createItem({ ...parsed, tenantId });
+        res.status(201).json(item);
+      }
     } catch (error: any) {
       console.error("Error creating item:", error);
       res.status(400).json({ message: error.message || "Failed to create item" });
@@ -5158,10 +5223,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tenantId = req.tenantId!;
       const userId = req.user.claims.sub;
       
-      const expense = await storage.approveExpense(id, tenantId, userId);
+      // Create expense approval and journal entry atomically
+      const result = await withTransaction(async (tx) => {
+        // 1. Approve expense
+        const expense = await storage.approveExpense(id, tenantId, userId, tx);
+        
+        // 2. Build journal entry input
+        const entryInput = {
+          id: expense.id,
+          expenseNumber: expense.expenseNumber,
+          expenseDate: expense.expenseDate,
+          employeeName: expense.employeeName || 'Employee',
+          totalAmount: expense.amount,
+          categoryAccountId: expense.categoryAccountId, // Must be set for expense approval
+        };
+        
+        // 3. Create journal entry structure
+        const journalEntryData = await createExpenseApprovalJournalEntry(
+          entryInput,
+          tenantId,
+          userId,
+          storage,
+          tx
+        );
+        
+        // 4. Persist journal entry to database
+        const journalEntryNumber = await storage.getNextJournalEntryNumber(tenantId, tx);
+        const journalEntry = await storage.createJournalEntry(tenantId, {
+          ...journalEntryData,
+          entryNumber: journalEntryNumber,
+          status: 'posted', // Auto-post on approval
+        }, tx);
+        
+        // 5. Update historical balances
+        await updateHistoricalBalances(
+          tenantId,
+          journalEntry.id,
+          journalEntryData.lines,
+          journalEntryData.entryDate,
+          tx
+        );
+        
+        return expense;
+      });
       
       // Serialize dates
-      res.json(serializeExpense(expense));
+      res.json(serializeExpense(result));
     } catch (error: any) {
       console.error("Error approving expense:", error);
       res.status(400).json({ message: error.message || "Failed to approve expense" });
@@ -5198,17 +5305,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate payment details with Zod
       const validatedData = reimburseExpenseSchema.parse(req.body);
       
-      const expense = await storage.reimburseExpense(
-        id,
-        tenantId,
-        userId,
-        {
+      // Create reimbursement and journal entry atomically
+      const result = await withTransaction(async (tx) => {
+        // 1. Process reimbursement
+        const expense = await storage.reimburseExpense(
+          id,
+          tenantId,
+          userId,
+          {
+            paymentMethod: validatedData.paymentMethod,
+            paymentReference: validatedData.paymentReference,
+          },
+          tx
+        );
+        
+        // 2. Build journal entry input
+        const entryInput = {
+          expenseId: expense.id,
+          expenseNumber: expense.expenseNumber,
+          reimbursementDate: expense.reimbursedAt || new Date(),
+          amount: expense.amount,
           paymentMethod: validatedData.paymentMethod,
-          paymentReference: validatedData.paymentReference,
-        }
-      );
+        };
+        
+        // 3. Create journal entry structure
+        const journalEntryData = await createExpenseReimbursementJournalEntry(
+          entryInput,
+          tenantId,
+          userId,
+          storage,
+          tx
+        );
+        
+        // 4. Persist journal entry to database
+        const journalEntryNumber = await storage.getNextJournalEntryNumber(tenantId, tx);
+        const journalEntry = await storage.createJournalEntry(tenantId, {
+          ...journalEntryData,
+          entryNumber: journalEntryNumber,
+          status: 'posted', // Auto-post on reimbursement
+        }, tx);
+        
+        // 5. Update historical balances
+        await updateHistoricalBalances(
+          tenantId,
+          journalEntry.id,
+          journalEntryData.lines,
+          journalEntryData.entryDate,
+          tx
+        );
+        
+        return expense;
+      });
       
-      res.json(serializeExpense(expense));
+      res.json(serializeExpense(result));
     } catch (error: any) {
       console.error("Error reimbursing expense:", error);
       if (error instanceof z.ZodError) {
@@ -8037,11 +8186,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const { status } = req.body;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      
       if (!status) {
         return res.status(400).json({ error: "status is required" });
       }
-      const adjustment = await storage.updateStockAdjustmentStatus(req.tenantId, id, status);
-      res.json(adjustment);
+      
+      // If approving, create journal entry atomically
+      if (status === 'approved') {
+        const result = await withTransaction(async (tx) => {
+          // 1. Update stock adjustment status
+          const adjustment = await storage.updateStockAdjustmentStatus(tenantId, id, status, tx);
+          
+          // 2. Fetch line items to build journal entry
+          const lineItems = await storage.getStockAdjustmentLineItems(tenantId, id, tx);
+          
+          // Build entry input
+          const entryInput = {
+            id: adjustment.id,
+            adjustmentNumber: adjustment.adjustmentNumber,
+            adjustmentDate: adjustment.adjustmentDate,
+            reason: adjustment.reason || 'Stock adjustment',
+            lineItems: lineItems.map(item => ({
+              itemId: item.itemId,
+              quantityAdjusted: item.quantityAdjusted,
+              unitCost: item.unitCost,
+              totalCost: (parseFloat(item.quantityAdjusted) * parseFloat(item.unitCost)).toFixed(2),
+            })),
+          };
+          
+          // 3. Create journal entry structure
+          const journalEntryData = await createStockAdjustmentJournalEntry(
+            entryInput,
+            tenantId,
+            userId,
+            storage,
+            tx
+          );
+          
+          // 4. Persist journal entry to database
+          const journalEntryNumber = await storage.getNextJournalEntryNumber(tenantId, tx);
+          const journalEntry = await storage.createJournalEntry(tenantId, {
+            ...journalEntryData,
+            entryNumber: journalEntryNumber,
+            status: 'posted', // Auto-post on approval
+          }, tx);
+          
+          // 5. Update historical balances
+          await updateHistoricalBalances(
+            tenantId,
+            journalEntry.id,
+            journalEntryData.lines,
+            journalEntryData.entryDate,
+            tx
+          );
+          
+          return adjustment;
+        });
+        
+        res.json(result);
+      } else {
+        // For other status updates, just update without journal entry
+        const adjustment = await storage.updateStockAdjustmentStatus(tenantId, id, status);
+        res.json(adjustment);
+      }
     } catch (error: any) {
       console.error("[API] Error updating stock adjustment status:", error);
       res.status(400).json({ error: error.message || "Failed to update stock adjustment status" });

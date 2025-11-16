@@ -2464,7 +2464,7 @@ export const journalEntries = pgTable("journal_entries", {
   index("journal_entries_workflow_request_idx").on(table.workflowRequestId),
   sql`CREATE UNIQUE INDEX IF NOT EXISTS journal_entries_prevent_duplicate_posts ON journal_entries (tenant_id, source_document_type, source_document_id) WHERE status = 'posted' AND is_auto_generated = true`,
   sql`CONSTRAINT check_journal_entry_status CHECK (status IN ('draft', 'pending_approval', 'approved', 'posted', 'rejected'))`,
-  sql`CONSTRAINT check_source_document_type CHECK (source_document_type IS NULL OR source_document_type IN ('invoice', 'bill', 'payment', 'customer_payment', 'credit_note', 'debit_note', 'expense', 'fixed_asset', 'inventory_adjustment', 'depreciation', 'payment_batch', 'approval'))`,
+  sql`CONSTRAINT check_source_document_type CHECK (source_document_type IS NULL OR source_document_type IN ('invoice', 'bill', 'payment', 'customer_payment', 'credit_note', 'debit_note', 'expense', 'fixed_asset', 'inventory_adjustment', 'depreciation', 'payment_batch', 'approval', 'stock_adjustment', 'opening_stock', 'expense_approval', 'expense_reimbursement'))`,
 ]);
 
 export const insertJournalEntrySchema = createInsertSchema(journalEntries, {
