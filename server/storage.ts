@@ -445,18 +445,51 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    const [user] = await db
-      .insert(users)
-      .values(userData)
-      .onConflictDoUpdate({
-        target: users.id,
-        set: {
-          ...userData,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
-    return user;
+    // Handle conflicts on ID (primary key) - this covers the standard case
+    // Note: We cannot handle email conflicts via onConflict because Drizzle only supports single targets
+    // Instead, we'll update by ID when it matches, otherwise insert
+    try {
+      const [user] = await db
+        .insert(users)
+        .values(userData)
+        .onConflictDoUpdate({
+          target: users.id,
+          set: {
+            email: userData.email,
+            firstName: userData.firstName,
+            lastName: userData.lastName,
+            profileImageUrl: userData.profileImageUrl,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+      return user;
+    } catch (error: any) {
+      // If we get a unique constraint violation on email, look up the existing user and update
+      if (error.code === '23505' && error.constraint === 'users_email_unique') {
+        const [existingUser] = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, userData.email!));
+        
+        if (existingUser) {
+          // Update the existing user with new data
+          const [updatedUser] = await db
+            .update(users)
+            .set({
+              firstName: userData.firstName,
+              lastName: userData.lastName,
+              profileImageUrl: userData.profileImageUrl,
+              updatedAt: new Date(),
+            })
+            .where(eq(users.id, existingUser.id))
+            .returning();
+          return updatedUser;
+        }
+      }
+      // Re-throw if it's a different error
+      throw error;
+    }
   }
 
   // Tenant operations

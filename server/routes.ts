@@ -317,6 +317,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // IMPORTANT: /me route must come BEFORE /:id route to avoid matching "me" as an ID
+  // Get current user's roles
+  app.get('/api/rbac/roles/me', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      res.json({ roles: req.roles || [] });
+    } catch (error) {
+      console.error("Error fetching user roles:", error);
+      res.status(500).json({ message: "Failed to fetch user roles" });
+    }
+  });
+
   // Get role with permissions
   app.get('/api/rbac/roles/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
     try {
@@ -444,16 +455,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user permissions:", error);
       res.status(500).json({ message: "Failed to fetch user permissions" });
-    }
-  });
-
-  // Get current user's roles
-  app.get('/api/rbac/roles/me', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
-    try {
-      res.json({ roles: req.roles || [] });
-    } catch (error) {
-      console.error("Error fetching user roles:", error);
-      res.status(500).json({ message: "Failed to fetch user roles" });
     }
   });
 
