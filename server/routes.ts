@@ -74,6 +74,20 @@ import {
   bankReconciliationPayloadSchema,
   insertCustomReportConfigSchema,
   insertScheduledReportSchema,
+  insertWarehouseSchema,
+  insertWarehouseStockSchema,
+  insertTransferOrderSchema,
+  insertTransferOrderLineItemSchema,
+  insertSerialNumberSchema,
+  insertBatchNumberSchema,
+  insertStockAdjustmentSchema,
+  insertStockAdjustmentLineItemSchema,
+  insertStockCountSchema,
+  insertStockCountLineItemSchema,
+  insertCompositeItemComponentSchema,
+  insertUOMConversionSchema,
+  insertInventoryCostLayerSchema,
+  insertInventoryTransactionSchema,
   openBankingConnections,
   openBankingPayments,
   bankAccounts,
@@ -7593,6 +7607,741 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Failed to trigger global exchange rate fetch",
         error: error.message 
       });
+    }
+  });
+
+  // ===== INVENTORY ROUTES =====
+
+  // Warehouses routes
+  app.get("/api/warehouses", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const warehouses = await storage.getWarehouses(req.tenantId);
+      res.json(warehouses);
+    } catch (error) {
+      console.error("[API] Error fetching warehouses:", error);
+      res.status(500).json({ error: "Failed to fetch warehouses" });
+    }
+  });
+
+  app.get("/api/warehouses/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const warehouse = await storage.getWarehouse(req.tenantId, id);
+      if (!warehouse) {
+        return res.status(404).json({ error: "Warehouse not found" });
+      }
+      res.json(warehouse);
+    } catch (error) {
+      console.error("[API] Error fetching warehouse:", error);
+      res.status(500).json({ error: "Failed to fetch warehouse" });
+    }
+  });
+
+  app.post("/api/warehouses", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_warehouses"), async (req: any, res) => {
+    try {
+      const parsed = insertWarehouseSchema.omit({ tenantId: true }).parse(req.body);
+      const warehouse = await storage.createWarehouse({ ...parsed, tenantId: req.tenantId });
+      res.status(201).json(warehouse);
+    } catch (error: any) {
+      console.error("[API] Error creating warehouse:", error);
+      res.status(400).json({ error: error.message || "Failed to create warehouse" });
+    }
+  });
+
+  app.put("/api/warehouses/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_warehouses"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertWarehouseSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const warehouse = await storage.updateWarehouse(req.tenantId, id, parsed);
+      res.json(warehouse);
+    } catch (error: any) {
+      console.error("[API] Error updating warehouse:", error);
+      res.status(400).json({ error: error.message || "Failed to update warehouse" });
+    }
+  });
+
+  app.delete("/api/warehouses/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_warehouses"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteWarehouse(req.tenantId, id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[API] Error deleting warehouse:", error);
+      res.status(400).json({ error: error.message || "Failed to delete warehouse" });
+    }
+  });
+
+  app.post("/api/warehouses/:id/set-default", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_warehouses"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const warehouse = await storage.setDefaultWarehouse(req.tenantId, id);
+      res.json(warehouse);
+    } catch (error: any) {
+      console.error("[API] Error setting default warehouse:", error);
+      res.status(400).json({ error: error.message || "Failed to set default warehouse" });
+    }
+  });
+
+  // Warehouse Stock routes
+  app.get("/api/warehouse-stock", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { warehouseId, itemId } = req.query;
+      const filters: any = {};
+      if (warehouseId) filters.warehouseId = warehouseId as string;
+      if (itemId) filters.itemId = itemId as string;
+      
+      const stock = await storage.getWarehouseStock(req.tenantId, filters);
+      res.json(stock);
+    } catch (error) {
+      console.error("[API] Error fetching warehouse stock:", error);
+      res.status(500).json({ error: "Failed to fetch warehouse stock" });
+    }
+  });
+
+  app.get("/api/warehouse-stock/item/:itemId", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { itemId } = req.params;
+      const stock = await storage.getWarehouseStockByItem(req.tenantId, itemId);
+      res.json(stock);
+    } catch (error) {
+      console.error("[API] Error fetching item stock:", error);
+      res.status(500).json({ error: "Failed to fetch item stock" });
+    }
+  });
+
+  app.get("/api/warehouse-stock/warehouse/:warehouseId", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { warehouseId } = req.params;
+      const stock = await storage.getWarehouseStockByWarehouse(req.tenantId, warehouseId);
+      res.json(stock);
+    } catch (error) {
+      console.error("[API] Error fetching warehouse stock:", error);
+      res.status(500).json({ error: "Failed to fetch warehouse stock" });
+    }
+  });
+
+  app.post("/api/warehouse-stock", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const parsed = insertWarehouseStockSchema.omit({ tenantId: true }).parse(req.body);
+      const stock = await storage.upsertWarehouseStock({ ...parsed, tenantId: req.tenantId });
+      res.status(201).json(stock);
+    } catch (error: any) {
+      console.error("[API] Error upserting warehouse stock:", error);
+      res.status(400).json({ error: error.message || "Failed to upsert warehouse stock" });
+    }
+  });
+
+  app.post("/api/warehouse-stock/adjust", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const { warehouseId, itemId, quantityChange } = req.body;
+      if (!warehouseId || !itemId || quantityChange === undefined) {
+        return res.status(400).json({ error: "warehouseId, itemId, and quantityChange are required" });
+      }
+      const stock = await storage.adjustWarehouseStock(req.tenantId, warehouseId, itemId, parseFloat(quantityChange));
+      res.json(stock);
+    } catch (error: any) {
+      console.error("[API] Error adjusting warehouse stock:", error);
+      res.status(400).json({ error: error.message || "Failed to adjust warehouse stock" });
+    }
+  });
+
+  // Transfer Orders routes
+  app.get("/api/transfer-orders", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { status, fromWarehouseId, toWarehouseId } = req.query;
+      const filters: any = {};
+      if (status) filters.status = status as string;
+      if (fromWarehouseId) filters.fromWarehouseId = fromWarehouseId as string;
+      if (toWarehouseId) filters.toWarehouseId = toWarehouseId as string;
+      
+      const orders = await storage.getTransferOrders(req.tenantId, filters);
+      res.json(orders);
+    } catch (error) {
+      console.error("[API] Error fetching transfer orders:", error);
+      res.status(500).json({ error: "Failed to fetch transfer orders" });
+    }
+  });
+
+  app.get("/api/transfer-orders/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const order = await storage.getTransferOrder(req.tenantId, id);
+      if (!order) {
+        return res.status(404).json({ error: "Transfer order not found" });
+      }
+      res.json(order);
+    } catch (error) {
+      console.error("[API] Error fetching transfer order:", error);
+      res.status(500).json({ error: "Failed to fetch transfer order" });
+    }
+  });
+
+  app.get("/api/transfer-orders/:id/line-items", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const lineItems = await storage.getTransferOrderLineItems(req.tenantId, id);
+      res.json(lineItems);
+    } catch (error) {
+      console.error("[API] Error fetching transfer order line items:", error);
+      res.status(500).json({ error: "Failed to fetch transfer order line items" });
+    }
+  });
+
+  app.post("/api/transfer-orders", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.create_transfer_orders"), async (req: any, res) => {
+    try {
+      const { lineItems, ...orderData } = req.body;
+      const parsed = insertTransferOrderSchema.omit({ tenantId: true }).parse(orderData);
+      const parsedLineItems = lineItems.map((item: any) => insertTransferOrderLineItemSchema.omit({ tenantId: true }).parse(item));
+      const order = await storage.createTransferOrder({ ...parsed, tenantId: req.tenantId }, parsedLineItems);
+      res.status(201).json(order);
+    } catch (error: any) {
+      console.error("[API] Error creating transfer order:", error);
+      res.status(400).json({ error: error.message || "Failed to create transfer order" });
+    }
+  });
+
+  app.put("/api/transfer-orders/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.create_transfer_orders"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertTransferOrderSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const order = await storage.updateTransferOrder(req.tenantId, id, parsed);
+      res.json(order);
+    } catch (error: any) {
+      console.error("[API] Error updating transfer order:", error);
+      res.status(400).json({ error: error.message || "Failed to update transfer order" });
+    }
+  });
+
+  app.put("/api/transfer-orders/:id/status", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.approve_transfers"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      if (!status) {
+        return res.status(400).json({ error: "status is required" });
+      }
+      const order = await storage.updateTransferOrderStatus(req.tenantId, id, status);
+      res.json(order);
+    } catch (error: any) {
+      console.error("[API] Error updating transfer order status:", error);
+      res.status(400).json({ error: error.message || "Failed to update transfer order status" });
+    }
+  });
+
+  app.delete("/api/transfer-orders/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.create_transfer_orders"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteTransferOrder(req.tenantId, id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[API] Error deleting transfer order:", error);
+      res.status(400).json({ error: error.message || "Failed to delete transfer order" });
+    }
+  });
+
+  // Serial Numbers routes
+  app.get("/api/serial-numbers", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { itemId, warehouseId, status } = req.query;
+      const filters: any = {};
+      if (itemId) filters.itemId = itemId as string;
+      if (warehouseId) filters.warehouseId = warehouseId as string;
+      if (status) filters.status = status as string;
+      
+      const serialNumbers = await storage.getSerialNumbers(req.tenantId, filters);
+      res.json(serialNumbers);
+    } catch (error) {
+      console.error("[API] Error fetching serial numbers:", error);
+      res.status(500).json({ error: "Failed to fetch serial numbers" });
+    }
+  });
+
+  app.get("/api/serial-numbers/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const serialNumber = await storage.getSerialNumber(req.tenantId, id);
+      if (!serialNumber) {
+        return res.status(404).json({ error: "Serial number not found" });
+      }
+      res.json(serialNumber);
+    } catch (error) {
+      console.error("[API] Error fetching serial number:", error);
+      res.status(500).json({ error: "Failed to fetch serial number" });
+    }
+  });
+
+  app.post("/api/serial-numbers", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_serial_numbers"), async (req: any, res) => {
+    try {
+      const parsed = insertSerialNumberSchema.omit({ tenantId: true }).parse(req.body);
+      const serialNumber = await storage.createSerialNumber({ ...parsed, tenantId: req.tenantId });
+      res.status(201).json(serialNumber);
+    } catch (error: any) {
+      console.error("[API] Error creating serial number:", error);
+      res.status(400).json({ error: error.message || "Failed to create serial number" });
+    }
+  });
+
+  app.put("/api/serial-numbers/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_serial_numbers"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertSerialNumberSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const serialNumber = await storage.updateSerialNumber(req.tenantId, id, parsed);
+      res.json(serialNumber);
+    } catch (error: any) {
+      console.error("[API] Error updating serial number:", error);
+      res.status(400).json({ error: error.message || "Failed to update serial number" });
+    }
+  });
+
+  app.delete("/api/serial-numbers/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_serial_numbers"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteSerialNumber(req.tenantId, id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[API] Error deleting serial number:", error);
+      res.status(400).json({ error: error.message || "Failed to delete serial number" });
+    }
+  });
+
+  // Batch Numbers routes
+  app.get("/api/batch-numbers", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { itemId, warehouseId } = req.query;
+      const filters: any = {};
+      if (itemId) filters.itemId = itemId as string;
+      if (warehouseId) filters.warehouseId = warehouseId as string;
+      
+      const batchNumbers = await storage.getBatchNumbers(req.tenantId, filters);
+      res.json(batchNumbers);
+    } catch (error) {
+      console.error("[API] Error fetching batch numbers:", error);
+      res.status(500).json({ error: "Failed to fetch batch numbers" });
+    }
+  });
+
+  app.get("/api/batch-numbers/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const batchNumber = await storage.getBatchNumber(req.tenantId, id);
+      if (!batchNumber) {
+        return res.status(404).json({ error: "Batch number not found" });
+      }
+      res.json(batchNumber);
+    } catch (error) {
+      console.error("[API] Error fetching batch number:", error);
+      res.status(500).json({ error: "Failed to fetch batch number" });
+    }
+  });
+
+  app.post("/api/batch-numbers", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_batch_numbers"), async (req: any, res) => {
+    try {
+      const parsed = insertBatchNumberSchema.omit({ tenantId: true }).parse(req.body);
+      const batchNumber = await storage.createBatchNumber({ ...parsed, tenantId: req.tenantId });
+      res.status(201).json(batchNumber);
+    } catch (error: any) {
+      console.error("[API] Error creating batch number:", error);
+      res.status(400).json({ error: error.message || "Failed to create batch number" });
+    }
+  });
+
+  app.put("/api/batch-numbers/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_batch_numbers"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertBatchNumberSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const batchNumber = await storage.updateBatchNumber(req.tenantId, id, parsed);
+      res.json(batchNumber);
+    } catch (error: any) {
+      console.error("[API] Error updating batch number:", error);
+      res.status(400).json({ error: error.message || "Failed to update batch number" });
+    }
+  });
+
+  app.delete("/api/batch-numbers/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_batch_numbers"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteBatchNumber(req.tenantId, id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[API] Error deleting batch number:", error);
+      res.status(400).json({ error: error.message || "Failed to delete batch number" });
+    }
+  });
+
+  // Stock Adjustments routes
+  app.get("/api/stock-adjustments", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { status, warehouseId } = req.query;
+      const filters: any = {};
+      if (status) filters.status = status as string;
+      if (warehouseId) filters.warehouseId = warehouseId as string;
+      
+      const adjustments = await storage.getStockAdjustments(req.tenantId, filters);
+      res.json(adjustments);
+    } catch (error) {
+      console.error("[API] Error fetching stock adjustments:", error);
+      res.status(500).json({ error: "Failed to fetch stock adjustments" });
+    }
+  });
+
+  app.get("/api/stock-adjustments/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const adjustment = await storage.getStockAdjustment(req.tenantId, id);
+      if (!adjustment) {
+        return res.status(404).json({ error: "Stock adjustment not found" });
+      }
+      res.json(adjustment);
+    } catch (error) {
+      console.error("[API] Error fetching stock adjustment:", error);
+      res.status(500).json({ error: "Failed to fetch stock adjustment" });
+    }
+  });
+
+  app.get("/api/stock-adjustments/:id/line-items", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const lineItems = await storage.getStockAdjustmentLineItems(req.tenantId, id);
+      res.json(lineItems);
+    } catch (error) {
+      console.error("[API] Error fetching stock adjustment line items:", error);
+      res.status(500).json({ error: "Failed to fetch stock adjustment line items" });
+    }
+  });
+
+  app.post("/api/stock-adjustments", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const { lineItems, ...adjustmentData } = req.body;
+      const parsed = insertStockAdjustmentSchema.omit({ tenantId: true }).parse(adjustmentData);
+      const parsedLineItems = lineItems.map((item: any) => insertStockAdjustmentLineItemSchema.omit({ tenantId: true }).parse(item));
+      const adjustment = await storage.createStockAdjustment({ ...parsed, tenantId: req.tenantId }, parsedLineItems);
+      res.status(201).json(adjustment);
+    } catch (error: any) {
+      console.error("[API] Error creating stock adjustment:", error);
+      res.status(400).json({ error: error.message || "Failed to create stock adjustment" });
+    }
+  });
+
+  app.put("/api/stock-adjustments/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertStockAdjustmentSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const adjustment = await storage.updateStockAdjustment(req.tenantId, id, parsed);
+      res.json(adjustment);
+    } catch (error: any) {
+      console.error("[API] Error updating stock adjustment:", error);
+      res.status(400).json({ error: error.message || "Failed to update stock adjustment" });
+    }
+  });
+
+  app.put("/api/stock-adjustments/:id/status", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.approve_adjustments"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      if (!status) {
+        return res.status(400).json({ error: "status is required" });
+      }
+      const adjustment = await storage.updateStockAdjustmentStatus(req.tenantId, id, status);
+      res.json(adjustment);
+    } catch (error: any) {
+      console.error("[API] Error updating stock adjustment status:", error);
+      res.status(400).json({ error: error.message || "Failed to update stock adjustment status" });
+    }
+  });
+
+  app.delete("/api/stock-adjustments/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteStockAdjustment(req.tenantId, id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[API] Error deleting stock adjustment:", error);
+      res.status(400).json({ error: error.message || "Failed to delete stock adjustment" });
+    }
+  });
+
+  // Stock Counts routes
+  app.get("/api/stock-counts", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { status, warehouseId } = req.query;
+      const filters: any = {};
+      if (status) filters.status = status as string;
+      if (warehouseId) filters.warehouseId = warehouseId as string;
+      
+      const counts = await storage.getStockCounts(req.tenantId, filters);
+      res.json(counts);
+    } catch (error) {
+      console.error("[API] Error fetching stock counts:", error);
+      res.status(500).json({ error: "Failed to fetch stock counts" });
+    }
+  });
+
+  app.get("/api/stock-counts/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const count = await storage.getStockCount(req.tenantId, id);
+      if (!count) {
+        return res.status(404).json({ error: "Stock count not found" });
+      }
+      res.json(count);
+    } catch (error) {
+      console.error("[API] Error fetching stock count:", error);
+      res.status(500).json({ error: "Failed to fetch stock count" });
+    }
+  });
+
+  app.get("/api/stock-counts/:id/line-items", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const lineItems = await storage.getStockCountLineItems(req.tenantId, id);
+      res.json(lineItems);
+    } catch (error) {
+      console.error("[API] Error fetching stock count line items:", error);
+      res.status(500).json({ error: "Failed to fetch stock count line items" });
+    }
+  });
+
+  app.post("/api/stock-counts", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.create_stock_counts"), async (req: any, res) => {
+    try {
+      const { lineItems, ...countData } = req.body;
+      const parsed = insertStockCountSchema.omit({ tenantId: true }).parse(countData);
+      const parsedLineItems = lineItems.map((item: any) => insertStockCountLineItemSchema.omit({ tenantId: true }).parse(item));
+      const count = await storage.createStockCount({ ...parsed, tenantId: req.tenantId }, parsedLineItems);
+      res.status(201).json(count);
+    } catch (error: any) {
+      console.error("[API] Error creating stock count:", error);
+      res.status(400).json({ error: error.message || "Failed to create stock count" });
+    }
+  });
+
+  app.put("/api/stock-counts/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.create_stock_counts"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertStockCountSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const count = await storage.updateStockCount(req.tenantId, id, parsed);
+      res.json(count);
+    } catch (error: any) {
+      console.error("[API] Error updating stock count:", error);
+      res.status(400).json({ error: error.message || "Failed to update stock count" });
+    }
+  });
+
+  app.put("/api/stock-counts/:id/status", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.create_stock_counts"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      if (!status) {
+        return res.status(400).json({ error: "status is required" });
+      }
+      const count = await storage.updateStockCountStatus(req.tenantId, id, status);
+      res.json(count);
+    } catch (error: any) {
+      console.error("[API] Error updating stock count status:", error);
+      res.status(400).json({ error: error.message || "Failed to update stock count status" });
+    }
+  });
+
+  app.delete("/api/stock-counts/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.create_stock_counts"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteStockCount(req.tenantId, id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[API] Error deleting stock count:", error);
+      res.status(400).json({ error: error.message || "Failed to delete stock count" });
+    }
+  });
+
+  // Composite Items routes
+  app.get("/api/composite-items/:compositeItemId/components", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { compositeItemId } = req.params;
+      const components = await storage.getCompositeItemComponents(req.tenantId, compositeItemId);
+      res.json(components);
+    } catch (error) {
+      console.error("[API] Error fetching composite item components:", error);
+      res.status(500).json({ error: "Failed to fetch composite item components" });
+    }
+  });
+
+  app.get("/api/composite-items/:compositeItemId/components/active", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { compositeItemId } = req.params;
+      const allComponents = await storage.getCompositeItemComponents(req.tenantId, compositeItemId);
+      const activeComponents = allComponents.filter(c => c.isActive);
+      res.json(activeComponents);
+    } catch (error) {
+      console.error("[API] Error fetching active composite item components:", error);
+      res.status(500).json({ error: "Failed to fetch active composite item components" });
+    }
+  });
+
+  app.post("/api/composite-items/:compositeItemId/components", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_composites"), async (req: any, res) => {
+    try {
+      const { compositeItemId } = req.params;
+      const parsed = insertCompositeItemComponentSchema.omit({ tenantId: true }).parse(req.body);
+      const component = await storage.createCompositeItemComponent({ 
+        ...parsed, 
+        compositeItemId,
+        tenantId: req.tenantId 
+      });
+      res.status(201).json(component);
+    } catch (error: any) {
+      console.error("[API] Error creating composite item component:", error);
+      res.status(400).json({ error: error.message || "Failed to create composite item component" });
+    }
+  });
+
+  app.put("/api/composite-items/:compositeItemId/components/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_composites"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertCompositeItemComponentSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const component = await storage.updateCompositeItemComponent(req.tenantId, id, parsed);
+      res.json(component);
+    } catch (error: any) {
+      console.error("[API] Error updating composite item component:", error);
+      res.status(400).json({ error: error.message || "Failed to update composite item component" });
+    }
+  });
+
+  app.delete("/api/composite-items/:compositeItemId/components/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.manage_composites"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteCompositeItemComponent(req.tenantId, id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[API] Error deleting composite item component:", error);
+      res.status(400).json({ error: error.message || "Failed to delete composite item component" });
+    }
+  });
+
+  // UOM Conversions routes
+  app.get("/api/uom-conversions", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { itemId } = req.query;
+      const conversions = await storage.getUOMConversions(req.tenantId, itemId as string | undefined);
+      res.json(conversions);
+    } catch (error) {
+      console.error("[API] Error fetching UOM conversions:", error);
+      res.status(500).json({ error: "Failed to fetch UOM conversions" });
+    }
+  });
+
+  app.post("/api/uom-conversions", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.configure_settings"), async (req: any, res) => {
+    try {
+      const parsed = insertUOMConversionSchema.omit({ tenantId: true }).parse(req.body);
+      const conversion = await storage.createUOMConversion({ ...parsed, tenantId: req.tenantId });
+      res.status(201).json(conversion);
+    } catch (error: any) {
+      console.error("[API] Error creating UOM conversion:", error);
+      res.status(400).json({ error: error.message || "Failed to create UOM conversion" });
+    }
+  });
+
+  app.put("/api/uom-conversions/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.configure_settings"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertUOMConversionSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const conversion = await storage.updateUOMConversion(req.tenantId, id, parsed);
+      res.json(conversion);
+    } catch (error: any) {
+      console.error("[API] Error updating UOM conversion:", error);
+      res.status(400).json({ error: error.message || "Failed to update UOM conversion" });
+    }
+  });
+
+  app.delete("/api/uom-conversions/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.configure_settings"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteUOMConversion(req.tenantId, id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[API] Error deleting UOM conversion:", error);
+      res.status(400).json({ error: error.message || "Failed to delete UOM conversion" });
+    }
+  });
+
+  // Cost Layers routes
+  app.get("/api/cost-layers", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { itemId, warehouseId, isActive } = req.query;
+      const filters: any = {};
+      if (itemId) filters.itemId = itemId as string;
+      if (warehouseId) filters.warehouseId = warehouseId as string;
+      if (isActive !== undefined) filters.isActive = isActive === 'true';
+      
+      const layers = await storage.getInventoryCostLayers(req.tenantId, filters);
+      res.json(layers);
+    } catch (error) {
+      console.error("[API] Error fetching cost layers:", error);
+      res.status(500).json({ error: "Failed to fetch cost layers" });
+    }
+  });
+
+  app.post("/api/cost-layers", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const parsed = insertInventoryCostLayerSchema.omit({ tenantId: true }).parse(req.body);
+      const layer = await storage.createInventoryCostLayer({ ...parsed, tenantId: req.tenantId });
+      res.status(201).json(layer);
+    } catch (error: any) {
+      console.error("[API] Error creating cost layer:", error);
+      res.status(400).json({ error: error.message || "Failed to create cost layer" });
+    }
+  });
+
+  app.put("/api/cost-layers/:id", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = insertInventoryCostLayerSchema.partial().omit({ tenantId: true }).parse(req.body);
+      const layer = await storage.updateInventoryCostLayer(req.tenantId, id, parsed);
+      res.json(layer);
+    } catch (error: any) {
+      console.error("[API] Error updating cost layer:", error);
+      res.status(400).json({ error: error.message || "Failed to update cost layer" });
+    }
+  });
+
+  app.post("/api/cost-layers/:id/consume", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { quantityToConsume } = req.body;
+      if (!quantityToConsume) {
+        return res.status(400).json({ error: "quantityToConsume is required" });
+      }
+      const layer = await storage.consumeInventoryCostLayer(req.tenantId, id, parseFloat(quantityToConsume));
+      res.json(layer);
+    } catch (error: any) {
+      console.error("[API] Error consuming cost layer:", error);
+      res.status(400).json({ error: error.message || "Failed to consume cost layer" });
+    }
+  });
+
+  // Inventory Transactions routes
+  app.get("/api/inventory-transactions", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.read"), async (req: any, res) => {
+    try {
+      const { itemId, warehouseId, transactionType, startDate, endDate } = req.query;
+      const filters: any = {};
+      if (itemId) filters.itemId = itemId as string;
+      if (warehouseId) filters.warehouseId = warehouseId as string;
+      if (transactionType) filters.transactionType = transactionType as string;
+      if (startDate) filters.startDate = new Date(startDate as string);
+      if (endDate) filters.endDate = new Date(endDate as string);
+      
+      const transactions = await storage.getInventoryTransactions(req.tenantId, filters);
+      res.json(transactions);
+    } catch (error) {
+      console.error("[API] Error fetching inventory transactions:", error);
+      res.status(500).json({ error: "Failed to fetch inventory transactions" });
+    }
+  });
+
+  app.post("/api/inventory-transactions", isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission("inventory.adjust"), async (req: any, res) => {
+    try {
+      const parsed = insertInventoryTransactionSchema.omit({ tenantId: true }).parse(req.body);
+      const transaction = await storage.createInventoryTransaction({ ...parsed, tenantId: req.tenantId });
+      res.status(201).json(transaction);
+    } catch (error: any) {
+      console.error("[API] Error creating inventory transaction:", error);
+      res.status(400).json({ error: error.message || "Failed to create inventory transaction" });
     }
   });
 
