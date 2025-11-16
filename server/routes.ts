@@ -6473,7 +6473,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // GET /api/open-banking/connections
   // List all Open Banking connections for tenant
-  app.get('/api/open-banking/connections', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.get('/api/open-banking/connections', isAuthenticated, verifyTenantAccess, requirePermission('open_banking.view_connections'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
       
@@ -6985,7 +6985,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // POST /api/open-banking/bank-accounts/:accountId/sync-transactions
   // Manually trigger transaction sync for a bank account
-  app.post('/api/open-banking/bank-accounts/:accountId/sync-transactions', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+  app.post('/api/open-banking/bank-accounts/:accountId/sync-transactions', isAuthenticated, verifyTenantAccess, requirePermission('open_banking.sync_transactions'), async (req: any, res) => {
     try {
       const { accountId } = req.params;
       const tenantId = req.tenantId!; // Secure - from middleware
@@ -7189,6 +7189,163 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('[Open Banking] Get transaction error:', error);
       res.status(500).json({ 
         message: "Failed to get transaction",
+        error: error.message 
+      });
+    }
+  });
+
+  // POST /api/open-banking/webhooks/lean
+  // Handle Lean webhook events (unauthenticated - external callbacks)
+  app.post('/api/open-banking/webhooks/lean', async (req, res) => {
+    try {
+      const signature = req.headers['lean-signature'] as string;
+      const payload = req.body;
+      
+      // TODO: Verify webhook signature using LEAN_WEBHOOK_SECRET when available
+      // For now, just log and accept in sandbox mode
+      
+      console.log('[Lean Webhook] Received event:', {
+        type: payload.event_type,
+        entityId: payload.entity_id,
+        timestamp: payload.timestamp,
+      });
+
+      // Handle different event types
+      switch (payload.event_type) {
+        case 'ACCOUNT_CONNECTED':
+          // Account successfully connected
+          console.log('[Lean Webhook] Account connected:', payload);
+          break;
+        
+        case 'ACCOUNT_DISCONNECTED':
+          // Account disconnected
+          console.log('[Lean Webhook] Account disconnected:', payload);
+          // Update connection status in database
+          break;
+        
+        case 'TRANSACTION_UPDATE':
+          // New transactions available
+          console.log('[Lean Webhook] Transaction update:', payload);
+          // Trigger transaction sync
+          break;
+        
+        case 'PAYMENT_STATUS_CHANGED':
+          // Payment status updated
+          console.log('[Lean Webhook] Payment status changed:', payload);
+          break;
+        
+        default:
+          console.log('[Lean Webhook] Unknown event type:', payload.event_type);
+      }
+
+      // Always respond 200 to acknowledge receipt
+      res.status(200).json({ received: true });
+    } catch (error) {
+      console.error('[Lean Webhook] Error processing webhook:', error);
+      res.status(500).json({ error: 'Webhook processing failed' });
+    }
+  });
+
+  // POST /api/open-banking/payments/initiate
+  // Initiate an A2A payment via Lean
+  app.post('/api/open-banking/payments/initiate', isAuthenticated, verifyTenantAccess, requirePermission('open_banking.initiate_payment'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { connectionId, amount, currency, recipientAccountId, reference, invoiceId, billId } = req.body;
+
+      // Validate input
+      if (!connectionId || !amount || !recipientAccountId) {
+        return res.status(400).json({ message: 'Missing required fields' });
+      }
+
+      // Get connection and decrypt tokens
+      const [connection] = await db.select()
+        .from(openBankingConnections)
+        .where(and(
+          eq(openBankingConnections.id, connectionId),
+          eq(openBankingConnections.tenantId, tenantId)
+        ))
+        .limit(1);
+
+      if (!connection) {
+        return res.status(404).json({ message: 'Connection not found' });
+      }
+
+      // Check provider capabilities
+      const provider = openBankingProviderFactory.createProvider(connection.provider);
+      if (!('makePayment' in provider)) {
+        return res.status(400).json({ 
+          message: `Provider ${connection.provider} does not support payments` 
+        });
+      }
+
+      // Decrypt access token
+      const openBankingService = new OpenBankingService(tenantId);
+      const decryptedTokens = await openBankingService.getDecryptedTokens(connectionId);
+
+      // Initiate payment
+      const paymentResult = await provider.makePayment(decryptedTokens.accessToken, {
+        amount: parseFloat(amount),
+        currency: currency || 'AED',
+        recipientAccountId,
+        reference: reference || `Payment from Copilot Accountant`,
+        metadata: { invoiceId, billId },
+      });
+
+      // TODO: Store payment record in database for tracking
+
+      res.json(paymentResult);
+    } catch (error: any) {
+      console.error('[Open Banking] Payment initiation error:', error);
+      res.status(500).json({ 
+        message: 'Failed to initiate payment',
+        error: error.message 
+      });
+    }
+  });
+
+  // GET /api/open-banking/payments/:paymentId/status
+  // Check payment status
+  app.get('/api/open-banking/payments/:paymentId/status', isAuthenticated, verifyTenantAccess, requirePermission('open_banking.view_payments'), async (req: any, res) => {
+    try {
+      const { paymentId } = req.params;
+      const { connectionId } = req.query;
+      const tenantId = req.tenantId!;
+
+      if (!connectionId) {
+        return res.status(400).json({ message: 'connectionId required' });
+      }
+
+      // Get connection
+      const [connection] = await db.select()
+        .from(openBankingConnections)
+        .where(and(
+          eq(openBankingConnections.id, connectionId as string),
+          eq(openBankingConnections.tenantId, tenantId)
+        ))
+        .limit(1);
+
+      if (!connection) {
+        return res.status(404).json({ message: 'Connection not found' });
+      }
+
+      const provider = openBankingProviderFactory.createProvider(connection.provider);
+      if (!('getPaymentStatus' in provider)) {
+        return res.status(400).json({ 
+          message: `Provider ${connection.provider} does not support payment status` 
+        });
+      }
+
+      const openBankingService = new OpenBankingService(tenantId);
+      const decryptedTokens = await openBankingService.getDecryptedTokens(connectionId as string);
+
+      const status = await provider.getPaymentStatus(decryptedTokens.accessToken, paymentId);
+
+      res.json(status);
+    } catch (error: any) {
+      console.error('[Open Banking] Payment status error:', error);
+      res.status(500).json({ 
+        message: 'Failed to get payment status',
         error: error.message 
       });
     }

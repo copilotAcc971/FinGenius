@@ -89,6 +89,16 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       // Inventory
       'inventory.*',
       
+      // Open Banking: full access
+      'open_banking.connect',
+      'open_banking.disconnect',
+      'open_banking.view_connections',
+      'open_banking.view_transactions',
+      'open_banking.sync_transactions',
+      'open_banking.reconcile',
+      'open_banking.initiate_payment',
+      'open_banking.view_payments',
+      
       // User management but not billing
       'users.*',
     ],
@@ -158,6 +168,16 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       
       // Inventory
       'inventory.*',
+      
+      // Open Banking: full access
+      'open_banking.connect',
+      'open_banking.disconnect',
+      'open_banking.view_connections',
+      'open_banking.view_transactions',
+      'open_banking.sync_transactions',
+      'open_banking.reconcile',
+      'open_banking.initiate_payment',
+      'open_banking.view_payments',
       
       // User management but not billing
       'users.*',
@@ -245,6 +265,12 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       
       // Read company profile
       'company_profile.read',
+      
+      // Open Banking: view and sync only (no connect/disconnect or payments)
+      'open_banking.view_connections',
+      'open_banking.view_transactions',
+      'open_banking.sync_transactions',
+      'open_banking.reconcile',
       
       // Read users
       'users.read',

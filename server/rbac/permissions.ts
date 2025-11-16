@@ -36,6 +36,7 @@ export const PERMISSION_MODULES = {
   ENCUMBRANCES: 'encumbrances',
   INVENTORY: 'inventory',
   SCHEDULED_REPORTS: 'scheduled_reports',
+  OPEN_BANKING: 'open_banking',
 } as const;
 
 export const PERMISSION_ACTIONS = {
@@ -202,6 +203,16 @@ export const PERMISSION_DEFINITIONS = [
   { module: 'employee_expenses', action: 'reject', name: 'employee_expenses.reject', description: 'Reject expense claims' },
   { module: 'employee_expenses', action: 'reimburse', name: 'employee_expenses.reimburse', description: 'Process reimbursements' },
   { module: 'employee_expenses', action: 'view_all', name: 'employee_expenses.view_all', description: 'View all employees expense claims' },
+
+  // Open Banking Permissions (8 total)
+  { module: 'open_banking', action: 'create', name: 'open_banking.connect', description: 'Connect bank accounts via Open Banking' },
+  { module: 'open_banking', action: 'delete', name: 'open_banking.disconnect', description: 'Disconnect bank accounts' },
+  { module: 'open_banking', action: 'read', name: 'open_banking.view_connections', description: 'View Open Banking connections' },
+  { module: 'open_banking', action: 'read', name: 'open_banking.view_transactions', description: 'View synced bank transactions' },
+  { module: 'open_banking', action: 'update', name: 'open_banking.sync_transactions', description: 'Manually sync bank transactions' },
+  { module: 'open_banking', action: 'reconcile', name: 'open_banking.reconcile', description: 'Perform bank reconciliation' },
+  { module: 'open_banking', action: 'create', name: 'open_banking.initiate_payment', description: 'Initiate A2A payments via Open Banking' },
+  { module: 'open_banking', action: 'read', name: 'open_banking.view_payments', description: 'View Open Banking payment history' },
 
   // Payments (vendor payments)
   { module: 'payments', action: 'create', name: 'payments.create', description: 'Create vendor payments' },
