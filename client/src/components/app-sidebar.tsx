@@ -32,6 +32,11 @@ import {
   FileBarChart,
   FileSpreadsheet,
   Calendar,
+  Warehouse,
+  FileEdit,
+  ArrowRightLeft,
+  ClipboardCheck,
+  Box,
 } from "lucide-react";
 import logoImage from "@assets/generated_images/Copilot_Accountant_app_logo_0a4d944c.png";
 import {
@@ -105,6 +110,15 @@ const accountingItems = [
   { title: "AP Aging Report", url: "/ap-aging", icon: Clock },
 ];
 
+const inventoryItems = [
+  { title: "Warehouses", url: "/warehouses", icon: Warehouse },
+  { title: "Warehouse Stock", url: "/warehouse-stock", icon: Package },
+  { title: "Stock Adjustments", url: "/stock-adjustments", icon: FileEdit },
+  { title: "Transfer Orders", url: "/transfer-orders", icon: ArrowRightLeft },
+  { title: "Stock Counts", url: "/stock-counts", icon: ClipboardCheck },
+  { title: "Composite Items", url: "/composite-items", icon: Box },
+];
+
 const otherItems = [
   { title: "Documents", url: "/documents", icon: Upload },
   { title: "Reports", url: "/reports", icon: BarChart3 },
@@ -148,6 +162,11 @@ function getIconName(IconComponent: any): string {
     [FileBarChart.name]: "FileBarChart",
     [FileSpreadsheet.name]: "FileSpreadsheet",
     [Calendar.name]: "Calendar",
+    [Warehouse.name]: "Warehouse",
+    [FileEdit.name]: "FileEdit",
+    [ArrowRightLeft.name]: "ArrowRightLeft",
+    [ClipboardCheck.name]: "ClipboardCheck",
+    [Box.name]: "Box",
   };
   return iconMap[IconComponent.name] || "FileText";
 }
@@ -158,6 +177,7 @@ const allMenuItems = [
   ...purchasesItems,
   ...paymentsItems,
   ...accountingItems,
+  ...inventoryItems,
   ...otherItems,
   ...adminItems,
 ];
@@ -178,6 +198,7 @@ export function AppSidebar() {
     purchases: getGroupCollapsedState("purchases"),
     payments: getGroupCollapsedState("payments"),
     accounting: getGroupCollapsedState("accounting"),
+    inventory: getGroupCollapsedState("inventory"),
     administration: getGroupCollapsedState("administration"),
   });
 
@@ -549,6 +570,49 @@ export function AppSidebar() {
                         </Button>
                       </div>
                       {item.title === "Approvals" && <ApprovalBadge />}
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+
+        {/* Inventory Section */}
+        <Collapsible open={!collapsed.inventory} onOpenChange={(open) => handleGroupToggle("inventory", open)}>
+          <SidebarGroup>
+            <CollapsibleTrigger asChild>
+              <SidebarGroupLabel className="flex items-center justify-between cursor-pointer hover-elevate" data-testid="button-collapse-inventory">
+                <span>Inventory</span>
+                {collapsed.inventory ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </SidebarGroupLabel>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {inventoryItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <div className="flex items-center w-full gap-1">
+                        <SidebarMenuButton asChild isActive={location === item.url} className="flex-1" data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
+                          <Link href={item.url}>
+                            <item.icon className="h-5 w-5" />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 shrink-0"
+                          onClick={(e) => handleToggleFavorite(item.url, e)}
+                          data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                        >
+                          {favorites.includes(item.url) ? (
+                            <Star className="h-4 w-4 fill-current" />
+                          ) : (
+                            <StarOff className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
                     </SidebarMenuItem>
                   ))}
                 </SidebarMenu>
