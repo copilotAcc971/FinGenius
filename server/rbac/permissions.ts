@@ -297,8 +297,20 @@ export const PERMISSION_DEFINITIONS = [
   { module: 'encumbrances', action: 'manage', name: 'encumbrances.manage', description: 'Manage encumbrance settings' },
 
   // Inventory
-  { module: 'inventory', action: 'read', name: 'inventory.read', description: 'View inventory' },
+  // Inventory Management
+  { module: 'inventory', action: 'read', name: 'inventory.read', description: 'View inventory levels and stock' },
   { module: 'inventory', action: 'adjust', name: 'inventory.adjust', description: 'Create inventory adjustments' },
+  { module: 'inventory', action: 'approve', name: 'inventory.approve_adjustments', description: 'Approve stock adjustments' },
+  { module: 'inventory', action: 'manage', name: 'inventory.manage_warehouses', description: 'Manage warehouses (create, edit, delete)' },
+  { module: 'inventory', action: 'create', name: 'inventory.create_transfer_orders', description: 'Create transfer orders between warehouses' },
+  { module: 'inventory', action: 'approve', name: 'inventory.approve_transfers', description: 'Approve warehouse transfer orders' },
+  { module: 'inventory', action: 'manage', name: 'inventory.manage_serial_numbers', description: 'Manage serial number tracking' },
+  { module: 'inventory', action: 'manage', name: 'inventory.manage_batch_numbers', description: 'Manage batch number tracking' },
+  { module: 'inventory', action: 'create', name: 'inventory.create_stock_counts', description: 'Create physical stock counts' },
+  { module: 'inventory', action: 'manage', name: 'inventory.manage_composites', description: 'Manage composite items (kits/bundles)' },
+  { module: 'inventory', action: 'read', name: 'inventory.view_reports', description: 'View inventory reports' },
+  { module: 'inventory', action: 'export', name: 'inventory.export_reports', description: 'Export inventory reports' },
+  { module: 'inventory', action: 'configure', name: 'inventory.configure_settings', description: 'Configure inventory settings (valuation methods, UOMs, cost layers)' },
 
   // Fixed Assets (extending assets)
   { module: 'assets', action: 'depreciate', name: 'assets.depreciate', description: 'Run depreciation for fixed assets' },

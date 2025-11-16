@@ -54,7 +54,7 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
     - **Transaction Sync:** Automated daily sync (2 AM UTC cron), 90-day backfill, pagination (500/request), incremental via lastSyncedAt, duplicate detection
     - **AI Reconciliation:** OpenAI GPT-4o-mini with confidence scoring (0-100), graceful fallback to rule-based matching, atomic transaction handling
     - **Payment Initiation:** Full API routes with database persistence, webhook status updates, payment lifecycle tracking
-    - **RBAC:** 8 new permissions (connect, disconnect, view_connections, view_transactions, sync_transactions, reconcile, initiate_payment, view_payments). **Total: 157 permissions**
+    - **RBAC:** 8 new permissions (connect, disconnect, view_connections, view_transactions, sync_transactions, reconcile, initiate_payment, view_payments). **Total: 157 permissions** (pre-inventory)
     - **Database:** 4 tables (open_banking_connections, bank_accounts, bank_transactions, open_banking_payments) with encryption, 11 foreign keys, unique constraints, multi-tenant isolation
     - **Security:** AES-256-GCM token encryption with key rotation, HMAC webhook verification, buffer DoS prevention, 1MB payload limit, sandbox/production mode handling
     - **Data Integrity:** 3-column unique constraint prevents duplicates, atomic db.transaction() operations, incremental sync, comprehensive error handling
@@ -63,6 +63,28 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
       - ✅ Duplicate Email Handling: Enhanced upsertUser() to gracefully handle existing users, preventing server crashes on re-login
     - **Documentation:** Complete setup guide in `LEAN_INTEGRATION_GUIDE.md` with deployment checklist, troubleshooting, monitoring
     - **Configuration:** Requires LEAN_APP_TOKEN, LEAN_CLIENT_ID, LEAN_CLIENT_SECRET (sandbox: LEAN_SANDBOX_MODE='true', production: LEAN_WEBHOOK_SECRET required)
+- **Inventory Management System (Phase 4 - DATABASE FOUNDATION COMPLETE ✅):**
+    - **Status:** Architect approved, production-ready database schema and RBAC (Nov 16, 2024)
+    - **Database Schema:** 15 inventory tables with complete multi-warehouse stock tracking and cost layering:
+      - **Core Tables:** warehouses, warehouseStock (per-warehouse quantities with committed/inTransit/reorderQuantity), transferOrders, transferOrderLineItems
+      - **Tracking:** serialNumbers, batchNumbers, stockAdjustments, stockAdjustmentLineItems, stockCounts, stockCountLineItems
+      - **Advanced:** compositeItemComponents (with cost rollups and effective dating for BOM versioning), uomConversions, inventoryCostLayers, inventoryTransactions (linked to cost layers)
+      - **Items Table Enhanced:** Opening stock (openingStock, openingStockDate, openingStockRate), stock breakdown (inTransit, yetToReceive, committed, availableForSale), UOM (defaultUOM), cost tracking (averageCost, standardCost, compositeCost), metadata (itemImages array, customFields JSONB), warehouse assignment (defaultWarehouseId)
+    - **Cost Valuation:** Complete FIFO/LIFO/Weighted Average foundation with inventoryCostLayers table:
+      - Receipt date, quantity tracking (quantity, remainingQuantity)
+      - Cost tracking (unitCost, totalCost)
+      - Source document linkage (sourceType, sourceId, sourceNumber)
+      - Serial/batch references, isActive flag for consumption tracking
+      - Linked to inventoryTransactions via costLayerId for reconciliation
+    - **Multi-Warehouse Support:** Per-warehouse stock levels with committed/inTransit quantities, warehouse-specific reorder levels, last count tracking
+    - **RBAC:** 13 new inventory permissions. **Total: 168 permissions**
+      - inventory.read, inventory.adjust, inventory.approve_adjustments
+      - inventory.manage_warehouses, inventory.create_transfer_orders, inventory.approve_transfers
+      - inventory.manage_serial_numbers, inventory.manage_batch_numbers, inventory.create_stock_counts
+      - inventory.manage_composites, inventory.view_reports, inventory.export_reports
+      - inventory.configure_settings (valuation methods, UOMs, cost layers)
+    - **Data Integrity:** All tables use varchar with gen_random_uuid() for ID consistency, full multi-tenant isolation with tenantId on all tables
+    - **Remaining Phase 4 Work:** Storage layer methods (4.3), API routes (4.4), UI components (4.5), Inventory reports, Testing (4.6)
 
 ## External Dependencies
 - **OpenAI GPT-5:** For AI-powered document data extraction and categorization.
