@@ -54,6 +54,8 @@ import {
   projectExpenses,
   projectMilestones,
   projectInvoices,
+  projectInvoiceTimeEntries,
+  projectInvoiceMilestones,
   type User,
   type UpsertUser,
   type Tenant,
@@ -171,6 +173,10 @@ import {
   type InsertProjectMilestone,
   type ProjectInvoice,
   type InsertProjectInvoice,
+  type ProjectInvoiceTimeEntry,
+  type InsertProjectInvoiceTimeEntry,
+  type ProjectInvoiceMilestone,
+  type InsertProjectInvoiceMilestone,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
@@ -515,6 +521,47 @@ export interface IStorage {
   // Project Invoice operations
   getProjectInvoices(projectId: string, tenantId: string): Promise<ProjectInvoice[]>;
   linkInvoiceToProject(link: InsertProjectInvoice & { tenantId: string }): Promise<ProjectInvoice>;
+  
+  // Project Invoicing Storage Layer
+  listInvoiceableTimeEntries(tenantId: string, projectId: string, filters?: {
+    startDate?: string;
+    endDate?: string;
+    userId?: string;
+    taskId?: string;
+  }): Promise<TimeEntry[]>;
+  listInvoiceableMilestones(tenantId: string, projectId: string): Promise<ProjectMilestone[]>;
+  listProjectInvoices(tenantId: string, projectId: string): Promise<ProjectInvoice[]>;
+  calculateProjectProgressBilling(tenantId: string, projectId: string): Promise<{
+    totalBudget: string;
+    totalInvoiced: string;
+    percentageComplete: number;
+    availableToBill: string;
+  }>;
+  createProjectInvoiceFromTimeEntries(
+    tenantId: string,
+    projectId: string,
+    timeEntryIds: string[],
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }>;
+  createProjectInvoiceFromMilestone(
+    tenantId: string,
+    projectId: string,
+    milestoneId: string,
+    amount: string,
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }>;
+  createProjectInvoiceFromProgress(
+    tenantId: string,
+    projectId: string,
+    percentageComplete: string,
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }>;
+  markTimeEntriesInvoiced(tenantId: string, timeEntryIds: string[], projectInvoiceId: string): Promise<void>;
+  updateMilestoneInvoicedAmount(tenantId: string, milestoneId: string, additionalAmount: string): Promise<void>;
+  getProjectInvoiceDetail(tenantId: string, projectInvoiceId: string): Promise<ProjectInvoice & {
+    timeEntries?: TimeEntry[];
+    milestones?: ProjectMilestone[];
+  }>;
 
   // Project Reporting & Analytics
   getProjectProfitability(projectId: string, tenantId: string): Promise<{
@@ -7125,6 +7172,461 @@ export class DatabaseStorage implements IStorage {
     return link;
   }
 
+  // Project Invoicing Storage Layer
+  async listInvoiceableTimeEntries(tenantId: string, projectId: string, filters?: {
+    startDate?: string;
+    endDate?: string;
+    userId?: string;
+    taskId?: string;
+  }): Promise<TimeEntry[]> {
+    let conditions = [
+      eq(timeEntries.tenantId, tenantId),
+      eq(timeEntries.projectId, projectId),
+      eq(timeEntries.status, 'approved'),
+      eq(timeEntries.isBillable, true),
+      isNull(timeEntries.projectInvoiceId)
+    ];
+
+    if (filters?.startDate) {
+      conditions.push(gte(timeEntries.date, filters.startDate));
+    }
+    if (filters?.endDate) {
+      conditions.push(lte(timeEntries.date, filters.endDate));
+    }
+    if (filters?.userId) {
+      conditions.push(eq(timeEntries.userId, filters.userId));
+    }
+    if (filters?.taskId) {
+      conditions.push(eq(timeEntries.taskId, filters.taskId));
+    }
+
+    return await db
+      .select()
+      .from(timeEntries)
+      .where(and(...conditions))
+      .orderBy(asc(timeEntries.date));
+  }
+
+  async listInvoiceableMilestones(tenantId: string, projectId: string): Promise<ProjectMilestone[]> {
+    return await db
+      .select()
+      .from(projectMilestones)
+      .where(and(
+        eq(projectMilestones.tenantId, tenantId),
+        eq(projectMilestones.projectId, projectId),
+        eq(projectMilestones.status, 'completed'),
+        eq(projectMilestones.isFullyInvoiced, false)
+      ))
+      .orderBy(asc(projectMilestones.dueDate));
+  }
+
+  async listProjectInvoices(tenantId: string, projectId: string): Promise<ProjectInvoice[]> {
+    return await db
+      .select()
+      .from(projectInvoices)
+      .where(and(
+        eq(projectInvoices.tenantId, tenantId),
+        eq(projectInvoices.projectId, projectId)
+      ))
+      .orderBy(desc(projectInvoices.createdAt));
+  }
+
+  async calculateProjectProgressBilling(tenantId: string, projectId: string): Promise<{
+    totalBudget: string;
+    totalInvoiced: string;
+    percentageComplete: number;
+    availableToBill: string;
+  }> {
+    const project = await this.getProject(projectId, tenantId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const totalBudget = parseFloat(project.budgetAmount || '0');
+
+    const invoicedResult = await db
+      .select({
+        total: sum(sql`${projectInvoices.totalAmount}::numeric`)
+      })
+      .from(projectInvoices)
+      .where(and(
+        eq(projectInvoices.tenantId, tenantId),
+        eq(projectInvoices.projectId, projectId)
+      ));
+
+    const totalInvoiced = parseFloat(invoicedResult[0]?.total || '0');
+    const percentageComplete = totalBudget > 0 ? (totalInvoiced / totalBudget) * 100 : 0;
+    const availableToBill = Math.max(0, totalBudget - totalInvoiced);
+
+    return {
+      totalBudget: totalBudget.toFixed(2),
+      totalInvoiced: totalInvoiced.toFixed(2),
+      percentageComplete: parseFloat(percentageComplete.toFixed(2)),
+      availableToBill: availableToBill.toFixed(2)
+    };
+  }
+
+  async createProjectInvoiceFromTimeEntries(
+    tenantId: string,
+    projectId: string,
+    timeEntryIds: string[],
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }> {
+    return await db.transaction(async (tx) => {
+      if (timeEntryIds.length === 0) {
+        throw new Error("No time entries provided");
+      }
+
+      const timeEntriesData = await tx
+        .select()
+        .from(timeEntries)
+        .where(and(
+          eq(timeEntries.tenantId, tenantId),
+          eq(timeEntries.projectId, projectId),
+          sql`${timeEntries.id} = ANY(${timeEntryIds})`
+        ));
+
+      if (timeEntriesData.length !== timeEntryIds.length) {
+        throw new Error("Some time entries not found or do not belong to this project");
+      }
+
+      for (const entry of timeEntriesData) {
+        if (entry.status !== 'approved') {
+          throw new Error(`Time entry ${entry.id} is not approved`);
+        }
+        if (!entry.isBillable) {
+          throw new Error(`Time entry ${entry.id} is not billable`);
+        }
+        if (entry.projectInvoiceId) {
+          throw new Error(`Time entry ${entry.id} has already been invoiced`);
+        }
+      }
+
+      let totalHours = 0;
+      let totalAmount = 0;
+      const junctionEntries: InsertProjectInvoiceTimeEntry[] = [];
+
+      for (const entry of timeEntriesData) {
+        const hours = parseFloat(entry.hours || '0') + (parseFloat(entry.minutes?.toString() || '0') / 60);
+        const amount = parseFloat(entry.billableAmount || '0');
+        totalHours += hours;
+        totalAmount += amount;
+      }
+
+      const calculatedInvoiceData: InsertInvoice = {
+        ...invoiceData,
+        tenantId,
+        subtotal: totalAmount.toFixed(2),
+        taxAmount: invoiceData.taxAmount || '0',
+        total: (totalAmount + parseFloat(invoiceData.taxAmount || '0')).toFixed(2)
+      };
+
+      const [invoice] = await tx
+        .insert(invoices)
+        .values(calculatedInvoiceData)
+        .returning();
+
+      const [projectInvoice] = await tx
+        .insert(projectInvoices)
+        .values({
+          tenantId,
+          projectId,
+          invoiceId: invoice.id,
+          billingMode: 'time_entries',
+          totalHours: totalHours.toFixed(2),
+          totalAmount: totalAmount.toFixed(2),
+          periodStart: invoiceData.invoiceDate ? new Date(invoiceData.invoiceDate).toISOString().split('T')[0] : undefined,
+          periodEnd: invoiceData.dueDate ? new Date(invoiceData.dueDate).toISOString().split('T')[0] : undefined
+        })
+        .returning();
+
+      for (const entry of timeEntriesData) {
+        const hours = parseFloat(entry.hours || '0') + (parseFloat(entry.minutes?.toString() || '0') / 60);
+        const rate = parseFloat(entry.billableRate || '0');
+        const amount = parseFloat(entry.billableAmount || '0');
+
+        junctionEntries.push({
+          tenantId,
+          projectInvoiceId: projectInvoice.id,
+          timeEntryId: entry.id,
+          hours: hours.toFixed(2),
+          rate: rate.toFixed(2),
+          amount: amount.toFixed(2)
+        });
+      }
+
+      if (junctionEntries.length > 0) {
+        await tx
+          .insert(projectInvoiceTimeEntries)
+          .values(junctionEntries);
+      }
+
+      await tx
+        .update(timeEntries)
+        .set({ projectInvoiceId: projectInvoice.id })
+        .where(sql`${timeEntries.id} = ANY(${timeEntryIds})`);
+
+      return { invoice, projectInvoice };
+    });
+  }
+
+  async createProjectInvoiceFromMilestone(
+    tenantId: string,
+    projectId: string,
+    milestoneId: string,
+    amount: string,
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }> {
+    return await db.transaction(async (tx) => {
+      const [milestone] = await tx
+        .select()
+        .from(projectMilestones)
+        .where(and(
+          eq(projectMilestones.id, milestoneId),
+          eq(projectMilestones.tenantId, tenantId),
+          eq(projectMilestones.projectId, projectId)
+        ))
+        .limit(1);
+
+      if (!milestone) {
+        throw new Error("Milestone not found or does not belong to this project");
+      }
+
+      if (milestone.status !== 'completed') {
+        throw new Error("Milestone must be completed before invoicing");
+      }
+
+      const invoiceableAmount = parseFloat(milestone.invoiceableAmount || '0');
+      const alreadyInvoiced = parseFloat(milestone.invoicedAmount || '0');
+      const remainingAmount = invoiceableAmount - alreadyInvoiced;
+      const amountToInvoice = parseFloat(amount);
+
+      if (amountToInvoice <= 0) {
+        throw new Error("Invoice amount must be greater than zero");
+      }
+
+      if (amountToInvoice > remainingAmount) {
+        throw new Error(`Cannot invoice ${amount}. Only ${remainingAmount.toFixed(2)} remaining for this milestone`);
+      }
+
+      const calculatedInvoiceData: InsertInvoice = {
+        ...invoiceData,
+        tenantId,
+        subtotal: amount,
+        taxAmount: invoiceData.taxAmount || '0',
+        total: (amountToInvoice + parseFloat(invoiceData.taxAmount || '0')).toFixed(2)
+      };
+
+      const [invoice] = await tx
+        .insert(invoices)
+        .values(calculatedInvoiceData)
+        .returning();
+
+      const [projectInvoice] = await tx
+        .insert(projectInvoices)
+        .values({
+          tenantId,
+          projectId,
+          invoiceId: invoice.id,
+          billingMode: 'milestone',
+          milestoneId: milestoneId,
+          totalAmount: amount,
+          sourceSummary: `Milestone: ${milestone.name}`
+        })
+        .returning();
+
+      await tx
+        .insert(projectInvoiceMilestones)
+        .values({
+          tenantId,
+          projectInvoiceId: projectInvoice.id,
+          milestoneId: milestoneId,
+          invoicedAmount: amount
+        });
+
+      const newInvoicedAmount = alreadyInvoiced + amountToInvoice;
+      const isFullyInvoiced = newInvoicedAmount >= invoiceableAmount;
+
+      await tx
+        .update(projectMilestones)
+        .set({
+          invoicedAmount: newInvoicedAmount.toFixed(2),
+          isFullyInvoiced: isFullyInvoiced,
+          updatedAt: new Date()
+        })
+        .where(eq(projectMilestones.id, milestoneId));
+
+      return { invoice, projectInvoice };
+    });
+  }
+
+  async createProjectInvoiceFromProgress(
+    tenantId: string,
+    projectId: string,
+    percentageComplete: string,
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }> {
+    return await db.transaction(async (tx) => {
+      const project = await this.getProject(projectId, tenantId);
+      if (!project) {
+        throw new Error("Project not found");
+      }
+
+      const percentage = parseFloat(percentageComplete);
+      if (percentage <= 0 || percentage > 100) {
+        throw new Error("Percentage must be between 0 and 100");
+      }
+
+      const totalBudget = parseFloat(project.budgetAmount || '0');
+      if (totalBudget <= 0) {
+        throw new Error("Project must have a budget amount for progress billing");
+      }
+
+      const invoicedResult = await tx
+        .select({
+          total: sum(sql`${projectInvoices.totalAmount}::numeric`)
+        })
+        .from(projectInvoices)
+        .where(and(
+          eq(projectInvoices.tenantId, tenantId),
+          eq(projectInvoices.projectId, projectId)
+        ));
+
+      const totalInvoiced = parseFloat(invoicedResult[0]?.total || '0');
+      const targetAmount = (totalBudget * percentage) / 100;
+      const amountToInvoice = targetAmount - totalInvoiced;
+
+      if (amountToInvoice <= 0) {
+        throw new Error(`Project already invoiced ${totalInvoiced.toFixed(2)}. Cannot invoice for ${percentage}% completion`);
+      }
+
+      const calculatedInvoiceData: InsertInvoice = {
+        ...invoiceData,
+        tenantId,
+        subtotal: amountToInvoice.toFixed(2),
+        taxAmount: invoiceData.taxAmount || '0',
+        total: (amountToInvoice + parseFloat(invoiceData.taxAmount || '0')).toFixed(2)
+      };
+
+      const [invoice] = await tx
+        .insert(invoices)
+        .values(calculatedInvoiceData)
+        .returning();
+
+      const [projectInvoice] = await tx
+        .insert(projectInvoices)
+        .values({
+          tenantId,
+          projectId,
+          invoiceId: invoice.id,
+          billingMode: 'progress',
+          percentageComplete: percentage.toFixed(2),
+          totalAmount: amountToInvoice.toFixed(2),
+          sourceSummary: `${percentage}% project completion`
+        })
+        .returning();
+
+      return { invoice, projectInvoice };
+    });
+  }
+
+  async markTimeEntriesInvoiced(tenantId: string, timeEntryIds: string[], projectInvoiceId: string): Promise<void> {
+    if (timeEntryIds.length === 0) return;
+
+    await db
+      .update(timeEntries)
+      .set({ projectInvoiceId })
+      .where(and(
+        eq(timeEntries.tenantId, tenantId),
+        sql`${timeEntries.id} = ANY(${timeEntryIds})`
+      ));
+  }
+
+  async updateMilestoneInvoicedAmount(tenantId: string, milestoneId: string, additionalAmount: string): Promise<void> {
+    const [milestone] = await db
+      .select()
+      .from(projectMilestones)
+      .where(and(
+        eq(projectMilestones.id, milestoneId),
+        eq(projectMilestones.tenantId, tenantId)
+      ))
+      .limit(1);
+
+    if (!milestone) {
+      throw new Error("Milestone not found");
+    }
+
+    const currentInvoiced = parseFloat(milestone.invoicedAmount || '0');
+    const additional = parseFloat(additionalAmount);
+    const newInvoicedAmount = currentInvoiced + additional;
+    const invoiceableAmount = parseFloat(milestone.invoiceableAmount || '0');
+    const isFullyInvoiced = newInvoicedAmount >= invoiceableAmount;
+
+    await db
+      .update(projectMilestones)
+      .set({
+        invoicedAmount: newInvoicedAmount.toFixed(2),
+        isFullyInvoiced: isFullyInvoiced,
+        updatedAt: new Date()
+      })
+      .where(eq(projectMilestones.id, milestoneId));
+  }
+
+  async getProjectInvoiceDetail(tenantId: string, projectInvoiceId: string): Promise<ProjectInvoice & {
+    timeEntries?: TimeEntry[];
+    milestones?: ProjectMilestone[];
+  }> {
+    const [projectInvoice] = await db
+      .select()
+      .from(projectInvoices)
+      .where(and(
+        eq(projectInvoices.id, projectInvoiceId),
+        eq(projectInvoices.tenantId, tenantId)
+      ))
+      .limit(1);
+
+    if (!projectInvoice) {
+      throw new Error("Project invoice not found");
+    }
+
+    const result: ProjectInvoice & {
+      timeEntries?: TimeEntry[];
+      milestones?: ProjectMilestone[];
+    } = { ...projectInvoice };
+
+    if (projectInvoice.billingMode === 'time_entries') {
+      const junctionRecords = await db
+        .select()
+        .from(projectInvoiceTimeEntries)
+        .where(eq(projectInvoiceTimeEntries.projectInvoiceId, projectInvoiceId));
+
+      const timeEntryIds = junctionRecords.map(j => j.timeEntryId);
+      
+      if (timeEntryIds.length > 0) {
+        result.timeEntries = await db
+          .select()
+          .from(timeEntries)
+          .where(sql`${timeEntries.id} = ANY(${timeEntryIds})`);
+      }
+    } else if (projectInvoice.billingMode === 'milestone') {
+      const junctionRecords = await db
+        .select()
+        .from(projectInvoiceMilestones)
+        .where(eq(projectInvoiceMilestones.projectInvoiceId, projectInvoiceId));
+
+      const milestoneIds = junctionRecords.map(j => j.milestoneId);
+      
+      if (milestoneIds.length > 0) {
+        result.milestones = await db
+          .select()
+          .from(projectMilestones)
+          .where(sql`${projectMilestones.id} = ANY(${milestoneIds})`);
+      }
+    }
+
+    return result;
+  }
+
   // Project Reporting & Analytics
   async getProjectProfitability(projectId: string, tenantId: string): Promise<{
     projectId: string;
@@ -8576,6 +9078,76 @@ export class MemStorage implements IStorage {
 
   async linkInvoiceToProject(link: InsertProjectInvoice & { tenantId: string }): Promise<ProjectInvoice> {
     throw new Error('Project invoices not implemented in MemStorage');
+  }
+
+  // Project Invoicing Storage Layer - Stubs
+  async listInvoiceableTimeEntries(tenantId: string, projectId: string, filters?: {
+    startDate?: string;
+    endDate?: string;
+    userId?: string;
+    taskId?: string;
+  }): Promise<TimeEntry[]> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async listInvoiceableMilestones(tenantId: string, projectId: string): Promise<ProjectMilestone[]> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async listProjectInvoices(tenantId: string, projectId: string): Promise<ProjectInvoice[]> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async calculateProjectProgressBilling(tenantId: string, projectId: string): Promise<{
+    totalBudget: string;
+    totalInvoiced: string;
+    percentageComplete: number;
+    availableToBill: string;
+  }> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async createProjectInvoiceFromTimeEntries(
+    tenantId: string,
+    projectId: string,
+    timeEntryIds: string[],
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async createProjectInvoiceFromMilestone(
+    tenantId: string,
+    projectId: string,
+    milestoneId: string,
+    amount: string,
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async createProjectInvoiceFromProgress(
+    tenantId: string,
+    projectId: string,
+    percentageComplete: string,
+    invoiceData: InsertInvoice
+  ): Promise<{ invoice: Invoice; projectInvoice: ProjectInvoice }> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async markTimeEntriesInvoiced(tenantId: string, timeEntryIds: string[], projectInvoiceId: string): Promise<void> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async updateMilestoneInvoicedAmount(tenantId: string, milestoneId: string, additionalAmount: string): Promise<void> {
+    throw new Error('Project invoicing not implemented in MemStorage');
+  }
+
+  async getProjectInvoiceDetail(tenantId: string, projectInvoiceId: string): Promise<ProjectInvoice & {
+    timeEntries?: TimeEntry[];
+    milestones?: ProjectMilestone[];
+  }> {
+    throw new Error('Project invoicing not implemented in MemStorage');
   }
 
   // Project Reporting & Analytics - Stubs
