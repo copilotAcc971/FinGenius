@@ -8,6 +8,13 @@
       "when": 1763049059260,
       "tag": "0000_cute_tyrannus",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1763373959537,
+      "tag": "0001_curved_bloodaxe",
+      "breakpoints": true
     }
   ]
 }
