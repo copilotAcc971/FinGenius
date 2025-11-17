@@ -33,6 +33,7 @@ import {
   FileSpreadsheet,
   Calendar,
   FolderKanban,
+  ChartBar,
 } from "lucide-react";
 import logoImage from "@assets/generated_images/Copilot_Accountant_app_logo_0a4d944c.png";
 import {
@@ -90,6 +91,7 @@ const paymentsItems = [
 
 const projectsItems = [
   { title: "Projects", url: "/projects", icon: FolderKanban },
+  { title: "Project Reports", url: "/projects/reports", icon: ChartBar },
   { title: "Time Tracking", url: "/time-tracking", icon: Clock },
   { title: "Timesheets", url: "/timesheets", icon: Calendar },
 ];
@@ -156,6 +158,7 @@ function getIconName(IconComponent: any): string {
     [FileSpreadsheet.name]: "FileSpreadsheet",
     [Calendar.name]: "Calendar",
     [FolderKanban.name]: "FolderKanban",
+    [ChartBar.name]: "ChartBar",
   };
   return iconMap[IconComponent.name] || "FileText";
 }

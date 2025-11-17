@@ -8081,7 +8081,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/projects/:projectId/report/profitability', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
-      const report = await storage.getProjectProfitabilityReport(req.params.projectId, tenantId);
+      const report = await storage.getProjectProfitability(req.params.projectId, tenantId);
       res.json(report);
     } catch (error: any) {
       console.error("Error fetching project profitability report:", error);
@@ -8093,10 +8093,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const tenantId = req.tenantId!;
       const { startDate, endDate } = req.query;
-      const report = await storage.getResourceUtilizationReport(
+      const defaultEnd = new Date();
+      const defaultStart = new Date(defaultEnd);
+      defaultStart.setMonth(defaultStart.getMonth() - 1);
+      
+      const report = await storage.getResourceUtilization(
         tenantId,
-        startDate ? new Date(startDate as string) : undefined,
-        endDate ? new Date(endDate as string) : undefined
+        startDate ? new Date(startDate as string) : defaultStart,
+        endDate ? new Date(endDate as string) : defaultEnd
       );
       res.json(report);
     } catch (error: any) {
@@ -8105,10 +8109,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/projects/:projectId/report/summary', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+  app.get('/api/projects/report/summary', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
-      const report = await storage.getProjectSummaryReport(req.params.projectId, tenantId);
+      const report = await storage.getProjectSummary(tenantId);
       res.json(report);
     } catch (error: any) {
       console.error("Error fetching project summary report:", error);

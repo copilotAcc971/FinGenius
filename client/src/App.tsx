@@ -61,6 +61,7 @@ import ScheduledReports from "@/pages/scheduled-reports";
 import EmployeeExpenses from "@/pages/employee-expenses";
 import Projects from "@/pages/projects";
 import ProjectDetail from "@/pages/project-detail";
+import ProjectReports from "@/pages/project-reports";
 import TimeTracking from "@/pages/time-tracking";
 import Timesheets from "@/pages/timesheets";
 
@@ -100,6 +101,7 @@ function Router() {
           <Route path="/employee-expenses" component={EmployeeExpenses} />
           <Route path="/payments" component={Payments} />
           <Route path="/customer-payments" component={CustomerPayments} />
+          <Route path="/projects/reports" component={ProjectReports} />
           <Route path="/projects/:id" component={ProjectDetail} />
           <Route path="/projects" component={Projects} />
           <Route path="/time-tracking" component={TimeTracking} />
