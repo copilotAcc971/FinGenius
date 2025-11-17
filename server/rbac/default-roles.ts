@@ -101,6 +101,12 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       
       // User management but not billing
       'users.*',
+
+      // Projects & Time Tracking: full access
+      'projects.*',
+      'time_entries.*',
+      'project_budgets.*',
+      'project_reports.read',
     ],
   },
 
@@ -181,6 +187,12 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       
       // User management but not billing
       'users.*',
+
+      // Projects & Time Tracking: full access
+      'projects.*',
+      'time_entries.*',
+      'project_budgets.*',
+      'project_reports.read',
     ],
   },
   
@@ -274,6 +286,13 @@ export const DEFAULT_ROLES: Record<string, DefaultRole> = {
       
       // Read users
       'users.read',
+
+      // Projects & Time Tracking: limited access
+      'projects.read',
+      'time_entries.read',
+      'time_entries.approve',
+      'project_budgets.read',
+      'project_reports.read',
     ],
   },
   

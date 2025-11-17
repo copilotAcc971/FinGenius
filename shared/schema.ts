@@ -32,6 +32,14 @@ export const DEBIT_NOTE_STATUS = ['draft', 'issued', 'applied', 'cancelled'] as 
 export const APPROVAL_REQUEST_STATUS = ['pending', 'approved', 'rejected', 'cancelled'] as const;
 export const FRAUD_CHECK_STATUS = ['not_checked', 'passed', 'flagged', 'blocked'] as const;
 
+// Project Management Status Enums
+export const PROJECT_STATUS = ['active', 'on_hold', 'completed', 'cancelled'] as const;
+export const PROJECT_BILLING_TYPE = ['time_and_materials', 'fixed_price', 'non_billable'] as const;
+export const TIME_ENTRY_STATUS = ['draft', 'submitted', 'approved', 'rejected', 'invoiced'] as const;
+export const PROJECT_TASK_STATUS = ['not_started', 'in_progress', 'completed', 'on_hold', 'cancelled'] as const;
+export const PROJECT_TASK_PRIORITY = ['low', 'medium', 'high', 'urgent'] as const;
+export const PROJECT_MILESTONE_STATUS = ['pending', 'in_progress', 'completed', 'missed'] as const;
+
 // Session storage table for Replit Auth
 export const sessions = pgTable(
   "sessions",
@@ -3693,6 +3701,289 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
 
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
+
+// ============================================================================
+// PROJECT MANAGEMENT & TIME TRACKING
+// ============================================================================
+
+// Projects (client projects for time tracking and billing)
+export const projects = pgTable("projects", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  projectNumber: varchar("project_number", { length: 100 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  status: varchar("status", { length: 50 }).notNull().default("active"),
+  billingType: varchar("billing_type", { length: 50 }).notNull().default("time_and_materials"),
+  budgetAmount: decimal("budget_amount", { precision: 15, scale: 2 }),
+  budgetHours: decimal("budget_hours", { precision: 10, scale: 2 }),
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  projectManagerId: varchar("project_manager_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_project_number_per_tenant").on(table.tenantId, table.projectNumber),
+  index("projects_tenant_idx").on(table.tenantId),
+  index("projects_customer_idx").on(table.customerId),
+  index("projects_project_manager_idx").on(table.projectManagerId),
+  index("projects_status_idx").on(table.status),
+  sql`CONSTRAINT check_project_status CHECK (status IN ('active', 'on_hold', 'completed', 'cancelled'))`,
+  sql`CONSTRAINT check_project_billing_type CHECK (billing_type IN ('time_and_materials', 'fixed_price', 'non_billable'))`,
+]);
+
+export const insertProjectSchema = createInsertSchema(projects, {
+  budgetAmount: decimalString.optional(),
+  budgetHours: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProject = z.infer<typeof insertProjectSchema>;
+export type Project = typeof projects.$inferSelect;
+
+// Project Members (team members assigned to projects)
+export const projectMembers = pgTable("project_members", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  role: varchar("role", { length: 100 }),
+  billableRate: decimal("billable_rate", { precision: 10, scale: 2 }),
+  isActive: boolean("is_active").default(true).notNull(),
+  joinedAt: timestamp("joined_at").defaultNow(),
+  leftAt: timestamp("left_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_project_member").on(table.tenantId, table.projectId, table.userId),
+  index("project_members_tenant_idx").on(table.tenantId),
+  index("project_members_project_idx").on(table.projectId),
+  index("project_members_user_idx").on(table.userId),
+]);
+
+export const insertProjectMemberSchema = createInsertSchema(projectMembers, {
+  billableRate: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProjectMember = z.infer<typeof insertProjectMemberSchema>;
+export type ProjectMember = typeof projectMembers.$inferSelect;
+
+// Time Entries (time tracking for projects and tasks)
+export const timeEntries = pgTable("time_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  taskId: varchar("task_id").references(() => projectTasks.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  description: text("description").notNull(),
+  date: date("date").notNull(),
+  hours: decimal("hours", { precision: 10, scale: 2 }).notNull(),
+  minutes: integer("minutes").default(0).notNull(),
+  isBillable: boolean("is_billable").default(true).notNull(),
+  billableRate: decimal("billable_rate", { precision: 10, scale: 2 }),
+  billableAmount: decimal("billable_amount", { precision: 15, scale: 2 }),
+  status: varchar("status", { length: 50 }).notNull().default("draft"),
+  approvedBy: varchar("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  invoiceId: varchar("invoice_id").references(() => invoices.id),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("time_entries_tenant_idx").on(table.tenantId),
+  index("time_entries_project_idx").on(table.projectId),
+  index("time_entries_user_idx").on(table.userId),
+  index("time_entries_task_idx").on(table.taskId),
+  index("time_entries_date_idx").on(table.date),
+  index("time_entries_status_idx").on(table.status),
+  index("time_entries_invoice_idx").on(table.invoiceId),
+  index("time_entries_tenant_status_idx").on(table.tenantId, table.status),
+  sql`CONSTRAINT check_time_entry_status CHECK (status IN ('draft', 'submitted', 'approved', 'rejected', 'invoiced'))`,
+]);
+
+export const insertTimeEntrySchema = createInsertSchema(timeEntries, {
+  hours: decimalString,
+  billableRate: decimalString.optional(),
+  billableAmount: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertTimeEntry = z.infer<typeof insertTimeEntrySchema>;
+export type TimeEntry = typeof timeEntries.$inferSelect;
+
+// Project Tasks (individual tasks within projects)
+export const projectTasks = pgTable("project_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  status: varchar("status", { length: 50 }).notNull().default("not_started"),
+  priority: varchar("priority", { length: 50 }).notNull().default("medium"),
+  assignedTo: varchar("assigned_to").references(() => users.id),
+  estimatedHours: decimal("estimated_hours", { precision: 10, scale: 2 }),
+  actualHours: decimal("actual_hours", { precision: 10, scale: 2 }).default("0").notNull(),
+  dueDate: date("due_date"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("project_tasks_tenant_idx").on(table.tenantId),
+  index("project_tasks_project_idx").on(table.projectId),
+  index("project_tasks_assigned_to_idx").on(table.assignedTo),
+  index("project_tasks_status_idx").on(table.status),
+  index("project_tasks_due_date_idx").on(table.dueDate),
+  sql`CONSTRAINT check_project_task_status CHECK (status IN ('not_started', 'in_progress', 'completed', 'on_hold', 'cancelled'))`,
+  sql`CONSTRAINT check_project_task_priority CHECK (priority IN ('low', 'medium', 'high', 'urgent'))`,
+]);
+
+export const insertProjectTaskSchema = createInsertSchema(projectTasks, {
+  estimatedHours: decimalString.optional(),
+  actualHours: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProjectTask = z.infer<typeof insertProjectTaskSchema>;
+export type ProjectTask = typeof projectTasks.$inferSelect;
+
+// Project Budgets (budget categories for projects)
+export const projectBudgets = pgTable("project_budgets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  category: varchar("category", { length: 100 }).notNull(),
+  budgetedAmount: decimal("budgeted_amount", { precision: 15, scale: 2 }).notNull(),
+  actualAmount: decimal("actual_amount", { precision: 15, scale: 2 }).default("0").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("project_budgets_tenant_idx").on(table.tenantId),
+  index("project_budgets_project_idx").on(table.projectId),
+]);
+
+export const insertProjectBudgetSchema = createInsertSchema(projectBudgets, {
+  budgetedAmount: decimalString,
+  actualAmount: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProjectBudget = z.infer<typeof insertProjectBudgetSchema>;
+export type ProjectBudget = typeof projectBudgets.$inferSelect;
+
+// Project Expenses (expenses linked to projects)
+export const projectExpenses = pgTable("project_expenses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  expenseId: varchar("expense_id"), // Forward reference to employeeExpenses (if exists)
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  description: text("description").notNull(),
+  category: varchar("category", { length: 100 }),
+  isBillable: boolean("is_billable").default(true).notNull(),
+  isInvoiced: boolean("is_invoiced").default(false).notNull(),
+  invoiceId: varchar("invoice_id").references(() => invoices.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("project_expenses_tenant_idx").on(table.tenantId),
+  index("project_expenses_project_idx").on(table.projectId),
+  index("project_expenses_expense_idx").on(table.expenseId),
+  index("project_expenses_invoice_idx").on(table.invoiceId),
+]);
+
+export const insertProjectExpenseSchema = createInsertSchema(projectExpenses, {
+  amount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProjectExpense = z.infer<typeof insertProjectExpenseSchema>;
+export type ProjectExpense = typeof projectExpenses.$inferSelect;
+
+// Project Milestones (key milestones for project tracking)
+export const projectMilestones = pgTable("project_milestones", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  dueDate: date("due_date").notNull(),
+  completedDate: date("completed_date"),
+  status: varchar("status", { length: 50 }).notNull().default("pending"),
+  billingPercentage: decimal("billing_percentage", { precision: 5, scale: 2 }),
+  invoiceId: varchar("invoice_id").references(() => invoices.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("project_milestones_tenant_idx").on(table.tenantId),
+  index("project_milestones_project_idx").on(table.projectId),
+  index("project_milestones_status_idx").on(table.status),
+  index("project_milestones_due_date_idx").on(table.dueDate),
+  sql`CONSTRAINT check_project_milestone_status CHECK (status IN ('pending', 'in_progress', 'completed', 'missed'))`,
+]);
+
+export const insertProjectMilestoneSchema = createInsertSchema(projectMilestones, {
+  billingPercentage: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProjectMilestone = z.infer<typeof insertProjectMilestoneSchema>;
+export type ProjectMilestone = typeof projectMilestones.$inferSelect;
+
+// Project Invoices (linking projects to invoices for billing)
+export const projectInvoices = pgTable("project_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  invoiceId: varchar("invoice_id").notNull().references(() => invoices.id),
+  billingPeriodStart: date("billing_period_start"),
+  billingPeriodEnd: date("billing_period_end"),
+  totalHours: decimal("total_hours", { precision: 10, scale: 2 }),
+  totalAmount: decimal("total_amount", { precision: 15, scale: 2 }).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_project_invoice").on(table.tenantId, table.invoiceId),
+  index("project_invoices_tenant_idx").on(table.tenantId),
+  index("project_invoices_project_idx").on(table.projectId),
+  index("project_invoices_invoice_idx").on(table.invoiceId),
+]);
+
+export const insertProjectInvoiceSchema = createInsertSchema(projectInvoices, {
+  totalHours: decimalString.optional(),
+  totalAmount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProjectInvoice = z.infer<typeof insertProjectInvoiceSchema>;
+export type ProjectInvoice = typeof projectInvoices.$inferSelect;
 
 // ============================================================================
 // RELATIONS (for Drizzle ORM queries)

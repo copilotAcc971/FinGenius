@@ -37,6 +37,10 @@ export const PERMISSION_MODULES = {
   INVENTORY: 'inventory',
   SCHEDULED_REPORTS: 'scheduled_reports',
   OPEN_BANKING: 'open_banking',
+  PROJECTS: 'projects',
+  TIME_ENTRIES: 'time_entries',
+  PROJECT_BUDGETS: 'project_budgets',
+  PROJECT_REPORTS: 'project_reports',
 } as const;
 
 export const PERMISSION_ACTIONS = {
@@ -303,6 +307,26 @@ export const PERMISSION_DEFINITIONS = [
   // Fixed Assets (extending assets)
   { module: 'assets', action: 'depreciate', name: 'assets.depreciate', description: 'Run depreciation for fixed assets' },
   { module: 'assets', action: 'dispose', name: 'assets.dispose', description: 'Dispose of fixed assets' },
+
+  // Projects
+  { module: 'projects', action: 'create', name: 'projects.create', description: 'Create new projects' },
+  { module: 'projects', action: 'read', name: 'projects.read', description: 'View projects' },
+  { module: 'projects', action: 'update', name: 'projects.update', description: 'Edit projects' },
+  { module: 'projects', action: 'delete', name: 'projects.delete', description: 'Delete projects' },
+
+  // Time Entries
+  { module: 'time_entries', action: 'create', name: 'time_entries.create', description: 'Create time entries' },
+  { module: 'time_entries', action: 'read', name: 'time_entries.read', description: 'View time entries' },
+  { module: 'time_entries', action: 'update', name: 'time_entries.update', description: 'Edit time entries' },
+  { module: 'time_entries', action: 'delete', name: 'time_entries.delete', description: 'Delete time entries' },
+  { module: 'time_entries', action: 'approve', name: 'time_entries.approve', description: 'Approve/reject time entries' },
+
+  // Project Budgets
+  { module: 'project_budgets', action: 'read', name: 'project_budgets.read', description: 'View project budgets' },
+  { module: 'project_budgets', action: 'manage', name: 'project_budgets.manage', description: 'Create and edit project budgets' },
+
+  // Project Reports
+  { module: 'project_reports', action: 'read', name: 'project_reports.read', description: 'View project reports and analytics' },
 ];
 
 // Permission inheritance rules (higher permissions inherit lower ones)
