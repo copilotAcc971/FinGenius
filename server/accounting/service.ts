@@ -73,6 +73,7 @@ const decimalString = z.preprocess(
  * - Must have exactly ONE of debitAmount OR creditAmount (not both, not neither)
  * - Amounts must be positive (>0)
  * - Description is required for audit trail
+ * - projectId is optional for project dimension tracking
  */
 export const journalEntryLineSchema = z.object({
   accountId: z.string().optional(),
@@ -80,6 +81,7 @@ export const journalEntryLineSchema = z.object({
   debitAmount: decimalString.optional(),
   creditAmount: decimalString.optional(),
   description: z.string(),
+  projectId: z.string().optional().nullable(),
 }).refine(
   (data) => data.accountId || data.accountCode,
   {

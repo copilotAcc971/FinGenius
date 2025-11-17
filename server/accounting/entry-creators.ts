@@ -91,6 +91,8 @@ import {
   debitNoteLineItems,
   items,
   taxes,
+  projects,
+  projectCostAccounts,
 } from '@shared/schema';
 import { ValidationError } from './errors';
 import { resolveSystemAccounts, validateBalance } from './service';
@@ -810,6 +812,71 @@ export function calculateEntryTotals(legs: { type: 'Debit' | 'Credit'; amount: s
   return { totalDebits, totalCredits };
 }
 
+// ====================================
+// PROJECT GL ACCOUNT HELPERS
+// ====================================
+
+/**
+ * Get project revenue account (or fallback to system default)
+ * 
+ * @param projectId - Project ID to lookup revenue account for
+ * @param tenantId - Tenant ID for security isolation
+ * @param tx - Database transaction for atomicity
+ * @returns Revenue account ID or null if not configured
+ */
+async function getProjectRevenueAccount(
+  projectId: string,
+  tenantId: string,
+  tx: DBTransaction
+): Promise<string | null> {
+  const project = await tx
+    .select({ revenueAccountId: projects.revenueAccountId })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.tenantId, tenantId)))
+    .limit(1);
+  
+  return project[0]?.revenueAccountId || null;
+}
+
+/**
+ * Get project cost account by category (or fallback to default/system)
+ * 
+ * @param projectId - Project ID to lookup cost account for
+ * @param costCategory - Category of cost ('labor', 'materials', 'overhead', 'other')
+ * @param tenantId - Tenant ID for security isolation
+ * @param tx - Database transaction for atomicity
+ * @returns Cost account ID or null if not configured
+ */
+async function getProjectCostAccount(
+  projectId: string,
+  costCategory: 'labor' | 'materials' | 'overhead' | 'other',
+  tenantId: string,
+  tx: DBTransaction
+): Promise<string | null> {
+  // First try category-specific account
+  const categoryAccount = await tx
+    .select({ accountId: projectCostAccounts.accountId })
+    .from(projectCostAccounts)
+    .where(and(
+      eq(projectCostAccounts.projectId, projectId),
+      eq(projectCostAccounts.tenantId, tenantId),
+      eq(projectCostAccounts.costCategory, costCategory)
+    ))
+    .limit(1);
+  
+  if (categoryAccount[0]) {
+    return categoryAccount[0].accountId;
+  }
+  
+  // Fallback to project's default cost account
+  const project = await tx
+    .select({ defaultCostAccountId: projects.defaultCostAccountId })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.tenantId, tenantId)))
+    .limit(1);
+  
+  return project[0]?.defaultCostAccountId || null;
+}
 
 // ====================================
 // ENTRY CREATOR FUNCTIONS
@@ -821,11 +888,11 @@ export function calculateEntryTotals(legs: { type: 'Debit' | 'Credit'; amount: s
  * **Journal Entry Pattern:**
  * ```
  * DR  Accounts Receivable    [totalAmount]     (1200)
- *     CR  Sales Revenue      [subtotal]        (4000)
+ *     CR  Sales Revenue      [subtotal]        (4000)  (or project revenue account)
  *     CR  Tax Payable        [totalTax]        (2100)
  * 
  * For each inventory line item:
- * DR  Cost of Goods Sold     [costOfGoodsSold] (5000)
+ * DR  Cost of Goods Sold     [costOfGoodsSold] (5000)  (or project cost account)
  *     CR  Inventory          [costOfGoodsSold] (1300)
  * ```
  * 
@@ -834,6 +901,7 @@ export function calculateEntryTotals(legs: { type: 'Debit' | 'Credit'; amount: s
  * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
+ * @param projectId - Optional project ID for project dimension tracking and GL account mapping
  * @returns Created journal entry
  */
 export async function createInvoiceJournalEntry(
@@ -841,7 +909,8 @@ export async function createInvoiceJournalEntry(
   tenantId: string,
   userId: string,
   storage: IStorage,
-  tx: DBTransaction
+  tx: DBTransaction,
+  projectId?: string | null
 ): Promise<CreateJournalEntry> {
   // Fetch all system accounts in one query
   const sysAccounts = await resolveSystemAccounts(tenantId, tx);
@@ -854,14 +923,21 @@ export async function createInvoiceJournalEntry(
     accountId: sysAccounts.accountsReceivable.id,
     debitAmount: input.totalAmount,
     description: `Invoice ${input.invoiceNumber} - Customer receivable`,
+    projectId,
   });
   
   // CR Sales Revenue [subtotal]
+  // If projectId provided, use project's revenue account instead of system default
+  const revenueAccountId = projectId 
+    ? (await getProjectRevenueAccount(projectId, tenantId, tx)) || sysAccounts.revenue.id
+    : sysAccounts.revenue.id;
+  
   if (parseFloat(input.subtotal) > 0) {
     lines.push({
-      accountId: sysAccounts.revenue.id,
+      accountId: revenueAccountId,
       creditAmount: input.subtotal,
       description: `Invoice ${input.invoiceNumber} - Sales revenue`,
+      projectId,
     });
   }
   
@@ -871,17 +947,23 @@ export async function createInvoiceJournalEntry(
       accountId: sysAccounts.taxPayable.id,
       creditAmount: input.totalTax,
       description: `Invoice ${input.invoiceNumber} - Tax collected`,
+      projectId,
     });
   }
   
   // For inventory items: DR COGS, CR Inventory
   for (const lineItem of input.lineItems) {
     if (lineItem.isInventoryItem && lineItem.costOfGoodsSold && parseFloat(lineItem.costOfGoodsSold) > 0) {
-      // DR Cost of Goods Sold
+      // DR Cost of Goods Sold (use project cost account if projectId provided)
+      const cogsAccountId = projectId
+        ? (await getProjectCostAccount(projectId, 'materials', tenantId, tx)) || sysAccounts.cogs.id
+        : sysAccounts.cogs.id;
+      
       lines.push({
-        accountId: sysAccounts.cogs.id,
+        accountId: cogsAccountId,
         debitAmount: lineItem.costOfGoodsSold,
         description: `COGS - ${lineItem.description}`,
+        projectId,
       });
       
       // CR Inventory
@@ -889,6 +971,7 @@ export async function createInvoiceJournalEntry(
         accountId: sysAccounts.inventory.id,
         creditAmount: lineItem.costOfGoodsSold,
         description: `Inventory reduction - ${lineItem.description}`,
+        projectId,
       });
     }
   }
@@ -924,6 +1007,7 @@ export async function createInvoiceJournalEntry(
  * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
+ * @param projectId - Optional project ID for project dimension tracking
  * @returns Created journal entry
  */
 export async function createBillJournalEntry(
@@ -931,7 +1015,8 @@ export async function createBillJournalEntry(
   tenantId: string,
   userId: string,
   storage: IStorage,
-  tx: DBTransaction
+  tx: DBTransaction,
+  projectId?: string | null
 ): Promise<CreateJournalEntry> {
   // Fetch all system accounts in one query
   const sysAccounts = await resolveSystemAccounts(tenantId, tx);
@@ -946,6 +1031,7 @@ export async function createBillJournalEntry(
         accountId: lineItem.expenseAccountId,
         debitAmount: lineItem.amount,
         description: lineItem.description,
+        projectId,
       });
     }
   }
@@ -956,6 +1042,7 @@ export async function createBillJournalEntry(
       accountId: sysAccounts.taxPayable.id, // Using same Tax Payable account for input tax
       debitAmount: input.totalTax,
       description: `Bill ${input.billNumber} - Input tax`,
+      projectId,
     });
   }
   
@@ -964,6 +1051,7 @@ export async function createBillJournalEntry(
     accountId: sysAccounts.accountsPayable.id,
     creditAmount: input.totalAmount,
     description: `Bill ${input.billNumber} - Vendor payable`,
+    projectId,
   });
   
   // Validate debits = credits
@@ -996,6 +1084,7 @@ export async function createBillJournalEntry(
  * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
+ * @param projectId - Optional project ID for project dimension tracking
  * @returns Created journal entry
  */
 export async function createCustomerPaymentJournalEntry(
@@ -1003,7 +1092,8 @@ export async function createCustomerPaymentJournalEntry(
   tenantId: string,
   userId: string,
   storage: IStorage,
-  tx: DBTransaction
+  tx: DBTransaction,
+  projectId?: string | null
 ): Promise<CreateJournalEntry> {
   // Fetch all system accounts in one query
   const sysAccounts = await resolveSystemAccounts(tenantId, tx);
@@ -1016,6 +1106,7 @@ export async function createCustomerPaymentJournalEntry(
     accountId: sysAccounts.cash.id,
     debitAmount: input.amount,
     description: `Customer payment ${input.paymentNumber} - ${input.paymentMethod}`,
+    projectId,
   });
   
   // CR Accounts Receivable [amount]
@@ -1023,6 +1114,7 @@ export async function createCustomerPaymentJournalEntry(
     accountId: sysAccounts.accountsReceivable.id,
     creditAmount: input.amount,
     description: `Customer payment ${input.paymentNumber} - Receipt from customer`,
+    projectId,
   });
   
   // Validate debits = credits
@@ -1055,6 +1147,7 @@ export async function createCustomerPaymentJournalEntry(
  * @param userId - User ID who is creating this entry (for preparedBy tracking)
  * @param storage - Storage instance for database access
  * @param tx - Database transaction for atomicity
+ * @param projectId - Optional project ID for project dimension tracking
  * @returns Created journal entry
  */
 export async function createVendorPaymentJournalEntry(
@@ -1062,7 +1155,8 @@ export async function createVendorPaymentJournalEntry(
   tenantId: string,
   userId: string,
   storage: IStorage,
-  tx: DBTransaction
+  tx: DBTransaction,
+  projectId?: string | null
 ): Promise<CreateJournalEntry> {
   // Fetch all system accounts in one query
   const sysAccounts = await resolveSystemAccounts(tenantId, tx);
@@ -1075,6 +1169,7 @@ export async function createVendorPaymentJournalEntry(
     accountId: sysAccounts.accountsPayable.id,
     debitAmount: input.amount,
     description: `Vendor payment ${input.paymentNumber} - Payment to vendor`,
+    projectId,
   });
   
   // CR Cash/Bank [amount]
@@ -1082,6 +1177,7 @@ export async function createVendorPaymentJournalEntry(
     accountId: sysAccounts.cash.id,
     creditAmount: input.amount,
     description: `Vendor payment ${input.paymentNumber} - ${input.paymentMethod}`,
+    projectId,
   });
   
   // Validate debits = credits

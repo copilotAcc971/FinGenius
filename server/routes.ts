@@ -100,6 +100,7 @@ import {
   approvalHistory,
   approvalSteps,
   approvalWorkflows,
+  projectInvoices,
   type Expense,
 } from "@shared/schema";
 import { insertFXConfigSchema } from "@shared/fx-types";
@@ -1906,13 +1907,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // 3a. Fetch invoice data with line items for journal entry creation
         const invoiceEntryData = await fetchInvoiceEntryData(id, tenantId, storage, tx);
 
+        // 3a-1. Check if invoice is linked to a project (via projectInvoices join table)
+        const projectInvoiceLink = await tx
+          .select({ projectId: projectInvoices.projectId })
+          .from(projectInvoices)
+          .where(and(
+            eq(projectInvoices.invoiceId, id),
+            eq(projectInvoices.tenantId, tenantId)
+          ))
+          .limit(1);
+        const projectId = projectInvoiceLink[0]?.projectId || null;
+
         // 3b. Create journal entry structure
         const journalEntryInput = await createInvoiceJournalEntry(
           invoiceEntryData,
           tenantId,
           userId, // preparedBy
           storage,
-          tx
+          tx,
+          projectId  // Pass projectId for dimension tracking
         );
 
         // 3c. Get next journal entry number - CRITICAL: Pass tx for atomicity
@@ -1946,6 +1959,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             type: line.debitAmount ? 'Debit' as const : 'Credit' as const,
             amount: line.debitAmount || line.creditAmount!,
             description: line.description,
+            projectId: line.projectId || null,
           })),
           tx
         );
@@ -4746,13 +4760,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // 3a. Fetch bill data with line items for journal entry creation
         const billEntryData = await fetchBillEntryData(id, tenantId, storage, tx);
 
+        // 3a-1. Get projectId from bill for dimension tracking
+        const projectId = bill.projectId || null;
+
         // 3b. Create journal entry structure
         const journalEntryInput = await createBillJournalEntry(
           billEntryData,
           tenantId,
           userId, // preparedBy
           storage,
-          tx
+          tx,
+          projectId  // Pass projectId for dimension tracking
         );
 
         // 3c. Get next journal entry number - CRITICAL: Pass tx for atomicity
@@ -4786,6 +4804,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             type: line.debitAmount ? 'Debit' as const : 'Credit' as const,
             amount: line.debitAmount || line.creditAmount!,
             description: line.description,
+            projectId: line.projectId || null,
           })),
           tx
         );
