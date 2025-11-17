@@ -3794,6 +3794,7 @@ export const timeEntries = pgTable("time_entries", {
   approvedBy: varchar("approved_by").references(() => users.id),
   approvedAt: timestamp("approved_at"),
   invoiceId: varchar("invoice_id").references(() => invoices.id),
+  projectInvoiceId: varchar("project_invoice_id").references(() => projectInvoices.id),
   rejectionReason: text("rejection_reason"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -3805,6 +3806,7 @@ export const timeEntries = pgTable("time_entries", {
   index("time_entries_date_idx").on(table.date),
   index("time_entries_status_idx").on(table.status),
   index("time_entries_invoice_idx").on(table.invoiceId),
+  index("time_entries_project_invoice_idx").on(table.projectInvoiceId),
   index("time_entries_tenant_status_idx").on(table.tenantId, table.status),
   sql`CONSTRAINT check_time_entry_status CHECK (status IN ('draft', 'submitted', 'approved', 'rejected', 'invoiced'))`,
 ]);
@@ -3931,6 +3933,9 @@ export const projectMilestones = pgTable("project_milestones", {
   completedDate: date("completed_date"),
   status: varchar("status", { length: 50 }).notNull().default("pending"),
   billingPercentage: decimal("billing_percentage", { precision: 5, scale: 2 }),
+  invoiceableAmount: decimal("invoiceable_amount", { precision: 15, scale: 2 }),
+  invoicedAmount: decimal("invoiced_amount", { precision: 15, scale: 2 }).default("0").notNull(),
+  isFullyInvoiced: boolean("is_fully_invoiced").default(false).notNull(),
   invoiceId: varchar("invoice_id").references(() => invoices.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -3944,6 +3949,8 @@ export const projectMilestones = pgTable("project_milestones", {
 
 export const insertProjectMilestoneSchema = createInsertSchema(projectMilestones, {
   billingPercentage: decimalString.optional(),
+  invoiceableAmount: decimalString.optional(),
+  invoicedAmount: decimalString.optional(),
 }).omit({
   id: true,
   createdAt: true,
@@ -3959,8 +3966,12 @@ export const projectInvoices = pgTable("project_invoices", {
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   projectId: varchar("project_id").notNull().references(() => projects.id),
   invoiceId: varchar("invoice_id").notNull().references(() => invoices.id),
-  billingPeriodStart: date("billing_period_start"),
-  billingPeriodEnd: date("billing_period_end"),
+  billingMode: varchar("billing_mode", { length: 50 }).notNull(),
+  milestoneId: varchar("milestone_id").references(() => projectMilestones.id),
+  percentageComplete: decimal("percentage_complete", { precision: 5, scale: 2 }),
+  sourceSummary: text("source_summary"),
+  periodStart: date("period_start"),
+  periodEnd: date("period_end"),
   totalHours: decimal("total_hours", { precision: 10, scale: 2 }),
   totalAmount: decimal("total_amount", { precision: 15, scale: 2 }).notNull(),
   notes: text("notes"),
@@ -3971,9 +3982,11 @@ export const projectInvoices = pgTable("project_invoices", {
   index("project_invoices_tenant_idx").on(table.tenantId),
   index("project_invoices_project_idx").on(table.projectId),
   index("project_invoices_invoice_idx").on(table.invoiceId),
+  index("project_invoices_milestone_idx").on(table.milestoneId),
 ]);
 
 export const insertProjectInvoiceSchema = createInsertSchema(projectInvoices, {
+  percentageComplete: decimalString.optional(),
   totalHours: decimalString.optional(),
   totalAmount: decimalString,
 }).omit({
@@ -3984,6 +3997,58 @@ export const insertProjectInvoiceSchema = createInsertSchema(projectInvoices, {
 
 export type InsertProjectInvoice = z.infer<typeof insertProjectInvoiceSchema>;
 export type ProjectInvoice = typeof projectInvoices.$inferSelect;
+
+// Project Invoice Time Entries (junction table for time-based billing)
+export const projectInvoiceTimeEntries = pgTable("project_invoice_time_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectInvoiceId: varchar("project_invoice_id").notNull().references(() => projectInvoices.id),
+  timeEntryId: varchar("time_entry_id").notNull().references(() => timeEntries.id),
+  hours: decimal("hours", { precision: 10, scale: 2 }).notNull(),
+  rate: decimal("rate", { precision: 10, scale: 2 }).notNull(),
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  unique("unique_project_invoice_time_entry").on(table.tenantId, table.projectInvoiceId, table.timeEntryId),
+  index("project_invoice_time_entries_tenant_idx").on(table.tenantId),
+  index("project_invoice_time_entries_project_invoice_idx").on(table.projectInvoiceId),
+]);
+
+export const insertProjectInvoiceTimeEntrySchema = createInsertSchema(projectInvoiceTimeEntries, {
+  hours: decimalString,
+  rate: decimalString,
+  amount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertProjectInvoiceTimeEntry = z.infer<typeof insertProjectInvoiceTimeEntrySchema>;
+export type ProjectInvoiceTimeEntry = typeof projectInvoiceTimeEntries.$inferSelect;
+
+// Project Invoice Milestones (junction table for milestone-based billing)
+export const projectInvoiceMilestones = pgTable("project_invoice_milestones", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectInvoiceId: varchar("project_invoice_id").notNull().references(() => projectInvoices.id),
+  milestoneId: varchar("milestone_id").notNull().references(() => projectMilestones.id),
+  invoicedAmount: decimal("invoiced_amount", { precision: 15, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  unique("unique_project_invoice_milestone").on(table.tenantId, table.projectInvoiceId, table.milestoneId),
+  index("project_invoice_milestones_tenant_idx").on(table.tenantId),
+  index("project_invoice_milestones_project_invoice_idx").on(table.projectInvoiceId),
+]);
+
+export const insertProjectInvoiceMilestoneSchema = createInsertSchema(projectInvoiceMilestones, {
+  invoicedAmount: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertProjectInvoiceMilestone = z.infer<typeof insertProjectInvoiceMilestoneSchema>;
+export type ProjectInvoiceMilestone = typeof projectInvoiceMilestones.$inferSelect;
 
 // ============================================================================
 // RELATIONS (for Drizzle ORM queries)
