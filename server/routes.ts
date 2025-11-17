@@ -134,6 +134,36 @@ const reimburseExpenseSchema = z.object({
   paymentReference: z.string().min(1, "Payment reference is required"),
 });
 
+// Schemas for project invoicing endpoints
+const createInvoiceFromTimeEntriesSchema = z.object({
+  timeEntryIds: z.array(z.string()).min(1, "At least one time entry is required"),
+  customerId: z.string().min(1, "Customer is required"),
+  invoiceDate: z.string().min(1, "Invoice date is required"),
+  dueDate: z.string().min(1, "Due date is required"),
+  notes: z.string().optional(),
+  taxId: z.string().optional(),
+});
+
+const createInvoiceFromMilestoneSchema = z.object({
+  milestoneId: z.string().min(1, "Milestone is required"),
+  amount: z.string().min(1, "Amount is required"),
+  customerId: z.string().min(1, "Customer is required"),
+  invoiceDate: z.string().min(1, "Invoice date is required"),
+  dueDate: z.string().min(1, "Due date is required"),
+  notes: z.string().optional(),
+  taxId: z.string().optional(),
+});
+
+const createInvoiceFromProgressSchema = z.object({
+  percentageComplete: z.string().min(1, "Percentage complete is required"),
+  customerId: z.string().min(1, "Customer is required"),
+  invoiceDate: z.string().min(1, "Invoice date is required"),
+  dueDate: z.string().min(1, "Due date is required"),
+  description: z.string().optional(),
+  notes: z.string().optional(),
+  taxId: z.string().optional(),
+});
+
 // Expense serialization helper
 function serializeExpense(expense: Expense): any {
   return {
@@ -8053,15 +8083,211 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Project Invoices
+  // Project Invoices - List invoiceable resources
+  app.get('/api/projects/:projectId/invoices/invoiceable-time-entries', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { projectId } = req.params;
+      const { startDate, endDate, userId, taskId } = req.query;
+
+      const filters: any = {};
+      if (startDate) filters.startDate = new Date(startDate as string);
+      if (endDate) filters.endDate = new Date(endDate as string);
+      if (userId) filters.userId = userId as string;
+      if (taskId) filters.taskId = taskId as string;
+
+      const timeEntries = await storage.listInvoiceableTimeEntries(tenantId, projectId, filters);
+      res.json(timeEntries);
+    } catch (error: any) {
+      console.error("Error fetching invoiceable time entries:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch invoiceable time entries" });
+    }
+  });
+
+  app.get('/api/projects/:projectId/invoices/invoiceable-milestones', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { projectId } = req.params;
+
+      const milestones = await storage.listInvoiceableMilestones(tenantId, projectId);
+      res.json(milestones);
+    } catch (error: any) {
+      console.error("Error fetching invoiceable milestones:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch invoiceable milestones" });
+    }
+  });
+
+  app.get('/api/projects/:projectId/invoices/progress-billing-calculation', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { projectId } = req.params;
+
+      const calculation = await storage.calculateProjectProgressBilling(tenantId, projectId);
+      res.json(calculation);
+    } catch (error: any) {
+      console.error("Error calculating progress billing:", error);
+      res.status(500).json({ message: error.message || "Failed to calculate progress billing" });
+    }
+  });
+
+  // Project Invoices - Create invoices from different sources
+  app.post('/api/projects/:projectId/invoices/from-time-entries', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { projectId } = req.params;
+      
+      const validated = createInvoiceFromTimeEntriesSchema.parse(req.body);
+      const { timeEntryIds, customerId, invoiceDate, dueDate, notes, taxId } = validated;
+
+      const invoiceSequence = await storage.getNextInvoiceNumber(tenantId);
+      const taxAmount = taxId ? '0.00' : '0.00';
+
+      const invoiceData: any = {
+        tenantId,
+        customerId,
+        invoiceNumber: invoiceSequence,
+        invoiceDate,
+        dueDate,
+        status: 'draft',
+        notes: notes || '',
+        currencyCode: 'USD',
+        taxAmount,
+      };
+
+      if (taxId) {
+        invoiceData.taxId = taxId;
+      }
+
+      const result = await storage.createProjectInvoiceFromTimeEntries(
+        tenantId,
+        projectId,
+        timeEntryIds,
+        invoiceData
+      );
+
+      res.status(201).json(result);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error("Error creating invoice from time entries:", error);
+      res.status(400).json({ message: error.message || "Failed to create invoice from time entries" });
+    }
+  });
+
+  app.post('/api/projects/:projectId/invoices/from-milestone', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { projectId } = req.params;
+      
+      const validated = createInvoiceFromMilestoneSchema.parse(req.body);
+      const { milestoneId, amount, customerId, invoiceDate, dueDate, notes, taxId } = validated;
+
+      const invoiceSequence = await storage.getNextInvoiceNumber(tenantId);
+      const taxAmount = taxId ? '0.00' : '0.00';
+
+      const invoiceData: any = {
+        tenantId,
+        customerId,
+        invoiceNumber: invoiceSequence,
+        invoiceDate,
+        dueDate,
+        status: 'draft',
+        notes: notes || '',
+        currencyCode: 'USD',
+        taxAmount,
+      };
+
+      if (taxId) {
+        invoiceData.taxId = taxId;
+      }
+
+      const result = await storage.createProjectInvoiceFromMilestone(
+        tenantId,
+        projectId,
+        milestoneId,
+        amount,
+        invoiceData
+      );
+
+      res.status(201).json(result);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error("Error creating invoice from milestone:", error);
+      res.status(400).json({ message: error.message || "Failed to create invoice from milestone" });
+    }
+  });
+
+  app.post('/api/projects/:projectId/invoices/from-progress', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { projectId } = req.params;
+      
+      const validated = createInvoiceFromProgressSchema.parse(req.body);
+      const { percentageComplete, customerId, invoiceDate, dueDate, description, notes, taxId } = validated;
+
+      const invoiceSequence = await storage.getNextInvoiceNumber(tenantId);
+      const taxAmount = taxId ? '0.00' : '0.00';
+
+      const invoiceData: any = {
+        tenantId,
+        customerId,
+        invoiceNumber: invoiceSequence,
+        invoiceDate,
+        dueDate,
+        status: 'draft',
+        notes: description || notes || '',
+        currencyCode: 'USD',
+        taxAmount,
+      };
+
+      if (taxId) {
+        invoiceData.taxId = taxId;
+      }
+
+      const result = await storage.createProjectInvoiceFromProgress(
+        tenantId,
+        projectId,
+        percentageComplete,
+        invoiceData
+      );
+
+      res.status(201).json(result);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      }
+      console.error("Error creating invoice from progress:", error);
+      res.status(400).json({ message: error.message || "Failed to create invoice from progress" });
+    }
+  });
+
+  // Project Invoices - List and detail
   app.get('/api/projects/:projectId/invoices', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
-      const invoices = await storage.getProjectInvoices(req.params.projectId, tenantId);
+      const { projectId } = req.params;
+
+      const invoices = await storage.listProjectInvoices(tenantId, projectId);
       res.json(invoices);
     } catch (error: any) {
       console.error("Error fetching project invoices:", error);
       res.status(500).json({ message: error.message || "Failed to fetch project invoices" });
+    }
+  });
+
+  app.get('/api/project-invoices/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { id } = req.params;
+
+      const projectInvoice = await storage.getProjectInvoiceDetail(tenantId, id);
+      res.json(projectInvoice);
+    } catch (error: any) {
+      console.error("Error fetching project invoice detail:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project invoice detail" });
     }
   });
 

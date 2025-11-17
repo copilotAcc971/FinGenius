@@ -21,6 +21,7 @@ import { useRBAC } from "@/contexts/rbac-context";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Project, Customer, TimeEntry, ProjectTask, ProjectMilestone, User, ProjectBudget, ProjectExpense, ProjectInvoice } from "@shared/schema";
 import { format } from "date-fns";
+import { CreateProjectInvoiceDialog } from "@/components/create-project-invoice-dialog";
 
 export default function ProjectDetail() {
   const params = useParams();
@@ -31,6 +32,7 @@ export default function ProjectDetail() {
   const { hasPermission, canUpdate } = useRBAC();
   const canManage = canUpdate('projects');
   const [activeTab, setActiveTab] = useState("overview");
+  const [createInvoiceDialogOpen, setCreateInvoiceDialogOpen] = useState(false);
 
   // Safe decimal to number conversion
   const safeDecimal = (value: string | null | undefined): number => {
@@ -658,44 +660,91 @@ export default function ProjectDetail() {
 
         <TabsContent value="invoices" className="mt-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
               <CardTitle>Project Invoices</CardTitle>
+              {hasPermission("invoices:create") && (
+                <Button
+                  onClick={() => setCreateInvoiceDialogOpen(true)}
+                  data-testid="button-create-invoice"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Invoice
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
               {invoicesLoading ? (
-                <div>Loading invoices...</div>
+                <div className="text-center py-8">Loading invoices...</div>
               ) : !invoices || invoices.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
-                  No invoices linked to this project
+                  <p>No invoices linked to this project</p>
+                  {hasPermission("invoices:create") && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={() => setCreateInvoiceDialogOpen(true)}
+                      data-testid="button-create-first-invoice"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create First Invoice
+                    </Button>
+                  )}
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Invoice ID</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead className="text-right">Hours</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {invoices.map((invoice) => (
-                      <TableRow key={invoice.id}>
-                        <TableCell>{invoice.invoiceId}</TableCell>
-                        <TableCell>{new Date(invoice.createdAt).toLocaleDateString()}</TableCell>
-                        <TableCell className="text-right font-mono">
-                          ${safeDecimal(invoice.totalAmount).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {invoice.totalHours ? safeDecimal(invoice.totalHours).toFixed(2) : '-'}
-                        </TableCell>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-semibold">Invoice Number</TableHead>
+                        <TableHead className="font-semibold">Billing Mode</TableHead>
+                        <TableHead className="font-semibold">Date</TableHead>
+                        <TableHead className="font-semibold text-right">Hours</TableHead>
+                        <TableHead className="font-semibold text-right">Amount</TableHead>
+                        <TableHead className="font-semibold">Status</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {invoices.map((invoice) => (
+                        <TableRow key={invoice.id} data-testid={`row-invoice-${invoice.id}`}>
+                          <TableCell className="font-mono">{invoice.invoiceId}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" data-testid={`badge-mode-${invoice.id}`}>
+                              {invoice.billingMode === "time_entries" ? "Time Entries" :
+                               invoice.billingMode === "milestone" ? "Milestone" :
+                               invoice.billingMode === "progress" ? "Progress" :
+                               invoice.billingMode}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{format(new Date(invoice.createdAt), "MMM d, yyyy")}</TableCell>
+                          <TableCell className="text-right font-mono">
+                            {invoice.totalHours ? safeDecimal(invoice.totalHours).toFixed(2) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right font-mono" data-testid={`amount-${invoice.id}`}>
+                            ${safeDecimal(invoice.totalAmount).toFixed(2)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" data-testid={`status-${invoice.id}`}>
+                              Active
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </CardContent>
           </Card>
+          
+          {customer && (
+            <CreateProjectInvoiceDialog
+              open={createInvoiceDialogOpen}
+              onOpenChange={setCreateInvoiceDialogOpen}
+              project={project}
+              customer={customer}
+            />
+          )}
         </TabsContent>
       </Tabs>
     </div>
