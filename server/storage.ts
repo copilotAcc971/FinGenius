@@ -56,6 +56,7 @@ import {
   projectInvoices,
   projectInvoiceTimeEntries,
   projectInvoiceMilestones,
+  projectCostAccounts,
   type User,
   type UpsertUser,
   type Tenant,
@@ -177,6 +178,8 @@ import {
   type InsertProjectInvoiceTimeEntry,
   type ProjectInvoiceMilestone,
   type InsertProjectInvoiceMilestone,
+  type ProjectCostAccount,
+  type InsertProjectCostAccount,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
@@ -596,6 +599,77 @@ export interface IStorage {
     startDate: Date | null;
     endDate: Date | null;
   }>>;
+
+  // Project Cost Account CRUD
+  createProjectCostAccount(data: InsertProjectCostAccount): Promise<ProjectCostAccount>;
+  updateProjectCostAccount(id: string, tenantId: string, data: Partial<InsertProjectCostAccount>): Promise<ProjectCostAccount>;
+  deleteProjectCostAccount(id: string, tenantId: string): Promise<void>;
+  getProjectCostAccounts(projectId: string, tenantId: string): Promise<ProjectCostAccount[]>;
+
+  // Project Account Mappings
+  getProjectAccountMappings(projectId: string, tenantId: string): Promise<{
+    revenueAccount: Account | null;
+    defaultCostAccount: Account | null;
+    categoryAccounts: { category: string; account: Account }[];
+  }>;
+
+  // Project Cost Breakdown
+  getProjectCostBreakdown(projectId: string, tenantId: string): Promise<{
+    laborCost: string;
+    materialsCost: string;
+    overheadCost: string;
+    otherCost: string;
+    totalCost: string;
+  }>;
+
+  // Project Budget vs Actual
+  getProjectBudgetVsActual(projectId: string, tenantId: string): Promise<{
+    laborBudget: string;
+    laborActual: string;
+    laborVariance: string;
+    materialsBudget: string;
+    materialsActual: string;
+    materialsVariance: string;
+    overheadBudget: string;
+    overheadActual: string;
+    overheadVariance: string;
+    otherBudget: string;
+    otherActual: string;
+    otherVariance: string;
+    totalBudget: string;
+    totalActual: string;
+    totalVariance: string;
+  }>;
+
+  // Projects Profitability Summary
+  getProjectsProfitabilitySummary(tenantId: string, filters?: {
+    status?: string;
+    customerId?: string;
+  }): Promise<Array<{
+    projectId: string;
+    projectName: string;
+    customerName: string;
+    status: string;
+    totalRevenue: string;
+    totalCosts: string;
+    totalProfit: string;
+    profitMargin: string;
+  }>>;
+
+  // Project Financial Snapshot
+  getProjectFinancialSnapshot(projectId: string, tenantId: string): Promise<{
+    project: Project;
+    revenue: { total: string; accountName: string | null };
+    costs: {
+      labor: { amount: string; accountName: string | null };
+      materials: { amount: string; accountName: string | null };
+      overhead: { amount: string; accountName: string | null };
+      other: { amount: string; accountName: string | null };
+      total: string;
+    };
+    profit: string;
+    profitMargin: string;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -7833,6 +7907,251 @@ export class DatabaseStorage implements IStorage {
     
     return summaries;
   }
+
+  // Project Cost Account CRUD
+  async createProjectCostAccount(data: InsertProjectCostAccount): Promise<ProjectCostAccount> {
+    const [account] = await db.insert(projectCostAccounts).values(data).returning();
+    return account;
+  }
+
+  async updateProjectCostAccount(id: string, tenantId: string, data: Partial<InsertProjectCostAccount>): Promise<ProjectCostAccount> {
+    const [account] = await db.update(projectCostAccounts)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(
+        eq(projectCostAccounts.id, id),
+        eq(projectCostAccounts.tenantId, tenantId)
+      ))
+      .returning();
+    
+    if (!account) throw new Error("Project cost account not found");
+    return account;
+  }
+
+  async deleteProjectCostAccount(id: string, tenantId: string): Promise<void> {
+    await db.delete(projectCostAccounts)
+      .where(and(
+        eq(projectCostAccounts.id, id),
+        eq(projectCostAccounts.tenantId, tenantId)
+      ));
+  }
+
+  async getProjectCostAccounts(projectId: string, tenantId: string): Promise<ProjectCostAccount[]> {
+    return await db.select()
+      .from(projectCostAccounts)
+      .where(and(
+        eq(projectCostAccounts.projectId, projectId),
+        eq(projectCostAccounts.tenantId, tenantId)
+      ));
+  }
+
+  // Project Account Mappings
+  async getProjectAccountMappings(projectId: string, tenantId: string) {
+    const project = await this.getProject(projectId, tenantId);
+    if (!project) throw new Error("Project not found");
+
+    const revenueAccount = project.revenueAccountId 
+      ? await this.getAccount(project.revenueAccountId, tenantId)
+      : null;
+
+    const defaultCostAccount = project.defaultCostAccountId
+      ? await this.getAccount(project.defaultCostAccountId, tenantId)
+      : null;
+
+    const costAccounts = await db.select({
+      category: projectCostAccounts.costCategory,
+      account: accounts,
+    })
+      .from(projectCostAccounts)
+      .innerJoin(accounts, eq(projectCostAccounts.accountId, accounts.id))
+      .where(and(
+        eq(projectCostAccounts.projectId, projectId),
+        eq(projectCostAccounts.tenantId, tenantId)
+      ));
+
+    return {
+      revenueAccount,
+      defaultCostAccount,
+      categoryAccounts: costAccounts.map(ca => ({
+        category: ca.category,
+        account: ca.account
+      })),
+    };
+  }
+
+  // Project Cost Breakdown
+  async getProjectCostBreakdown(projectId: string, tenantId: string) {
+    const timeResult = await db.select({
+      total: sum(sql`${timeEntries.billableAmount}::numeric`),
+    })
+      .from(timeEntries)
+      .where(and(
+        eq(timeEntries.tenantId, tenantId),
+        eq(timeEntries.projectId, projectId),
+        eq(timeEntries.status, 'approved')
+      ));
+    
+    const laborCost = timeResult[0]?.total || '0';
+
+    const expenseResult = await db.select({
+      total: sum(sql`${projectExpenses.amount}::numeric`),
+    })
+      .from(projectExpenses)
+      .where(and(
+        eq(projectExpenses.tenantId, tenantId),
+        eq(projectExpenses.projectId, projectId)
+      ));
+    
+    const expenseCost = expenseResult[0]?.total || '0';
+
+    const materialsCost = '0';
+    const overheadCost = '0';
+    const otherCost = expenseCost;
+
+    const totalCost = (
+      parseFloat(laborCost) +
+      parseFloat(materialsCost) +
+      parseFloat(overheadCost) +
+      parseFloat(otherCost)
+    ).toFixed(2);
+
+    return {
+      laborCost,
+      materialsCost,
+      overheadCost,
+      otherCost,
+      totalCost,
+    };
+  }
+
+  // Project Budget vs Actual
+  async getProjectBudgetVsActual(projectId: string, tenantId: string) {
+    const project = await this.getProject(projectId, tenantId);
+    if (!project) throw new Error("Project not found");
+
+    const budgets = await db.select()
+      .from(projectBudgets)
+      .where(and(
+        eq(projectBudgets.projectId, projectId),
+        eq(projectBudgets.tenantId, tenantId)
+      ))
+      .orderBy(desc(projectBudgets.createdAt))
+      .limit(1);
+
+    const budget = budgets[0] || null;
+
+    const costBreakdown = await this.getProjectCostBreakdown(projectId, tenantId);
+
+    const laborBudget = budget?.laborBudget || '0';
+    const laborActual = costBreakdown.laborCost;
+    const laborVariance = (parseFloat(laborBudget) - parseFloat(laborActual)).toFixed(2);
+
+    const materialsBudget = budget?.materialsBudget || '0';
+    const materialsActual = costBreakdown.materialsCost;
+    const materialsVariance = (parseFloat(materialsBudget) - parseFloat(materialsActual)).toFixed(2);
+
+    const overheadBudget = budget?.overheadBudget || '0';
+    const overheadActual = costBreakdown.overheadCost;
+    const overheadVariance = (parseFloat(overheadBudget) - parseFloat(overheadActual)).toFixed(2);
+
+    const otherBudget = budget?.otherBudget || '0';
+    const otherActual = costBreakdown.otherCost;
+    const otherVariance = (parseFloat(otherBudget) - parseFloat(otherActual)).toFixed(2);
+
+    const totalBudget = budget?.budgetAmount || '0';
+    const totalActual = costBreakdown.totalCost;
+    const totalVariance = (parseFloat(totalBudget) - parseFloat(totalActual)).toFixed(2);
+
+    return {
+      laborBudget, laborActual, laborVariance,
+      materialsBudget, materialsActual, materialsVariance,
+      overheadBudget, overheadActual, overheadVariance,
+      otherBudget, otherActual, otherVariance,
+      totalBudget, totalActual, totalVariance,
+    };
+  }
+
+  // Projects Profitability Summary
+  async getProjectsProfitabilitySummary(tenantId: string, filters?: { status?: string; customerId?: string }) {
+    let conditions = [eq(projects.tenantId, tenantId)];
+    
+    if (filters?.status) {
+      conditions.push(eq(projects.status, filters.status));
+    }
+    if (filters?.customerId) {
+      conditions.push(eq(projects.customerId, filters.customerId));
+    }
+
+    const projectsList = await db.select()
+      .from(projects)
+      .leftJoin(customers, eq(projects.customerId, customers.id))
+      .where(and(...conditions))
+      .orderBy(desc(projects.createdAt));
+
+    const summary = [];
+    for (const row of projectsList) {
+      const project = row.projects;
+      const customer = row.customers;
+      
+      const profitability = await this.getProjectProfitability(project.id, tenantId);
+      
+      summary.push({
+        projectId: project.id,
+        projectName: project.name,
+        customerName: customer?.displayName || '',
+        status: project.status,
+        totalRevenue: profitability.totalRevenue,
+        totalCosts: profitability.totalCosts,
+        totalProfit: profitability.totalProfit,
+        profitMargin: profitability.profitMargin,
+      });
+    }
+
+    return summary;
+  }
+
+  // Project Financial Snapshot
+  async getProjectFinancialSnapshot(projectId: string, tenantId: string) {
+    const project = await this.getProject(projectId, tenantId);
+    if (!project) throw new Error("Project not found");
+
+    const profitability = await this.getProjectProfitability(projectId, tenantId);
+    const costBreakdown = await this.getProjectCostBreakdown(projectId, tenantId);
+    const accountMappings = await this.getProjectAccountMappings(projectId, tenantId);
+
+    const laborAccount = accountMappings.categoryAccounts.find(ca => ca.category === 'labor');
+    const materialsAccount = accountMappings.categoryAccounts.find(ca => ca.category === 'materials');
+    const overheadAccount = accountMappings.categoryAccounts.find(ca => ca.category === 'overhead');
+    const otherAccount = accountMappings.categoryAccounts.find(ca => ca.category === 'other');
+
+    return {
+      project,
+      revenue: {
+        total: profitability.totalRevenue,
+        accountName: accountMappings.revenueAccount?.accountName || null,
+      },
+      costs: {
+        labor: {
+          amount: costBreakdown.laborCost,
+          accountName: laborAccount?.account.accountName || accountMappings.defaultCostAccount?.accountName || null,
+        },
+        materials: {
+          amount: costBreakdown.materialsCost,
+          accountName: materialsAccount?.account.accountName || accountMappings.defaultCostAccount?.accountName || null,
+        },
+        overhead: {
+          amount: costBreakdown.overheadCost,
+          accountName: overheadAccount?.account.accountName || accountMappings.defaultCostAccount?.accountName || null,
+        },
+        other: {
+          amount: costBreakdown.otherCost,
+          accountName: otherAccount?.account.accountName || accountMappings.defaultCostAccount?.accountName || null,
+        },
+        total: costBreakdown.totalCost,
+      },
+      profit: profitability.totalProfit,
+      profitMargin: profitability.profitMargin,
+    };
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -9161,6 +9480,42 @@ export class MemStorage implements IStorage {
 
   async getProjectSummary(tenantId: string): Promise<any[]> {
     throw new Error('Project summary not implemented in MemStorage');
+  }
+
+  async createProjectCostAccount(data: InsertProjectCostAccount): Promise<ProjectCostAccount> {
+    throw new Error('Project cost accounts not implemented in MemStorage');
+  }
+
+  async updateProjectCostAccount(id: string, tenantId: string, data: Partial<InsertProjectCostAccount>): Promise<ProjectCostAccount> {
+    throw new Error('Project cost accounts not implemented in MemStorage');
+  }
+
+  async deleteProjectCostAccount(id: string, tenantId: string): Promise<void> {
+    throw new Error('Project cost accounts not implemented in MemStorage');
+  }
+
+  async getProjectCostAccounts(projectId: string, tenantId: string): Promise<ProjectCostAccount[]> {
+    throw new Error('Project cost accounts not implemented in MemStorage');
+  }
+
+  async getProjectAccountMappings(projectId: string, tenantId: string): Promise<any> {
+    throw new Error('Project account mappings not implemented in MemStorage');
+  }
+
+  async getProjectCostBreakdown(projectId: string, tenantId: string): Promise<any> {
+    throw new Error('Project cost breakdown not implemented in MemStorage');
+  }
+
+  async getProjectBudgetVsActual(projectId: string, tenantId: string): Promise<any> {
+    throw new Error('Project budget vs actual not implemented in MemStorage');
+  }
+
+  async getProjectsProfitabilitySummary(tenantId: string, filters?: { status?: string; customerId?: string }): Promise<any[]> {
+    throw new Error('Projects profitability summary not implemented in MemStorage');
+  }
+
+  async getProjectFinancialSnapshot(projectId: string, tenantId: string): Promise<any> {
+    throw new Error('Project financial snapshot not implemented in MemStorage');
   }
 }
 
