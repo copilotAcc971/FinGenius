@@ -41,8 +41,9 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
     - Custom Report Builder: General Ledger, Transaction List, Invoice List, Bill List, Account Details with dynamic column selection and advanced filtering.
     - Comprehensive CSV/Excel export for all reports.
     - Scheduled Reports with Email Delivery via Microsoft Graph API.
-- **IFRS Compliance:** Adherence to IAS 1 (Presentation of Financial Statements), IAS 7 (Statement of Cash Flows - Indirect Method), and IAS 21 (Foreign Currency Translation).
-- **Employee Expense Management & Reimbursement:** Expense submission with receipt upload, permission-based access (6 new RBAC permissions), approval workflow, and reimbursement processing.
+- **IFRS Compliance:** Adherence to IAS 1 (Presentation of Financial Statements), IAS 2 (Inventories), IAS 7 (Statement of Cash Flows - Indirect Method), and IAS 21 (Foreign Currency Translation).
+- **Employee Expense Management & Reimbursement:** Expense submission with receipt upload, permission-based access (6 new RBAC permissions), approval workflow, reimbursement processing, and automatic journal entries for approvals and reimbursements.
+- **Inventory Management System:** Complete inventory module with FIFO/Weighted Average costing, stock adjustments, opening stock, composite items, inventory valuation reports, and automatic journal entries compliant with IAS 2 (Inventories). Includes 15 database tables, 13 RBAC permissions (total 168), 58 storage methods, and 57 API endpoints.
 - **Bills Form Enhancement:** Displays vendor tax registration number conditionally.
 - **Open Banking Integration - Lean Technologies:**
     - Provider-agnostic architecture with current implementation for Lean Technologies (UAE).
