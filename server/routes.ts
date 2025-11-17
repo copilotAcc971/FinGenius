@@ -8365,6 +8365,204 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== Project Accounting Endpoints =====
+
+  // GET /api/projects/:projectId/accounting/mappings
+  app.get('/api/projects/:projectId/accounting/mappings', 
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'),
+    async (req: any, res) => {
+      try {
+        const { projectId } = req.params;
+        const tenantId = req.tenantId!;
+        
+        const mappings = await storage.getProjectAccountMappings(projectId, tenantId);
+        res.json(mappings);
+      } catch (error: any) {
+        console.error('Error fetching project account mappings:', error);
+        res.status(500).json({ message: error.message || 'Failed to fetch account mappings' });
+      }
+    }
+  );
+
+  // PUT /api/projects/:projectId/accounting/mappings
+  app.put('/api/projects/:projectId/accounting/mappings',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'),
+    async (req: any, res) => {
+      try {
+        const { projectId } = req.params;
+        const tenantId = req.tenantId!;
+        const { revenueAccountId, defaultCostAccountId } = req.body;
+        
+        const updated = await storage.updateProject(projectId, tenantId, {
+          revenueAccountId,
+          defaultCostAccountId,
+        });
+        
+        res.json(updated);
+      } catch (error: any) {
+        console.error('Error updating project account mappings:', error);
+        res.status(500).json({ message: error.message || 'Failed to update account mappings' });
+      }
+    }
+  );
+
+  // GET /api/projects/:projectId/accounting/financial-snapshot
+  app.get('/api/projects/:projectId/accounting/financial-snapshot',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'),
+    async (req: any, res) => {
+      try {
+        const { projectId } = req.params;
+        const tenantId = req.tenantId!;
+        
+        const snapshot = await storage.getProjectFinancialSnapshot(projectId, tenantId);
+        res.json(snapshot);
+      } catch (error: any) {
+        console.error('Error fetching project financial snapshot:', error);
+        res.status(500).json({ message: error.message || 'Failed to fetch financial snapshot' });
+      }
+    }
+  );
+
+  // GET /api/projects/:projectId/accounting/cost-breakdown
+  app.get('/api/projects/:projectId/accounting/cost-breakdown',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'),
+    async (req: any, res) => {
+      try {
+        const { projectId } = req.params;
+        const tenantId = req.tenantId!;
+        
+        const breakdown = await storage.getProjectCostBreakdown(projectId, tenantId);
+        res.json(breakdown);
+      } catch (error: any) {
+        console.error('Error fetching project cost breakdown:', error);
+        res.status(500).json({ message: error.message || 'Failed to fetch cost breakdown' });
+      }
+    }
+  );
+
+  // GET /api/projects/:projectId/accounting/budget-vs-actual
+  app.get('/api/projects/:projectId/accounting/budget-vs-actual',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'),
+    async (req: any, res) => {
+      try {
+        const { projectId } = req.params;
+        const tenantId = req.tenantId!;
+        
+        const comparison = await storage.getProjectBudgetVsActual(projectId, tenantId);
+        res.json(comparison);
+      } catch (error: any) {
+        console.error('Error fetching budget vs actual:', error);
+        res.status(500).json({ message: error.message || 'Failed to fetch budget comparison' });
+      }
+    }
+  );
+
+  // ===== Project Cost Account Endpoints =====
+
+  // GET /api/projects/:projectId/cost-accounts
+  app.get('/api/projects/:projectId/cost-accounts',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'),
+    async (req: any, res) => {
+      try {
+        const { projectId } = req.params;
+        const tenantId = req.tenantId!;
+        
+        const accounts = await storage.getProjectCostAccounts(projectId, tenantId);
+        res.json(accounts);
+      } catch (error: any) {
+        console.error('Error fetching project cost accounts:', error);
+        res.status(500).json({ message: error.message || 'Failed to fetch cost accounts' });
+      }
+    }
+  );
+
+  // POST /api/projects/:projectId/cost-accounts
+  app.post('/api/projects/:projectId/cost-accounts',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'),
+    async (req: any, res) => {
+      try {
+        const { projectId } = req.params;
+        const tenantId = req.tenantId!;
+        const { costCategory, accountId, isDefault } = req.body;
+        
+        const account = await storage.createProjectCostAccount({
+          tenantId,
+          projectId,
+          costCategory,
+          accountId,
+          isDefault: isDefault || false,
+        });
+        
+        res.status(201).json(account);
+      } catch (error: any) {
+        console.error('Error creating project cost account:', error);
+        res.status(500).json({ message: error.message || 'Failed to create cost account' });
+      }
+    }
+  );
+
+  // PUT /api/projects/:projectId/cost-accounts/:id
+  app.put('/api/projects/:projectId/cost-accounts/:id',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'),
+    async (req: any, res) => {
+      try {
+        const { id } = req.params;
+        const tenantId = req.tenantId!;
+        const { accountId, isDefault } = req.body;
+        
+        const account = await storage.updateProjectCostAccount(id, tenantId, {
+          accountId,
+          isDefault,
+        });
+        
+        res.json(account);
+      } catch (error: any) {
+        console.error('Error updating project cost account:', error);
+        res.status(500).json({ message: error.message || 'Failed to update cost account' });
+      }
+    }
+  );
+
+  // DELETE /api/projects/:projectId/cost-accounts/:id
+  app.delete('/api/projects/:projectId/cost-accounts/:id',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'),
+    async (req: any, res) => {
+      try {
+        const { id } = req.params;
+        const tenantId = req.tenantId!;
+        
+        await storage.deleteProjectCostAccount(id, tenantId);
+        res.status(204).send();
+      } catch (error: any) {
+        console.error('Error deleting project cost account:', error);
+        res.status(500).json({ message: error.message || 'Failed to delete cost account' });
+      }
+    }
+  );
+
+  // ===== Project Reporting Endpoints =====
+
+  // GET /api/reports/projects/profitability
+  app.get('/api/reports/projects/profitability',
+    isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('project_reports.view'),
+    async (req: any, res) => {
+      try {
+        const tenantId = req.tenantId!;
+        const { status, customerId } = req.query;
+        
+        const summary = await storage.getProjectsProfitabilitySummary(tenantId, {
+          status: status as string | undefined,
+          customerId: customerId as string | undefined,
+        });
+        
+        res.json(summary);
+      } catch (error: any) {
+        console.error('Error fetching projects profitability summary:', error);
+        res.status(500).json({ message: error.message || 'Failed to fetch profitability summary' });
+      }
+    }
+  );
+
   const httpServer = createServer(app);
   return httpServer;
 }
