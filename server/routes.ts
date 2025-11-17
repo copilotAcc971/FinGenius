@@ -74,6 +74,14 @@ import {
   bankReconciliationPayloadSchema,
   insertCustomReportConfigSchema,
   insertScheduledReportSchema,
+  insertProjectSchema,
+  insertProjectMemberSchema,
+  insertTimeEntrySchema,
+  insertProjectTaskSchema,
+  insertProjectBudgetSchema,
+  insertProjectExpenseSchema,
+  insertProjectMilestoneSchema,
+  insertProjectInvoiceSchema,
   openBankingConnections,
   openBankingPayments,
   bankAccounts,
@@ -7592,6 +7600,519 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Failed to trigger global exchange rate fetch",
         error: error.message 
       });
+    }
+  });
+
+  // ====================================
+  // PROJECT MANAGEMENT ROUTES
+  // ====================================
+
+  // Projects
+  app.get('/api/projects', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const projects = await storage.getProjectsByTenant(tenantId);
+      res.json(projects);
+    } catch (error: any) {
+      console.error("Error fetching projects:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch projects" });
+    }
+  });
+
+  app.get('/api/projects/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const project = await storage.getProject(req.params.id, tenantId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+      res.json(project);
+    } catch (error: any) {
+      console.error("Error fetching project:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project" });
+    }
+  });
+
+  app.post('/api/projects', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.create'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const parsed = insertProjectSchema.parse(req.body);
+      const project = await storage.createProject({ ...parsed, tenantId });
+      res.status(201).json(project);
+    } catch (error: any) {
+      console.error("Error creating project:", error);
+      res.status(400).json({ message: error.message || "Failed to create project" });
+    }
+  });
+
+  app.patch('/api/projects/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const project = await storage.updateProject(req.params.id, tenantId, req.body);
+      res.json(project);
+    } catch (error: any) {
+      console.error("Error updating project:", error);
+      res.status(400).json({ message: error.message || "Failed to update project" });
+    }
+  });
+
+  app.delete('/api/projects/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.delete'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      await storage.deleteProject(req.params.id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting project:", error);
+      res.status(400).json({ message: error.message || "Failed to delete project" });
+    }
+  });
+
+  // Project Members
+  app.get('/api/projects/:projectId/members', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const members = await storage.getProjectMembers(req.params.projectId, tenantId);
+      res.json(members);
+    } catch (error: any) {
+      console.error("Error fetching project members:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project members" });
+    }
+  });
+
+  app.post('/api/projects/:projectId/members', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const parsed = insertProjectMemberSchema.parse({ ...req.body, projectId: req.params.projectId });
+      const member = await storage.addProjectMember({ ...parsed, tenantId });
+      res.status(201).json(member);
+    } catch (error: any) {
+      console.error("Error adding project member:", error);
+      res.status(400).json({ message: error.message || "Failed to add project member" });
+    }
+  });
+
+  app.patch('/api/project-members/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const member = await storage.updateProjectMember(req.params.id, tenantId, req.body);
+      res.json(member);
+    } catch (error: any) {
+      console.error("Error updating project member:", error);
+      res.status(400).json({ message: error.message || "Failed to update project member" });
+    }
+  });
+
+  app.delete('/api/project-members/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      await storage.removeProjectMember(req.params.id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error removing project member:", error);
+      res.status(400).json({ message: error.message || "Failed to remove project member" });
+    }
+  });
+
+  // Time Entries
+  app.get('/api/time-entries', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      const { startDate, endDate } = req.query;
+      
+      const entries = await storage.getTimeEntriesByUser(
+        userId, 
+        tenantId,
+        startDate ? new Date(startDate as string) : undefined,
+        endDate ? new Date(endDate as string) : undefined
+      );
+      res.json(entries);
+    } catch (error: any) {
+      console.error("Error fetching time entries:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch time entries" });
+    }
+  });
+
+  app.get('/api/projects/:projectId/time-entries', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const entries = await storage.getTimeEntriesByProject(req.params.projectId, tenantId);
+      res.json(entries);
+    } catch (error: any) {
+      console.error("Error fetching time entries:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch time entries" });
+    }
+  });
+
+  app.get('/api/time-entries/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const entry = await storage.getTimeEntry(req.params.id, tenantId);
+      if (!entry) {
+        return res.status(404).json({ message: "Time entry not found" });
+      }
+      res.json(entry);
+    } catch (error: any) {
+      console.error("Error fetching time entry:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch time entry" });
+    }
+  });
+
+  app.post('/api/time-entries', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.create'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      const parsed = insertTimeEntrySchema.parse({ ...req.body, userId });
+      const entry = await storage.createTimeEntry({ ...parsed, tenantId });
+      res.status(201).json(entry);
+    } catch (error: any) {
+      console.error("Error creating time entry:", error);
+      res.status(400).json({ message: error.message || "Failed to create time entry" });
+    }
+  });
+
+  app.patch('/api/time-entries/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const entry = await storage.updateTimeEntry(req.params.id, tenantId, req.body);
+      res.json(entry);
+    } catch (error: any) {
+      console.error("Error updating time entry:", error);
+      res.status(400).json({ message: error.message || "Failed to update time entry" });
+    }
+  });
+
+  app.delete('/api/time-entries/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.delete'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      await storage.deleteTimeEntry(req.params.id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting time entry:", error);
+      res.status(400).json({ message: error.message || "Failed to delete time entry" });
+    }
+  });
+
+  app.post('/api/time-entries/:id/submit', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const entry = await storage.submitTimeEntry(req.params.id, tenantId);
+      res.json(entry);
+    } catch (error: any) {
+      console.error("Error submitting time entry:", error);
+      res.status(400).json({ message: error.message || "Failed to submit time entry" });
+    }
+  });
+
+  app.post('/api/time-entries/:id/approve', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.approve'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const approvedBy = req.user.claims.sub;
+      const entry = await storage.approveTimeEntry(req.params.id, tenantId, approvedBy);
+      res.json(entry);
+    } catch (error: any) {
+      console.error("Error approving time entry:", error);
+      res.status(400).json({ message: error.message || "Failed to approve time entry" });
+    }
+  });
+
+  app.post('/api/time-entries/:id/reject', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('time_entries.approve'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const approvedBy = req.user.claims.sub;
+      const { reason } = req.body;
+      const entry = await storage.rejectTimeEntry(req.params.id, tenantId, approvedBy, reason || '');
+      res.json(entry);
+    } catch (error: any) {
+      console.error("Error rejecting time entry:", error);
+      res.status(400).json({ message: error.message || "Failed to reject time entry" });
+    }
+  });
+
+  // Project Tasks
+  app.get('/api/projects/:projectId/tasks', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const tasks = await storage.getProjectTasks(req.params.projectId, tenantId);
+      res.json(tasks);
+    } catch (error: any) {
+      console.error("Error fetching project tasks:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project tasks" });
+    }
+  });
+
+  app.get('/api/project-tasks/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const task = await storage.getProjectTask(req.params.id, tenantId);
+      if (!task) {
+        return res.status(404).json({ message: "Project task not found" });
+      }
+      res.json(task);
+    } catch (error: any) {
+      console.error("Error fetching project task:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project task" });
+    }
+  });
+
+  app.post('/api/project-tasks', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const parsed = insertProjectTaskSchema.parse(req.body);
+      const task = await storage.createProjectTask({ ...parsed, tenantId });
+      res.status(201).json(task);
+    } catch (error: any) {
+      console.error("Error creating project task:", error);
+      res.status(400).json({ message: error.message || "Failed to create project task" });
+    }
+  });
+
+  app.patch('/api/project-tasks/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const task = await storage.updateProjectTask(req.params.id, tenantId, req.body);
+      res.json(task);
+    } catch (error: any) {
+      console.error("Error updating project task:", error);
+      res.status(400).json({ message: error.message || "Failed to update project task" });
+    }
+  });
+
+  app.delete('/api/project-tasks/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      await storage.deleteProjectTask(req.params.id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting project task:", error);
+      res.status(400).json({ message: error.message || "Failed to delete project task" });
+    }
+  });
+
+  // Project Budgets
+  app.get('/api/projects/:projectId/budgets', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const budgets = await storage.getProjectBudgets(req.params.projectId, tenantId);
+      res.json(budgets);
+    } catch (error: any) {
+      console.error("Error fetching project budgets:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project budgets" });
+    }
+  });
+
+  app.post('/api/project-budgets', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const parsed = insertProjectBudgetSchema.parse(req.body);
+      const budget = await storage.createProjectBudget({ ...parsed, tenantId });
+      res.status(201).json(budget);
+    } catch (error: any) {
+      console.error("Error creating project budget:", error);
+      res.status(400).json({ message: error.message || "Failed to create project budget" });
+    }
+  });
+
+  app.patch('/api/project-budgets/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const budget = await storage.updateProjectBudget(req.params.id, tenantId, req.body);
+      res.json(budget);
+    } catch (error: any) {
+      console.error("Error updating project budget:", error);
+      res.status(400).json({ message: error.message || "Failed to update project budget" });
+    }
+  });
+
+  app.delete('/api/project-budgets/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      await storage.deleteProjectBudget(req.params.id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting project budget:", error);
+      res.status(400).json({ message: error.message || "Failed to delete project budget" });
+    }
+  });
+
+  // Project Expenses
+  app.get('/api/projects/:projectId/expenses', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const expenses = await storage.getProjectExpenses(req.params.projectId, tenantId);
+      res.json(expenses);
+    } catch (error: any) {
+      console.error("Error fetching project expenses:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project expenses" });
+    }
+  });
+
+  app.post('/api/project-expenses', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const parsed = insertProjectExpenseSchema.parse(req.body);
+      const expense = await storage.linkProjectExpense({ ...parsed, tenantId });
+      res.status(201).json(expense);
+    } catch (error: any) {
+      console.error("Error linking project expense:", error);
+      res.status(400).json({ message: error.message || "Failed to link project expense" });
+    }
+  });
+
+  app.delete('/api/project-expenses/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      await storage.unlinkProjectExpense(req.params.id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error unlinking project expense:", error);
+      res.status(400).json({ message: error.message || "Failed to unlink project expense" });
+    }
+  });
+
+  app.patch('/api/project-expenses/:id/mark-invoiced', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { invoiceId } = req.body;
+      const expense = await storage.markProjectExpenseInvoiced(req.params.id, tenantId, invoiceId);
+      res.json(expense);
+    } catch (error: any) {
+      console.error("Error marking project expense as invoiced:", error);
+      res.status(400).json({ message: error.message || "Failed to mark project expense as invoiced" });
+    }
+  });
+
+  // Project Milestones
+  app.get('/api/projects/:projectId/milestones', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const milestones = await storage.getProjectMilestones(req.params.projectId, tenantId);
+      res.json(milestones);
+    } catch (error: any) {
+      console.error("Error fetching project milestones:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project milestones" });
+    }
+  });
+
+  app.get('/api/project-milestones/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const milestone = await storage.getProjectMilestone(req.params.id, tenantId);
+      if (!milestone) {
+        return res.status(404).json({ message: "Project milestone not found" });
+      }
+      res.json(milestone);
+    } catch (error: any) {
+      console.error("Error fetching project milestone:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project milestone" });
+    }
+  });
+
+  app.post('/api/project-milestones', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const parsed = insertProjectMilestoneSchema.parse(req.body);
+      const milestone = await storage.createProjectMilestone({ ...parsed, tenantId });
+      res.status(201).json(milestone);
+    } catch (error: any) {
+      console.error("Error creating project milestone:", error);
+      res.status(400).json({ message: error.message || "Failed to create project milestone" });
+    }
+  });
+
+  app.patch('/api/project-milestones/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const milestone = await storage.updateProjectMilestone(req.params.id, tenantId, req.body);
+      res.json(milestone);
+    } catch (error: any) {
+      console.error("Error updating project milestone:", error);
+      res.status(400).json({ message: error.message || "Failed to update project milestone" });
+    }
+  });
+
+  app.delete('/api/project-milestones/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      await storage.deleteProjectMilestone(req.params.id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting project milestone:", error);
+      res.status(400).json({ message: error.message || "Failed to delete project milestone" });
+    }
+  });
+
+  app.post('/api/project-milestones/:id/complete', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const milestone = await storage.completeProjectMilestone(req.params.id, tenantId);
+      res.json(milestone);
+    } catch (error: any) {
+      console.error("Error completing project milestone:", error);
+      res.status(400).json({ message: error.message || "Failed to complete project milestone" });
+    }
+  });
+
+  // Project Invoices
+  app.get('/api/projects/:projectId/invoices', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const invoices = await storage.getProjectInvoices(req.params.projectId, tenantId);
+      res.json(invoices);
+    } catch (error: any) {
+      console.error("Error fetching project invoices:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project invoices" });
+    }
+  });
+
+  app.post('/api/project-invoices', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.update'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const parsed = insertProjectInvoiceSchema.parse(req.body);
+      const projectInvoice = await storage.linkProjectInvoice({ ...parsed, tenantId });
+      res.status(201).json(projectInvoice);
+    } catch (error: any) {
+      console.error("Error linking project invoice:", error);
+      res.status(400).json({ message: error.message || "Failed to link project invoice" });
+    }
+  });
+
+  // Project Reports
+  app.get('/api/projects/:projectId/report/profitability', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const report = await storage.getProjectProfitabilityReport(req.params.projectId, tenantId);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error fetching project profitability report:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project profitability report" });
+    }
+  });
+
+  app.get('/api/projects/report/resource-utilization', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { startDate, endDate } = req.query;
+      const report = await storage.getResourceUtilizationReport(
+        tenantId,
+        startDate ? new Date(startDate as string) : undefined,
+        endDate ? new Date(endDate as string) : undefined
+      );
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error fetching resource utilization report:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch resource utilization report" });
+    }
+  });
+
+  app.get('/api/projects/:projectId/report/summary', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('projects.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const report = await storage.getProjectSummaryReport(req.params.projectId, tenantId);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error fetching project summary report:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch project summary report" });
     }
   });
 

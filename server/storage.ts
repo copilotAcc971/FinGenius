@@ -46,6 +46,14 @@ import {
   accountSequences,
   bankReconciliations,
   bankReconciliationItems,
+  projects,
+  projectMembers,
+  timeEntries,
+  projectTasks,
+  projectBudgets,
+  projectExpenses,
+  projectMilestones,
+  projectInvoices,
   type User,
   type UpsertUser,
   type Tenant,
@@ -147,6 +155,22 @@ import {
   scheduledReportRuns,
   type ScheduledReportRun,
   type InsertScheduledReportRun,
+  type Project,
+  type InsertProject,
+  type ProjectMember,
+  type InsertProjectMember,
+  type TimeEntry,
+  type InsertTimeEntry,
+  type ProjectTask,
+  type InsertProjectTask,
+  type ProjectBudget,
+  type InsertProjectBudget,
+  type ProjectExpense,
+  type InsertProjectExpense,
+  type ProjectMilestone,
+  type InsertProjectMilestone,
+  type ProjectInvoice,
+  type InsertProjectInvoice,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
@@ -435,6 +459,96 @@ export interface IStorage {
   toggleScheduledReport(tenantId: string, id: string, isActive: boolean): Promise<ScheduledReport>;
   getScheduledReportRuns(tenantId: string, reportId: string, limit?: number): Promise<ScheduledReportRun[]>;
   createScheduledReportRun(run: InsertScheduledReportRun): Promise<ScheduledReportRun>;
+
+  // Project operations
+  getProjectsByTenant(tenantId: string): Promise<Project[]>;
+  getProject(id: string, tenantId: string): Promise<Project | null>;
+  createProject(project: InsertProject & { tenantId: string }): Promise<Project>;
+  updateProject(id: string, tenantId: string, project: Partial<InsertProject>): Promise<Project>;
+  deleteProject(id: string, tenantId: string): Promise<void>;
+  getNextProjectNumber(tenantId: string): Promise<string>;
+
+  // Project Member operations
+  getProjectMembers(projectId: string, tenantId: string): Promise<ProjectMember[]>;
+  addProjectMember(member: InsertProjectMember & { tenantId: string }): Promise<ProjectMember>;
+  updateProjectMember(id: string, tenantId: string, member: Partial<InsertProjectMember>): Promise<ProjectMember>;
+  removeProjectMember(id: string, tenantId: string): Promise<void>;
+
+  // Time Entry operations
+  getTimeEntriesByProject(projectId: string, tenantId: string): Promise<TimeEntry[]>;
+  getTimeEntriesByUser(userId: string, tenantId: string, startDate?: Date, endDate?: Date): Promise<TimeEntry[]>;
+  getTimeEntry(id: string, tenantId: string): Promise<TimeEntry | null>;
+  createTimeEntry(entry: InsertTimeEntry & { tenantId: string }): Promise<TimeEntry>;
+  updateTimeEntry(id: string, tenantId: string, entry: Partial<InsertTimeEntry>): Promise<TimeEntry>;
+  deleteTimeEntry(id: string, tenantId: string): Promise<void>;
+  approveTimeEntry(id: string, tenantId: string, approvedBy: string): Promise<TimeEntry>;
+  rejectTimeEntry(id: string, tenantId: string, approvedBy: string, reason: string): Promise<TimeEntry>;
+  submitTimeEntry(id: string, tenantId: string): Promise<TimeEntry>;
+
+  // Project Task operations
+  getProjectTasks(projectId: string, tenantId: string): Promise<ProjectTask[]>;
+  getProjectTask(id: string, tenantId: string): Promise<ProjectTask | null>;
+  createProjectTask(task: InsertProjectTask & { tenantId: string }): Promise<ProjectTask>;
+  updateProjectTask(id: string, tenantId: string, task: Partial<InsertProjectTask>): Promise<ProjectTask>;
+  deleteProjectTask(id: string, tenantId: string): Promise<void>;
+  updateTaskActualHours(taskId: string, tenantId: string): Promise<void>;
+
+  // Project Budget operations
+  getProjectBudgets(projectId: string, tenantId: string): Promise<ProjectBudget[]>;
+  createProjectBudget(budget: InsertProjectBudget & { tenantId: string }): Promise<ProjectBudget>;
+  updateProjectBudget(id: string, tenantId: string, budget: Partial<InsertProjectBudget>): Promise<ProjectBudget>;
+  deleteProjectBudget(id: string, tenantId: string): Promise<void>;
+
+  // Project Expense operations
+  getProjectExpenses(projectId: string, tenantId: string): Promise<ProjectExpense[]>;
+  linkExpenseToProject(expense: InsertProjectExpense & { tenantId: string }): Promise<ProjectExpense>;
+  unlinkExpenseFromProject(id: string, tenantId: string): Promise<void>;
+  markExpenseAsInvoiced(id: string, tenantId: string, invoiceId: string): Promise<void>;
+
+  // Project Milestone operations
+  getProjectMilestones(projectId: string, tenantId: string): Promise<ProjectMilestone[]>;
+  createProjectMilestone(milestone: InsertProjectMilestone & { tenantId: string }): Promise<ProjectMilestone>;
+  updateProjectMilestone(id: string, tenantId: string, milestone: Partial<InsertProjectMilestone>): Promise<ProjectMilestone>;
+  deleteProjectMilestone(id: string, tenantId: string): Promise<void>;
+  completeProjectMilestone(id: string, tenantId: string): Promise<ProjectMilestone>;
+
+  // Project Invoice operations
+  getProjectInvoices(projectId: string, tenantId: string): Promise<ProjectInvoice[]>;
+  linkInvoiceToProject(link: InsertProjectInvoice & { tenantId: string }): Promise<ProjectInvoice>;
+
+  // Project Reporting & Analytics
+  getProjectProfitability(projectId: string, tenantId: string): Promise<{
+    projectId: string;
+    projectName: string;
+    budgetAmount: string;
+    totalRevenue: string;
+    totalCosts: string;
+    totalProfit: string;
+    profitMargin: string;
+    budgetedHours: string;
+    actualHours: string;
+    billableHours: string;
+    nonBillableHours: string;
+  }>;
+  getResourceUtilization(tenantId: string, startDate: Date, endDate: Date): Promise<Array<{
+    userId: string;
+    userName: string;
+    totalHours: string;
+    billableHours: string;
+    nonBillableHours: string;
+    utilization: string;
+  }>>;
+  getProjectSummary(tenantId: string): Promise<Array<{
+    projectId: string;
+    projectName: string;
+    status: string;
+    customerName: string;
+    budgetAmount: string;
+    actualCosts: string;
+    budgetVariance: string;
+    startDate: Date | null;
+    endDate: Date | null;
+  }>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6423,6 +6537,800 @@ export class DatabaseStorage implements IStorage {
       .returning();
     return created;
   }
+
+  // ====================================
+  // PROJECT MANAGEMENT & TIME TRACKING
+  // ====================================
+
+  // Project operations
+  async getProjectsByTenant(tenantId: string): Promise<Project[]> {
+    return await db
+      .select()
+      .from(projects)
+      .where(eq(projects.tenantId, tenantId))
+      .orderBy(desc(projects.createdAt));
+  }
+
+  async getProject(id: string, tenantId: string): Promise<Project | null> {
+    const [project] = await db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.id, id), eq(projects.tenantId, tenantId)))
+      .limit(1);
+    
+    return project || null;
+  }
+
+  async createProject(projectData: InsertProject & { tenantId: string }): Promise<Project> {
+    return await db.transaction(async (tx) => {
+      const projectNumber = await this.getNextProjectNumber(projectData.tenantId);
+      
+      const [project] = await tx
+        .insert(projects)
+        .values({
+          ...projectData,
+          projectNumber,
+        })
+        .returning();
+      
+      return project;
+    });
+  }
+
+  async updateProject(id: string, tenantId: string, projectData: Partial<InsertProject>): Promise<Project> {
+    const project = await this.getProject(id, tenantId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+    
+    const [updated] = await db
+      .update(projects)
+      .set({ ...projectData, updatedAt: new Date() })
+      .where(and(eq(projects.id, id), eq(projects.tenantId, tenantId)))
+      .returning();
+    
+    return updated;
+  }
+
+  async deleteProject(id: string, tenantId: string): Promise<void> {
+    const project = await this.getProject(id, tenantId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+    
+    await db
+      .delete(projects)
+      .where(and(eq(projects.id, id), eq(projects.tenantId, tenantId)));
+  }
+
+  async getNextProjectNumber(tenantId: string): Promise<string> {
+    const lastProject = await db
+      .select({ projectNumber: projects.projectNumber })
+      .from(projects)
+      .where(eq(projects.tenantId, tenantId))
+      .orderBy(desc(projects.projectNumber))
+      .limit(1);
+    
+    const nextNumber = lastProject.length > 0 
+      ? parseInt(lastProject[0].projectNumber.split('-')[2]) + 1 
+      : 1;
+    
+    const year = new Date().getFullYear();
+    return `PRJ-${year}-${String(nextNumber).padStart(4, '0')}`;
+  }
+
+  // Project Member operations
+  async getProjectMembers(projectId: string, tenantId: string): Promise<ProjectMember[]> {
+    return await db
+      .select()
+      .from(projectMembers)
+      .where(and(
+        eq(projectMembers.projectId, projectId),
+        eq(projectMembers.tenantId, tenantId)
+      ))
+      .orderBy(desc(projectMembers.createdAt));
+  }
+
+  async addProjectMember(memberData: InsertProjectMember & { tenantId: string }): Promise<ProjectMember> {
+    const [member] = await db
+      .insert(projectMembers)
+      .values(memberData)
+      .returning();
+    
+    return member;
+  }
+
+  async updateProjectMember(id: string, tenantId: string, memberData: Partial<InsertProjectMember>): Promise<ProjectMember> {
+    const [existing] = await db
+      .select()
+      .from(projectMembers)
+      .where(and(eq(projectMembers.id, id), eq(projectMembers.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project member not found");
+    }
+    
+    const [updated] = await db
+      .update(projectMembers)
+      .set({ ...memberData, updatedAt: new Date() })
+      .where(and(eq(projectMembers.id, id), eq(projectMembers.tenantId, tenantId)))
+      .returning();
+    
+    return updated;
+  }
+
+  async removeProjectMember(id: string, tenantId: string): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(projectMembers)
+      .where(and(eq(projectMembers.id, id), eq(projectMembers.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project member not found");
+    }
+    
+    await db
+      .delete(projectMembers)
+      .where(and(eq(projectMembers.id, id), eq(projectMembers.tenantId, tenantId)));
+  }
+
+  // Time Entry operations
+  async getTimeEntriesByProject(projectId: string, tenantId: string): Promise<TimeEntry[]> {
+    return await db
+      .select()
+      .from(timeEntries)
+      .where(and(
+        eq(timeEntries.projectId, projectId),
+        eq(timeEntries.tenantId, tenantId)
+      ))
+      .orderBy(desc(timeEntries.date));
+  }
+
+  async getTimeEntriesByUser(userId: string, tenantId: string, startDate?: Date, endDate?: Date): Promise<TimeEntry[]> {
+    const conditions = [
+      eq(timeEntries.userId, userId),
+      eq(timeEntries.tenantId, tenantId)
+    ];
+    
+    if (startDate) {
+      conditions.push(gte(timeEntries.date, startDate.toISOString().split('T')[0]));
+    }
+    
+    if (endDate) {
+      conditions.push(lte(timeEntries.date, endDate.toISOString().split('T')[0]));
+    }
+    
+    return await db
+      .select()
+      .from(timeEntries)
+      .where(and(...conditions))
+      .orderBy(desc(timeEntries.date));
+  }
+
+  async getTimeEntry(id: string, tenantId: string): Promise<TimeEntry | null> {
+    const [entry] = await db
+      .select()
+      .from(timeEntries)
+      .where(and(eq(timeEntries.id, id), eq(timeEntries.tenantId, tenantId)))
+      .limit(1);
+    
+    return entry || null;
+  }
+
+  async createTimeEntry(entryData: InsertTimeEntry & { tenantId: string }): Promise<TimeEntry> {
+    const [entry] = await db
+      .insert(timeEntries)
+      .values(entryData)
+      .returning();
+    
+    return entry;
+  }
+
+  async updateTimeEntry(id: string, tenantId: string, entryData: Partial<InsertTimeEntry>): Promise<TimeEntry> {
+    const entry = await this.getTimeEntry(id, tenantId);
+    if (!entry) {
+      throw new Error("Time entry not found");
+    }
+    
+    const [updated] = await db
+      .update(timeEntries)
+      .set({ ...entryData, updatedAt: new Date() })
+      .where(and(eq(timeEntries.id, id), eq(timeEntries.tenantId, tenantId)))
+      .returning();
+    
+    return updated;
+  }
+
+  async deleteTimeEntry(id: string, tenantId: string): Promise<void> {
+    const entry = await this.getTimeEntry(id, tenantId);
+    if (!entry) {
+      throw new Error("Time entry not found");
+    }
+    
+    await db
+      .delete(timeEntries)
+      .where(and(eq(timeEntries.id, id), eq(timeEntries.tenantId, tenantId)));
+  }
+
+  async approveTimeEntry(id: string, tenantId: string, approvedBy: string): Promise<TimeEntry> {
+    const entry = await this.getTimeEntry(id, tenantId);
+    if (!entry) {
+      throw new Error("Time entry not found");
+    }
+    
+    if (entry.status !== 'submitted') {
+      throw new Error("Only submitted time entries can be approved");
+    }
+    
+    const [approved] = await db
+      .update(timeEntries)
+      .set({
+        status: 'approved',
+        approvedBy,
+        approvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(timeEntries.id, id), eq(timeEntries.tenantId, tenantId)))
+      .returning();
+    
+    if (approved.taskId) {
+      await this.updateTaskActualHours(approved.taskId, tenantId);
+    }
+    
+    return approved;
+  }
+
+  async rejectTimeEntry(id: string, tenantId: string, approvedBy: string, reason: string): Promise<TimeEntry> {
+    const entry = await this.getTimeEntry(id, tenantId);
+    if (!entry) {
+      throw new Error("Time entry not found");
+    }
+    
+    if (entry.status !== 'submitted') {
+      throw new Error("Only submitted time entries can be rejected");
+    }
+    
+    const [rejected] = await db
+      .update(timeEntries)
+      .set({
+        status: 'rejected',
+        approvedBy,
+        rejectionReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(timeEntries.id, id), eq(timeEntries.tenantId, tenantId)))
+      .returning();
+    
+    return rejected;
+  }
+
+  async submitTimeEntry(id: string, tenantId: string): Promise<TimeEntry> {
+    const entry = await this.getTimeEntry(id, tenantId);
+    if (!entry) {
+      throw new Error("Time entry not found");
+    }
+    
+    if (entry.status !== 'draft') {
+      throw new Error("Only draft time entries can be submitted");
+    }
+    
+    const [submitted] = await db
+      .update(timeEntries)
+      .set({
+        status: 'submitted',
+        updatedAt: new Date(),
+      })
+      .where(and(eq(timeEntries.id, id), eq(timeEntries.tenantId, tenantId)))
+      .returning();
+    
+    return submitted;
+  }
+
+  // Project Task operations
+  async getProjectTasks(projectId: string, tenantId: string): Promise<ProjectTask[]> {
+    return await db
+      .select()
+      .from(projectTasks)
+      .where(and(
+        eq(projectTasks.projectId, projectId),
+        eq(projectTasks.tenantId, tenantId)
+      ))
+      .orderBy(desc(projectTasks.createdAt));
+  }
+
+  async getProjectTask(id: string, tenantId: string): Promise<ProjectTask | null> {
+    const [task] = await db
+      .select()
+      .from(projectTasks)
+      .where(and(eq(projectTasks.id, id), eq(projectTasks.tenantId, tenantId)))
+      .limit(1);
+    
+    return task || null;
+  }
+
+  async createProjectTask(taskData: InsertProjectTask & { tenantId: string }): Promise<ProjectTask> {
+    const [task] = await db
+      .insert(projectTasks)
+      .values(taskData)
+      .returning();
+    
+    return task;
+  }
+
+  async updateProjectTask(id: string, tenantId: string, taskData: Partial<InsertProjectTask>): Promise<ProjectTask> {
+    const task = await this.getProjectTask(id, tenantId);
+    if (!task) {
+      throw new Error("Project task not found");
+    }
+    
+    const [updated] = await db
+      .update(projectTasks)
+      .set({ ...taskData, updatedAt: new Date() })
+      .where(and(eq(projectTasks.id, id), eq(projectTasks.tenantId, tenantId)))
+      .returning();
+    
+    return updated;
+  }
+
+  async deleteProjectTask(id: string, tenantId: string): Promise<void> {
+    const task = await this.getProjectTask(id, tenantId);
+    if (!task) {
+      throw new Error("Project task not found");
+    }
+    
+    await db
+      .delete(projectTasks)
+      .where(and(eq(projectTasks.id, id), eq(projectTasks.tenantId, tenantId)));
+  }
+
+  async updateTaskActualHours(taskId: string, tenantId: string): Promise<void> {
+    const result = await db
+      .select({
+        totalHours: sum(sql`(${timeEntries.hours}::numeric + ${timeEntries.minutes}::numeric / 60.0)`),
+      })
+      .from(timeEntries)
+      .where(and(
+        eq(timeEntries.taskId, taskId),
+        eq(timeEntries.tenantId, tenantId),
+        eq(timeEntries.status, 'approved')
+      ));
+    
+    const actualHours = result[0]?.totalHours || '0';
+    
+    await db
+      .update(projectTasks)
+      .set({ 
+        actualHours,
+        updatedAt: new Date() 
+      })
+      .where(and(eq(projectTasks.id, taskId), eq(projectTasks.tenantId, tenantId)));
+  }
+
+  // Project Budget operations
+  async getProjectBudgets(projectId: string, tenantId: string): Promise<ProjectBudget[]> {
+    return await db
+      .select()
+      .from(projectBudgets)
+      .where(and(
+        eq(projectBudgets.projectId, projectId),
+        eq(projectBudgets.tenantId, tenantId)
+      ))
+      .orderBy(desc(projectBudgets.createdAt));
+  }
+
+  async createProjectBudget(budgetData: InsertProjectBudget & { tenantId: string }): Promise<ProjectBudget> {
+    const [budget] = await db
+      .insert(projectBudgets)
+      .values(budgetData)
+      .returning();
+    
+    return budget;
+  }
+
+  async updateProjectBudget(id: string, tenantId: string, budgetData: Partial<InsertProjectBudget>): Promise<ProjectBudget> {
+    const [existing] = await db
+      .select()
+      .from(projectBudgets)
+      .where(and(eq(projectBudgets.id, id), eq(projectBudgets.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project budget not found");
+    }
+    
+    const [updated] = await db
+      .update(projectBudgets)
+      .set({ ...budgetData, updatedAt: new Date() })
+      .where(and(eq(projectBudgets.id, id), eq(projectBudgets.tenantId, tenantId)))
+      .returning();
+    
+    return updated;
+  }
+
+  async deleteProjectBudget(id: string, tenantId: string): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(projectBudgets)
+      .where(and(eq(projectBudgets.id, id), eq(projectBudgets.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project budget not found");
+    }
+    
+    await db
+      .delete(projectBudgets)
+      .where(and(eq(projectBudgets.id, id), eq(projectBudgets.tenantId, tenantId)));
+  }
+
+  // Project Expense operations
+  async getProjectExpenses(projectId: string, tenantId: string): Promise<ProjectExpense[]> {
+    return await db
+      .select()
+      .from(projectExpenses)
+      .where(and(
+        eq(projectExpenses.projectId, projectId),
+        eq(projectExpenses.tenantId, tenantId)
+      ))
+      .orderBy(desc(projectExpenses.createdAt));
+  }
+
+  async linkExpenseToProject(expenseData: InsertProjectExpense & { tenantId: string }): Promise<ProjectExpense> {
+    const [expense] = await db
+      .insert(projectExpenses)
+      .values(expenseData)
+      .returning();
+    
+    return expense;
+  }
+
+  async unlinkExpenseFromProject(id: string, tenantId: string): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(projectExpenses)
+      .where(and(eq(projectExpenses.id, id), eq(projectExpenses.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project expense not found");
+    }
+    
+    await db
+      .delete(projectExpenses)
+      .where(and(eq(projectExpenses.id, id), eq(projectExpenses.tenantId, tenantId)));
+  }
+
+  async markExpenseAsInvoiced(id: string, tenantId: string, invoiceId: string): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(projectExpenses)
+      .where(and(eq(projectExpenses.id, id), eq(projectExpenses.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project expense not found");
+    }
+    
+    await db
+      .update(projectExpenses)
+      .set({ 
+        isInvoiced: true, 
+        invoiceId,
+        updatedAt: new Date() 
+      })
+      .where(and(eq(projectExpenses.id, id), eq(projectExpenses.tenantId, tenantId)));
+  }
+
+  // Project Milestone operations
+  async getProjectMilestones(projectId: string, tenantId: string): Promise<ProjectMilestone[]> {
+    return await db
+      .select()
+      .from(projectMilestones)
+      .where(and(
+        eq(projectMilestones.projectId, projectId),
+        eq(projectMilestones.tenantId, tenantId)
+      ))
+      .orderBy(asc(projectMilestones.dueDate));
+  }
+
+  async createProjectMilestone(milestoneData: InsertProjectMilestone & { tenantId: string }): Promise<ProjectMilestone> {
+    const [milestone] = await db
+      .insert(projectMilestones)
+      .values(milestoneData)
+      .returning();
+    
+    return milestone;
+  }
+
+  async updateProjectMilestone(id: string, tenantId: string, milestoneData: Partial<InsertProjectMilestone>): Promise<ProjectMilestone> {
+    const [existing] = await db
+      .select()
+      .from(projectMilestones)
+      .where(and(eq(projectMilestones.id, id), eq(projectMilestones.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project milestone not found");
+    }
+    
+    const [updated] = await db
+      .update(projectMilestones)
+      .set({ ...milestoneData, updatedAt: new Date() })
+      .where(and(eq(projectMilestones.id, id), eq(projectMilestones.tenantId, tenantId)))
+      .returning();
+    
+    return updated;
+  }
+
+  async deleteProjectMilestone(id: string, tenantId: string): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(projectMilestones)
+      .where(and(eq(projectMilestones.id, id), eq(projectMilestones.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project milestone not found");
+    }
+    
+    await db
+      .delete(projectMilestones)
+      .where(and(eq(projectMilestones.id, id), eq(projectMilestones.tenantId, tenantId)));
+  }
+
+  async completeProjectMilestone(id: string, tenantId: string): Promise<ProjectMilestone> {
+    const [existing] = await db
+      .select()
+      .from(projectMilestones)
+      .where(and(eq(projectMilestones.id, id), eq(projectMilestones.tenantId, tenantId)))
+      .limit(1);
+    
+    if (!existing) {
+      throw new Error("Project milestone not found");
+    }
+    
+    const [completed] = await db
+      .update(projectMilestones)
+      .set({ 
+        status: 'completed',
+        completedDate: new Date().toISOString().split('T')[0],
+        updatedAt: new Date() 
+      })
+      .where(and(eq(projectMilestones.id, id), eq(projectMilestones.tenantId, tenantId)))
+      .returning();
+    
+    return completed;
+  }
+
+  // Project Invoice operations
+  async getProjectInvoices(projectId: string, tenantId: string): Promise<ProjectInvoice[]> {
+    return await db
+      .select()
+      .from(projectInvoices)
+      .where(and(
+        eq(projectInvoices.projectId, projectId),
+        eq(projectInvoices.tenantId, tenantId)
+      ))
+      .orderBy(desc(projectInvoices.createdAt));
+  }
+
+  async linkInvoiceToProject(linkData: InsertProjectInvoice & { tenantId: string }): Promise<ProjectInvoice> {
+    const [link] = await db
+      .insert(projectInvoices)
+      .values(linkData)
+      .returning();
+    
+    return link;
+  }
+
+  // Project Reporting & Analytics
+  async getProjectProfitability(projectId: string, tenantId: string): Promise<{
+    projectId: string;
+    projectName: string;
+    budgetAmount: string;
+    totalRevenue: string;
+    totalCosts: string;
+    totalProfit: string;
+    profitMargin: string;
+    budgetedHours: string;
+    actualHours: string;
+    billableHours: string;
+    nonBillableHours: string;
+  }> {
+    const project = await this.getProject(projectId, tenantId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+    
+    const revenueResult = await db
+      .select({
+        total: sum(sql`${invoices.total}::numeric`),
+      })
+      .from(projectInvoices)
+      .innerJoin(invoices, eq(projectInvoices.invoiceId, invoices.id))
+      .where(
+        and(
+          eq(projectInvoices.tenantId, tenantId),
+          eq(projectInvoices.projectId, projectId),
+          ne(invoices.status, 'void')
+        )
+      );
+    
+    const totalRevenue = revenueResult[0]?.total || '0';
+    
+    const timeResult = await db
+      .select({
+        totalCost: sum(sql`${timeEntries.billableAmount}::numeric`),
+        totalHours: sum(sql`(${timeEntries.hours}::numeric + ${timeEntries.minutes}::numeric / 60.0)`),
+        billableHours: sum(sql`CASE WHEN ${timeEntries.isBillable} THEN (${timeEntries.hours}::numeric + ${timeEntries.minutes}::numeric / 60.0) ELSE 0 END`),
+      })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.tenantId, tenantId),
+          eq(timeEntries.projectId, projectId),
+          eq(timeEntries.status, 'approved')
+        )
+      );
+    
+    const timeCost = timeResult[0]?.totalCost || '0';
+    const actualHours = timeResult[0]?.totalHours || '0';
+    const billableHours = timeResult[0]?.billableHours || '0';
+    
+    const expenseResult = await db
+      .select({
+        total: sum(sql`${projectExpenses.amount}::numeric`),
+      })
+      .from(projectExpenses)
+      .where(
+        and(
+          eq(projectExpenses.tenantId, tenantId),
+          eq(projectExpenses.projectId, projectId)
+        )
+      );
+    
+    const expenseCost = expenseResult[0]?.total || '0';
+    
+    const totalCosts = (parseFloat(timeCost) + parseFloat(expenseCost)).toFixed(2);
+    const totalProfit = (parseFloat(totalRevenue) - parseFloat(totalCosts)).toFixed(2);
+    const profitMargin = parseFloat(totalRevenue) > 0
+      ? ((parseFloat(totalProfit) / parseFloat(totalRevenue)) * 100).toFixed(2)
+      : '0';
+    
+    return {
+      projectId: project.id,
+      projectName: project.name,
+      budgetAmount: project.budgetAmount || '0',
+      totalRevenue,
+      totalCosts,
+      totalProfit,
+      profitMargin,
+      budgetedHours: project.budgetHours || '0',
+      actualHours,
+      billableHours,
+      nonBillableHours: (parseFloat(actualHours) - parseFloat(billableHours)).toFixed(2),
+    };
+  }
+
+  async getResourceUtilization(tenantId: string, startDate: Date, endDate: Date): Promise<Array<{
+    userId: string;
+    userName: string;
+    totalHours: string;
+    billableHours: string;
+    nonBillableHours: string;
+    utilization: string;
+  }>> {
+    const result = await db
+      .select({
+        userId: timeEntries.userId,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        totalHours: sum(sql`(${timeEntries.hours}::numeric + ${timeEntries.minutes}::numeric / 60.0)`),
+        billableHours: sum(sql`CASE WHEN ${timeEntries.isBillable} THEN (${timeEntries.hours}::numeric + ${timeEntries.minutes}::numeric / 60.0) ELSE 0 END`),
+      })
+      .from(timeEntries)
+      .innerJoin(users, eq(timeEntries.userId, users.id))
+      .where(
+        and(
+          eq(timeEntries.tenantId, tenantId),
+          gte(timeEntries.date, startDate.toISOString().split('T')[0]),
+          lte(timeEntries.date, endDate.toISOString().split('T')[0]),
+          eq(timeEntries.status, 'approved')
+        )
+      )
+      .groupBy(timeEntries.userId, users.firstName, users.lastName);
+    
+    return result.map((row: any) => {
+      const total = parseFloat(row.totalHours || '0');
+      const billable = parseFloat(row.billableHours || '0');
+      const nonBillable = total - billable;
+      const utilization = total > 0 ? ((billable / total) * 100).toFixed(2) : '0';
+      
+      return {
+        userId: row.userId,
+        userName: `${row.firstName || ''} ${row.lastName || ''}`.trim(),
+        totalHours: total.toFixed(2),
+        billableHours: billable.toFixed(2),
+        nonBillableHours: nonBillable.toFixed(2),
+        utilization,
+      };
+    });
+  }
+
+  async getProjectSummary(tenantId: string): Promise<Array<{
+    projectId: string;
+    projectName: string;
+    status: string;
+    customerName: string;
+    budgetAmount: string;
+    actualCosts: string;
+    budgetVariance: string;
+    startDate: Date | null;
+    endDate: Date | null;
+  }>> {
+    const projectsList = await this.getProjectsByTenant(tenantId);
+    
+    const summaries = await Promise.all(
+      projectsList.map(async (project) => {
+        const timeResult = await db
+          .select({
+            totalCost: sum(sql`${timeEntries.billableAmount}::numeric`),
+          })
+          .from(timeEntries)
+          .where(
+            and(
+              eq(timeEntries.tenantId, tenantId),
+              eq(timeEntries.projectId, project.id),
+              eq(timeEntries.status, 'approved')
+            )
+          );
+        
+        const expenseResult = await db
+          .select({
+            total: sum(sql`${projectExpenses.amount}::numeric`),
+          })
+          .from(projectExpenses)
+          .where(
+            and(
+              eq(projectExpenses.tenantId, tenantId),
+              eq(projectExpenses.projectId, project.id)
+            )
+          );
+        
+        const timeCost = parseFloat(timeResult[0]?.totalCost || '0');
+        const expenseCost = parseFloat(expenseResult[0]?.total || '0');
+        const actualCosts = (timeCost + expenseCost).toFixed(2);
+        
+        const budgetAmount = parseFloat(project.budgetAmount || '0');
+        const budgetVariance = (budgetAmount - parseFloat(actualCosts)).toFixed(2);
+        
+        const [customer] = await db
+          .select()
+          .from(customers)
+          .where(and(
+            eq(customers.id, project.customerId),
+            eq(customers.tenantId, tenantId)
+          ))
+          .limit(1);
+        
+        return {
+          projectId: project.id,
+          projectName: project.name,
+          status: project.status,
+          customerName: customer?.name || 'Unknown',
+          budgetAmount: project.budgetAmount || '0',
+          actualCosts,
+          budgetVariance,
+          startDate: project.startDate ? new Date(project.startDate) : null,
+          endDate: project.endDate ? new Date(project.endDate) : null,
+        };
+      })
+    );
+    
+    return summaries;
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -7387,6 +8295,300 @@ export class MemStorage implements IStorage {
 
   async getAPAgingReport(tenantId: string, groupBy: 'vendor' | 'invoice' | 'project' = 'vendor'): Promise<APAgingReport> {
     throw new Error('AP Aging Report not implemented in MemStorage');
+  }
+
+  async getEnhancedCashFlowReport(tenantId: string, startDate: Date, endDate: Date, comparisonStartDate?: Date, comparisonEndDate?: Date): Promise<EnhancedCashFlowReport> {
+    throw new Error('Enhanced Cash Flow Report not implemented in MemStorage');
+  }
+
+  // Currency operations - Stubs
+  async getCurrencies(tenantId: string): Promise<Currency[]> {
+    throw new Error('Currencies not implemented in MemStorage');
+  }
+
+  async getCurrencyByCode(tenantId: string, code: string): Promise<Currency | null> {
+    throw new Error('Currencies not implemented in MemStorage');
+  }
+
+  async createCurrency(tenantId: string, data: InsertCurrency): Promise<Currency> {
+    throw new Error('Currencies not implemented in MemStorage');
+  }
+
+  async updateCurrency(tenantId: string, code: string, data: Partial<InsertCurrency>): Promise<Currency> {
+    throw new Error('Currencies not implemented in MemStorage');
+  }
+
+  async deleteCurrency(tenantId: string, code: string): Promise<void> {
+    throw new Error('Currencies not implemented in MemStorage');
+  }
+
+  async setBaseCurrency(tenantId: string, code: string): Promise<void> {
+    throw new Error('Currencies not implemented in MemStorage');
+  }
+
+  async checkCurrencyUsageAny(tenantId: string, currencyCode: string): Promise<boolean> {
+    throw new Error('Currencies not implemented in MemStorage');
+  }
+
+  async getExchangeRates(tenantId: string, filters?: any): Promise<ExchangeRate[]> {
+    throw new Error('Exchange rates not implemented in MemStorage');
+  }
+
+  async getLatestExchangeRates(tenantId: string): Promise<ExchangeRate[]> {
+    throw new Error('Exchange rates not implemented in MemStorage');
+  }
+
+  async createExchangeRate(tenantId: string, data: InsertExchangeRate & { applyReciprocal?: boolean }): Promise<ExchangeRate[]> {
+    throw new Error('Exchange rates not implemented in MemStorage');
+  }
+
+  async getExchangeRateHistory(tenantId: string, fromCurrency: string, toCurrency: string, limit?: number): Promise<ExchangeRate[]> {
+    throw new Error('Exchange rates not implemented in MemStorage');
+  }
+
+  async getFXConfig(tenantId: string): Promise<FXConfig | null> {
+    throw new Error('FX Config not implemented in MemStorage');
+  }
+
+  async updateFXConfig(tenantId: string, data: Partial<InsertFXConfig>): Promise<FXConfig> {
+    throw new Error('FX Config not implemented in MemStorage');
+  }
+
+  async getCustomReports(tenantId: string): Promise<CustomReportConfig[]> {
+    throw new Error('Custom reports not implemented in MemStorage');
+  }
+
+  async getCustomReport(tenantId: string, reportId: string): Promise<CustomReportConfig | null> {
+    throw new Error('Custom reports not implemented in MemStorage');
+  }
+
+  async createCustomReport(config: InsertCustomReportConfig & { tenantId: string }): Promise<CustomReportConfig> {
+    throw new Error('Custom reports not implemented in MemStorage');
+  }
+
+  async updateCustomReport(tenantId: string, reportId: string, config: Partial<InsertCustomReportConfig>): Promise<CustomReportConfig> {
+    throw new Error('Custom reports not implemented in MemStorage');
+  }
+
+  async deleteCustomReport(tenantId: string, reportId: string): Promise<void> {
+    throw new Error('Custom reports not implemented in MemStorage');
+  }
+
+  async generateCustomReport(tenantId: string, config: any): Promise<CustomReportResult> {
+    throw new Error('Custom reports not implemented in MemStorage');
+  }
+
+  async getScheduledReports(tenantId: string): Promise<ScheduledReport[]> {
+    throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  async getScheduledReport(tenantId: string, id: string): Promise<ScheduledReport | null> {
+    throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  async createScheduledReport(config: InsertScheduledReport & { tenantId: string }): Promise<ScheduledReport> {
+    throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  async updateScheduledReport(tenantId: string, id: string, config: Partial<InsertScheduledReport>): Promise<ScheduledReport> {
+    throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  async deleteScheduledReport(tenantId: string, id: string): Promise<void> {
+    throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  async toggleScheduledReport(tenantId: string, id: string, isActive: boolean): Promise<ScheduledReport> {
+    throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  async getScheduledReportRuns(tenantId: string, reportId: string, limit?: number): Promise<ScheduledReportRun[]> {
+    throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  async createScheduledReportRun(run: InsertScheduledReportRun): Promise<ScheduledReportRun> {
+    throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  // Project operations - Stubs
+  async getProjectsByTenant(tenantId: string): Promise<Project[]> {
+    throw new Error('Projects not implemented in MemStorage');
+  }
+
+  async getProject(id: string, tenantId: string): Promise<Project | null> {
+    throw new Error('Projects not implemented in MemStorage');
+  }
+
+  async createProject(project: InsertProject & { tenantId: string }): Promise<Project> {
+    throw new Error('Projects not implemented in MemStorage');
+  }
+
+  async updateProject(id: string, tenantId: string, project: Partial<InsertProject>): Promise<Project> {
+    throw new Error('Projects not implemented in MemStorage');
+  }
+
+  async deleteProject(id: string, tenantId: string): Promise<void> {
+    throw new Error('Projects not implemented in MemStorage');
+  }
+
+  async getNextProjectNumber(tenantId: string): Promise<string> {
+    throw new Error('Projects not implemented in MemStorage');
+  }
+
+  // Project Member operations - Stubs
+  async getProjectMembers(projectId: string, tenantId: string): Promise<ProjectMember[]> {
+    throw new Error('Project members not implemented in MemStorage');
+  }
+
+  async addProjectMember(member: InsertProjectMember & { tenantId: string }): Promise<ProjectMember> {
+    throw new Error('Project members not implemented in MemStorage');
+  }
+
+  async updateProjectMember(id: string, tenantId: string, member: Partial<InsertProjectMember>): Promise<ProjectMember> {
+    throw new Error('Project members not implemented in MemStorage');
+  }
+
+  async removeProjectMember(id: string, tenantId: string): Promise<void> {
+    throw new Error('Project members not implemented in MemStorage');
+  }
+
+  // Time Entry operations - Stubs
+  async getTimeEntriesByProject(projectId: string, tenantId: string): Promise<TimeEntry[]> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  async getTimeEntriesByUser(userId: string, tenantId: string, startDate?: Date, endDate?: Date): Promise<TimeEntry[]> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  async getTimeEntry(id: string, tenantId: string): Promise<TimeEntry | null> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  async createTimeEntry(entry: InsertTimeEntry & { tenantId: string }): Promise<TimeEntry> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  async updateTimeEntry(id: string, tenantId: string, entry: Partial<InsertTimeEntry>): Promise<TimeEntry> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  async deleteTimeEntry(id: string, tenantId: string): Promise<void> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  async approveTimeEntry(id: string, tenantId: string, approvedBy: string): Promise<TimeEntry> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  async rejectTimeEntry(id: string, tenantId: string, approvedBy: string, reason: string): Promise<TimeEntry> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  async submitTimeEntry(id: string, tenantId: string): Promise<TimeEntry> {
+    throw new Error('Time entries not implemented in MemStorage');
+  }
+
+  // Project Task operations - Stubs
+  async getProjectTasks(projectId: string, tenantId: string): Promise<ProjectTask[]> {
+    throw new Error('Project tasks not implemented in MemStorage');
+  }
+
+  async getProjectTask(id: string, tenantId: string): Promise<ProjectTask | null> {
+    throw new Error('Project tasks not implemented in MemStorage');
+  }
+
+  async createProjectTask(task: InsertProjectTask & { tenantId: string }): Promise<ProjectTask> {
+    throw new Error('Project tasks not implemented in MemStorage');
+  }
+
+  async updateProjectTask(id: string, tenantId: string, task: Partial<InsertProjectTask>): Promise<ProjectTask> {
+    throw new Error('Project tasks not implemented in MemStorage');
+  }
+
+  async deleteProjectTask(id: string, tenantId: string): Promise<void> {
+    throw new Error('Project tasks not implemented in MemStorage');
+  }
+
+  async updateTaskActualHours(taskId: string, tenantId: string): Promise<void> {
+    throw new Error('Project tasks not implemented in MemStorage');
+  }
+
+  // Project Budget operations - Stubs
+  async getProjectBudgets(projectId: string, tenantId: string): Promise<ProjectBudget[]> {
+    throw new Error('Project budgets not implemented in MemStorage');
+  }
+
+  async createProjectBudget(budget: InsertProjectBudget & { tenantId: string }): Promise<ProjectBudget> {
+    throw new Error('Project budgets not implemented in MemStorage');
+  }
+
+  async updateProjectBudget(id: string, tenantId: string, budget: Partial<InsertProjectBudget>): Promise<ProjectBudget> {
+    throw new Error('Project budgets not implemented in MemStorage');
+  }
+
+  async deleteProjectBudget(id: string, tenantId: string): Promise<void> {
+    throw new Error('Project budgets not implemented in MemStorage');
+  }
+
+  // Project Expense operations - Stubs
+  async getProjectExpenses(projectId: string, tenantId: string): Promise<ProjectExpense[]> {
+    throw new Error('Project expenses not implemented in MemStorage');
+  }
+
+  async linkExpenseToProject(expense: InsertProjectExpense & { tenantId: string }): Promise<ProjectExpense> {
+    throw new Error('Project expenses not implemented in MemStorage');
+  }
+
+  async unlinkExpenseFromProject(id: string, tenantId: string): Promise<void> {
+    throw new Error('Project expenses not implemented in MemStorage');
+  }
+
+  async markExpenseAsInvoiced(id: string, tenantId: string, invoiceId: string): Promise<void> {
+    throw new Error('Project expenses not implemented in MemStorage');
+  }
+
+  // Project Milestone operations - Stubs
+  async getProjectMilestones(projectId: string, tenantId: string): Promise<ProjectMilestone[]> {
+    throw new Error('Project milestones not implemented in MemStorage');
+  }
+
+  async createProjectMilestone(milestone: InsertProjectMilestone & { tenantId: string }): Promise<ProjectMilestone> {
+    throw new Error('Project milestones not implemented in MemStorage');
+  }
+
+  async updateProjectMilestone(id: string, tenantId: string, milestone: Partial<InsertProjectMilestone>): Promise<ProjectMilestone> {
+    throw new Error('Project milestones not implemented in MemStorage');
+  }
+
+  async deleteProjectMilestone(id: string, tenantId: string): Promise<void> {
+    throw new Error('Project milestones not implemented in MemStorage');
+  }
+
+  async completeProjectMilestone(id: string, tenantId: string): Promise<ProjectMilestone> {
+    throw new Error('Project milestones not implemented in MemStorage');
+  }
+
+  // Project Invoice operations - Stubs
+  async getProjectInvoices(projectId: string, tenantId: string): Promise<ProjectInvoice[]> {
+    throw new Error('Project invoices not implemented in MemStorage');
+  }
+
+  async linkInvoiceToProject(link: InsertProjectInvoice & { tenantId: string }): Promise<ProjectInvoice> {
+    throw new Error('Project invoices not implemented in MemStorage');
+  }
+
+  // Project Reporting & Analytics - Stubs
+  async getProjectProfitability(projectId: string, tenantId: string): Promise<any> {
+    throw new Error('Project profitability not implemented in MemStorage');
+  }
+
+  async getResourceUtilization(tenantId: string, startDate: Date, endDate: Date): Promise<any[]> {
+    throw new Error('Resource utilization not implemented in MemStorage');
+  }
+
+  async getProjectSummary(tenantId: string): Promise<any[]> {
+    throw new Error('Project summary not implemented in MemStorage');
   }
 }
 
