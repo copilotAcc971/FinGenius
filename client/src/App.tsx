@@ -59,6 +59,10 @@ import ChartOfAccountsReport from "@/pages/chart-of-accounts-report";
 import CustomReportBuilder from "@/pages/custom-report-builder";
 import ScheduledReports from "@/pages/scheduled-reports";
 import EmployeeExpenses from "@/pages/employee-expenses";
+import Projects from "@/pages/projects";
+import ProjectDetail from "@/pages/project-detail";
+import TimeTracking from "@/pages/time-tracking";
+import Timesheets from "@/pages/timesheets";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -96,6 +100,10 @@ function Router() {
           <Route path="/employee-expenses" component={EmployeeExpenses} />
           <Route path="/payments" component={Payments} />
           <Route path="/customer-payments" component={CustomerPayments} />
+          <Route path="/projects/:id" component={ProjectDetail} />
+          <Route path="/projects" component={Projects} />
+          <Route path="/time-tracking" component={TimeTracking} />
+          <Route path="/timesheets" component={Timesheets} />
           <Route path="/documents" component={Documents} />
           <Route path="/reports" component={Reports} />
           <Route path="/reports/chart-of-accounts" component={ChartOfAccountsReport} />

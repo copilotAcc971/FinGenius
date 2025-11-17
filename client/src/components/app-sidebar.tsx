@@ -32,6 +32,7 @@ import {
   FileBarChart,
   FileSpreadsheet,
   Calendar,
+  FolderKanban,
 } from "lucide-react";
 import logoImage from "@assets/generated_images/Copilot_Accountant_app_logo_0a4d944c.png";
 import {
@@ -85,6 +86,12 @@ const purchasesItems = [
 const paymentsItems = [
   { title: "Vendor Payments", url: "/payments", icon: CreditCard },
   { title: "Customer Payments", url: "/customer-payments", icon: DollarSign },
+];
+
+const projectsItems = [
+  { title: "Projects", url: "/projects", icon: FolderKanban },
+  { title: "Time Tracking", url: "/time-tracking", icon: Clock },
+  { title: "Timesheets", url: "/timesheets", icon: Calendar },
 ];
 
 const accountingItems = [
@@ -148,6 +155,7 @@ function getIconName(IconComponent: any): string {
     [FileBarChart.name]: "FileBarChart",
     [FileSpreadsheet.name]: "FileSpreadsheet",
     [Calendar.name]: "Calendar",
+    [FolderKanban.name]: "FolderKanban",
   };
   return iconMap[IconComponent.name] || "FileText";
 }
@@ -157,6 +165,7 @@ const allMenuItems = [
   ...salesItems,
   ...purchasesItems,
   ...paymentsItems,
+  ...projectsItems,
   ...accountingItems,
   ...otherItems,
   ...adminItems,
@@ -177,6 +186,7 @@ export function AppSidebar() {
     sales: getGroupCollapsedState("sales"),
     purchases: getGroupCollapsedState("purchases"),
     payments: getGroupCollapsedState("payments"),
+    projects: getGroupCollapsedState("projects"),
     accounting: getGroupCollapsedState("accounting"),
     administration: getGroupCollapsedState("administration"),
   });
@@ -483,6 +493,49 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {paymentsItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <div className="flex items-center w-full gap-1">
+                        <SidebarMenuButton asChild isActive={location === item.url} className="flex-1" data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
+                          <Link href={item.url}>
+                            <item.icon className="h-5 w-5" />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 shrink-0"
+                          onClick={(e) => handleToggleFavorite(item.url, e)}
+                          data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                        >
+                          {favorites.includes(item.url) ? (
+                            <Star className="h-4 w-4 fill-current" />
+                          ) : (
+                            <StarOff className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+
+        {/* Projects Section */}
+        <Collapsible open={!collapsed.projects} onOpenChange={(open) => handleGroupToggle("projects", open)}>
+          <SidebarGroup>
+            <CollapsibleTrigger asChild>
+              <SidebarGroupLabel className="flex items-center justify-between cursor-pointer hover-elevate" data-testid="button-collapse-projects">
+                <span>Projects</span>
+                {collapsed.projects ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </SidebarGroupLabel>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {projectsItems.map((item) => (
                     <SidebarMenuItem key={item.title}>
                       <div className="flex items-center w-full gap-1">
                         <SidebarMenuButton asChild isActive={location === item.url} className="flex-1" data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
