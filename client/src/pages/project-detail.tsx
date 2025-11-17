@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useRBAC } from "@/contexts/rbac-context";
@@ -40,6 +41,12 @@ export default function ProjectDetail() {
     const parsed = parseFloat(value);
     return isNaN(parsed) ? 0 : parsed;
   };
+
+  // Currency symbol
+  const currencySymbol = currentTenant?.defaultCurrency === 'USD' ? '$' : 
+                        currentTenant?.defaultCurrency === 'EUR' ? '€' : 
+                        currentTenant?.defaultCurrency === 'GBP' ? '£' : 
+                        currentTenant?.defaultCurrency === 'AED' ? 'د.إ' : '$';
 
   const { data: project, isLoading: projectLoading } = useQuery<Project>({
     queryKey: ["/api/projects", projectId, currentTenant?.id],
@@ -121,6 +128,33 @@ export default function ProjectDetail() {
     enabled: !!projectId && !!currentTenant?.id && activeTab === 'invoices'
   });
 
+  const { data: allAccounts } = useQuery({
+    queryKey: ['/api/accounts'],
+    enabled: !!currentTenant?.id && activeTab === 'financials',
+  });
+
+  const revenueAccounts = allAccounts?.filter((a: any) => 
+    a.accountType === 'Revenue' || a.accountType === 'income'
+  );
+  const expenseAccounts = allAccounts?.filter((a: any) => 
+    a.accountType === 'Expense' || a.accountType === 'expense' || a.accountType === 'cost_of_goods_sold'
+  );
+
+  const { data: projectAccountMappings, refetch: refetchMappings } = useQuery({
+    queryKey: ['/api/projects', projectId, 'accounting', 'mappings'],
+    enabled: !!projectId && !!currentTenant?.id && activeTab === 'financials',
+  });
+
+  const budgetVsActualQuery = useQuery({
+    queryKey: ['/api/projects', projectId, 'accounting', 'budget-vs-actual'],
+    enabled: !!projectId && !!currentTenant?.id && activeTab === 'financials',
+  });
+
+  const costBreakdownQuery = useQuery({
+    queryKey: ['/api/projects', projectId, 'accounting', 'cost-breakdown'],
+    enabled: !!projectId && !!currentTenant?.id && activeTab === 'financials',
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!currentTenant?.id || !projectId) throw new Error("Missing required data");
@@ -162,6 +196,31 @@ export default function ProjectDetail() {
       });
     },
   });
+
+  const updateAccountingMutation = useMutation({
+    mutationFn: async (data: { revenueAccountId?: string; defaultCostAccountId?: string }) => {
+      return await apiRequest(`/api/projects/${projectId}/accounting/mappings`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+    onSuccess: () => {
+      refetchMappings();
+      toast({ title: 'GL accounts updated successfully' });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: 'Failed to update GL accounts', 
+        description: error.message,
+        variant: 'destructive' 
+      });
+    },
+  });
+
+  const handleUpdateAccounting = (data: any) => {
+    updateAccountingMutation.mutate(data);
+  };
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -280,6 +339,7 @@ export default function ProjectDetail() {
           <TabsTrigger value="expenses" data-testid="tab-expenses">Expenses</TabsTrigger>
           <TabsTrigger value="milestones" data-testid="tab-milestones">Milestones</TabsTrigger>
           <TabsTrigger value="invoices" data-testid="tab-invoices">Invoices</TabsTrigger>
+          <TabsTrigger value="financials" data-testid="tab-financials">Financials</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-6">
@@ -745,6 +805,163 @@ export default function ProjectDetail() {
               customer={customer}
             />
           )}
+        </TabsContent>
+
+        <TabsContent value="financials" className="mt-6">
+          <div className="grid gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>GL Account Mappings</CardTitle>
+                <CardDescription>Configure revenue and cost accounts for this project</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium">Revenue Account</label>
+                    <Select
+                      value={projectAccountMappings?.revenueAccount?.id || ''}
+                      onValueChange={(value) => handleUpdateAccounting({ revenueAccountId: value })}
+                      data-testid="select-revenue-account"
+                    >
+                      <SelectTrigger className="w-full mt-2">
+                        <SelectValue placeholder="Select revenue account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {revenueAccounts?.map((account: any) => (
+                          <SelectItem key={account.id} value={account.id} data-testid={`option-revenue-${account.id}`}>
+                            {account.accountCode} - {account.accountName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium">Default Cost Account</label>
+                    <Select
+                      value={projectAccountMappings?.defaultCostAccount?.id || ''}
+                      onValueChange={(value) => handleUpdateAccounting({ defaultCostAccountId: value })}
+                      data-testid="select-cost-account"
+                    >
+                      <SelectTrigger className="w-full mt-2">
+                        <SelectValue placeholder="Select default cost account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {expenseAccounts?.map((account: any) => (
+                          <SelectItem key={account.id} value={account.id} data-testid={`option-cost-${account.id}`}>
+                            {account.accountCode} - {account.accountName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Budget vs Actual</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {budgetVsActualQuery.isLoading ? (
+                  <div className="text-sm text-muted-foreground">Loading budget comparison...</div>
+                ) : budgetVsActualQuery.data ? (
+                  <Table data-testid="table-budget-vs-actual">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Budget</TableHead>
+                        <TableHead className="text-right">Actual</TableHead>
+                        <TableHead className="text-right">Variance</TableHead>
+                        <TableHead className="text-right">% Used</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">Labor</TableCell>
+                        <TableCell className="text-right" data-testid="budget-labor-budget">
+                          {currencySymbol}{parseFloat(budgetVsActualQuery.data.laborBudget).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right" data-testid="budget-labor-actual">
+                          {currencySymbol}{parseFloat(budgetVsActualQuery.data.laborActual).toLocaleString()}
+                        </TableCell>
+                        <TableCell className={`text-right ${parseFloat(budgetVsActualQuery.data.laborVariance) < 0 ? 'text-destructive' : 'text-green-600'}`}>
+                          {currencySymbol}{parseFloat(budgetVsActualQuery.data.laborVariance).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {((parseFloat(budgetVsActualQuery.data.laborActual) / parseFloat(budgetVsActualQuery.data.laborBudget)) * 100).toFixed(1)}%
+                        </TableCell>
+                      </TableRow>
+                      <TableRow className="font-semibold">
+                        <TableCell>Total</TableCell>
+                        <TableCell className="text-right" data-testid="budget-total-budget">
+                          {currencySymbol}{parseFloat(budgetVsActualQuery.data.totalBudget).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right" data-testid="budget-total-actual">
+                          {currencySymbol}{parseFloat(budgetVsActualQuery.data.totalActual).toLocaleString()}
+                        </TableCell>
+                        <TableCell className={`text-right ${parseFloat(budgetVsActualQuery.data.totalVariance) < 0 ? 'text-destructive' : 'text-green-600'}`}>
+                          {currencySymbol}{parseFloat(budgetVsActualQuery.data.totalVariance).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {((parseFloat(budgetVsActualQuery.data.totalActual) / parseFloat(budgetVsActualQuery.data.totalBudget)) * 100).toFixed(1)}%
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No budget data available</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Cost Breakdown</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {costBreakdownQuery.isLoading ? (
+                  <div className="text-sm text-muted-foreground">Loading cost breakdown...</div>
+                ) : costBreakdownQuery.data ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="flex justify-between items-center p-4 border rounded-md">
+                      <span className="font-medium">Labor</span>
+                      <span className="text-xl" data-testid="cost-labor">
+                        {currencySymbol}{parseFloat(costBreakdownQuery.data.laborCost).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center p-4 border rounded-md">
+                      <span className="font-medium">Materials</span>
+                      <span className="text-xl" data-testid="cost-materials">
+                        {currencySymbol}{parseFloat(costBreakdownQuery.data.materialsCost).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center p-4 border rounded-md">
+                      <span className="font-medium">Overhead</span>
+                      <span className="text-xl" data-testid="cost-overhead">
+                        {currencySymbol}{parseFloat(costBreakdownQuery.data.overheadCost).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center p-4 border rounded-md">
+                      <span className="font-medium">Other</span>
+                      <span className="text-xl" data-testid="cost-other">
+                        {currencySymbol}{parseFloat(costBreakdownQuery.data.otherCost).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center p-4 border rounded-md bg-muted col-span-2">
+                      <span className="font-bold">Total Cost</span>
+                      <span className="text-2xl font-bold" data-testid="cost-total">
+                        {currencySymbol}{parseFloat(costBreakdownQuery.data.totalCost).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No cost data available</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>
