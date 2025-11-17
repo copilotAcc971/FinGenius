@@ -971,6 +971,7 @@ export const expenses = pgTable("expenses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   vendorId: varchar("vendor_id").references(() => vendors.id),
+  projectId: varchar("project_id").references(() => projects.id),
   date: timestamp("date").notNull(),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   category: varchar("category", { length: 100 }).notNull(),
@@ -1933,9 +1934,12 @@ export const journalEntryLegs = pgTable("journal_entry_legs", {
   transactionAmountDebit: decimal("transaction_amount_debit", { precision: 20, scale: 10 }),
   transactionAmountCredit: decimal("transaction_amount_credit", { precision: 20, scale: 10 }),
   
+  projectId: varchar("project_id").references(() => projects.id),
+  
   description: text("description"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
+  index("journal_entry_legs_project_idx").on(table.projectId),
   // Database-level constraint: type must be 'Debit' or 'Credit'
   sql`CONSTRAINT check_leg_type CHECK (type IN ('Debit', 'Credit'))`,
 ]);
@@ -3721,6 +3725,8 @@ export const projects = pgTable("projects", {
   startDate: date("start_date"),
   endDate: date("end_date"),
   projectManagerId: varchar("project_manager_id").references(() => users.id),
+  revenueAccountId: varchar("revenue_account_id").references(() => accounts.id),
+  defaultCostAccountId: varchar("default_cost_account_id").references(() => accounts.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -3736,6 +3742,8 @@ export const projects = pgTable("projects", {
 export const insertProjectSchema = createInsertSchema(projects, {
   budgetAmount: decimalString.optional(),
   budgetHours: decimalString.optional(),
+  revenueAccountId: z.string().optional(),
+  defaultCostAccountId: z.string().optional(),
 }).omit({
   id: true,
   createdAt: true,
@@ -3870,6 +3878,10 @@ export const projectBudgets = pgTable("project_budgets", {
   category: varchar("category", { length: 100 }).notNull(),
   budgetedAmount: decimal("budgeted_amount", { precision: 15, scale: 2 }).notNull(),
   actualAmount: decimal("actual_amount", { precision: 15, scale: 2 }).default("0").notNull(),
+  laborBudget: decimal("labor_budget", { precision: 15, scale: 2 }),
+  materialsBudget: decimal("materials_budget", { precision: 15, scale: 2 }),
+  overheadBudget: decimal("overhead_budget", { precision: 15, scale: 2 }),
+  otherBudget: decimal("other_budget", { precision: 15, scale: 2 }),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -3881,6 +3893,10 @@ export const projectBudgets = pgTable("project_budgets", {
 export const insertProjectBudgetSchema = createInsertSchema(projectBudgets, {
   budgetedAmount: decimalString,
   actualAmount: decimalString.optional(),
+  laborBudget: decimalString.optional(),
+  materialsBudget: decimalString.optional(),
+  overheadBudget: decimalString.optional(),
+  otherBudget: decimalString.optional(),
 }).omit({
   id: true,
   createdAt: true,
@@ -3889,6 +3905,32 @@ export const insertProjectBudgetSchema = createInsertSchema(projectBudgets, {
 
 export type InsertProjectBudget = z.infer<typeof insertProjectBudgetSchema>;
 export type ProjectBudget = typeof projectBudgets.$inferSelect;
+
+// Project Cost Accounts (GL account mappings for project cost categories)
+export const projectCostAccounts = pgTable("project_cost_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  costCategory: varchar("cost_category", { length: 50 }).notNull(), // 'labor', 'materials', 'overhead', 'other'
+  accountId: varchar("account_id").notNull().references(() => accounts.id),
+  isDefault: boolean("is_default").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_project_cost_category").on(table.tenantId, table.projectId, table.costCategory),
+  index("project_cost_accounts_tenant_idx").on(table.tenantId),
+  index("project_cost_accounts_project_idx").on(table.projectId),
+  index("project_cost_accounts_account_idx").on(table.accountId),
+]);
+
+export const insertProjectCostAccountSchema = createInsertSchema(projectCostAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProjectCostAccount = z.infer<typeof insertProjectCostAccountSchema>;
+export type ProjectCostAccount = typeof projectCostAccounts.$inferSelect;
 
 // Project Expenses (expenses linked to projects)
 export const projectExpenses = pgTable("project_expenses", {

@@ -15,6 +15,13 @@
       "when": 1763373959537,
       "tag": "0001_curved_bloodaxe",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1763375709482,
+      "tag": "0002_pretty_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }
