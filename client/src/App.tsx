@@ -59,12 +59,6 @@ import ChartOfAccountsReport from "@/pages/chart-of-accounts-report";
 import CustomReportBuilder from "@/pages/custom-report-builder";
 import ScheduledReports from "@/pages/scheduled-reports";
 import EmployeeExpenses from "@/pages/employee-expenses";
-import Warehouses from "@/pages/warehouses";
-import WarehouseStock from "@/pages/warehouse-stock";
-import TransferOrders from "@/pages/transfer-orders";
-import StockAdjustments from "@/pages/stock-adjustments";
-import StockCounts from "@/pages/stock-counts";
-import CompositeItems from "@/pages/composite-items";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -76,7 +70,6 @@ function Router() {
       ) : (
         <>
           <Route path="/" component={Dashboard} />
-          <Route path="/dashboard" component={Dashboard} />
           <Route path="/customers" component={Customers} />
           <Route path="/vendors" component={Vendors} />
           <Route path="/items" component={Items} />
@@ -116,12 +109,6 @@ function Router() {
           <Route path="/settings/roles" component={RoleManagement} />
           <Route path="/settings/users" component={UserManagement} />
           <Route path="/settings/currencies" component={CurrenciesPage} />
-          <Route path="/warehouses" component={Warehouses} />
-          <Route path="/warehouse-stock" component={WarehouseStock} />
-          <Route path="/transfer-orders" component={TransferOrders} />
-          <Route path="/stock-adjustments" component={StockAdjustments} />
-          <Route path="/stock-counts" component={StockCounts} />
-          <Route path="/composite-items" component={CompositeItems} />
         </>
       )}
       <Route component={NotFound} />

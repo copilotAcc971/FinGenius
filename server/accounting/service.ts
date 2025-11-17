@@ -148,11 +148,8 @@ export type CreateJournalEntry = z.infer<typeof createJournalEntrySchema>;
  * - 1300: Inventory
  * - 2000: Accounts Payable
  * - 2100: Tax Payable
- * - 2200: Employee Reimbursement Payable
- * - 3200: Opening Balance Equity
  * - 4000: Sales Revenue
  * - 5000: Cost of Goods Sold
- * - 5910: Inventory Adjustment
  */
 export type SystemAccountMap = {
   cash: Account;
@@ -160,11 +157,8 @@ export type SystemAccountMap = {
   inventory: Account;
   accountsPayable: Account;
   taxPayable: Account;
-  employeeReimbursementPayable: Account;
-  openingBalanceEquity: Account;
   revenue: Account;
   cogs: Account;
-  inventoryAdjustment: Account;
 };
 
 // ====================================
@@ -508,11 +502,8 @@ export async function resolveSystemAccounts(
     inventory: '1300',
     accountsPayable: '2000',
     taxPayable: '2100',
-    employeeReimbursementPayable: '2200',
-    openingBalanceEquity: '3200',
     revenue: '4000',
     cogs: '5000',
-    inventoryAdjustment: '5910',
   };
 
   // Extract all codes for efficient WHERE IN query
@@ -543,11 +534,8 @@ export async function resolveSystemAccounts(
     '1300': 'Inventory',
     '2000': 'Accounts Payable',
     '2100': 'Tax Payable',
-    '2200': 'Employee Reimbursement Payable',
-    '3200': 'Opening Balance Equity',
     '4000': 'Revenue',
     '5000': 'Cost of Goods Sold',
-    '5910': 'Inventory Adjustment',
   };
 
   for (const [key, code] of Object.entries(SYSTEM_ACCOUNT_CODES)) {

@@ -97,14 +97,6 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
     description: 'Sales tax, VAT, or other taxes collected but not yet remitted to tax authorities.',
     normalBalance: 'credit',
   },
-  {
-    code: '2200',
-    name: 'Employee Reimbursement Payable',
-    type: 'liability',
-    accountCategory: 'Current Liabilities',
-    description: 'Amounts owed to employees for approved expense reimbursements. Cleared upon payment.',
-    normalBalance: 'credit',
-  },
 
   // ============================================
   // EQUITY (3000-3999)
@@ -124,14 +116,6 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
     type: 'equity',
     accountCategory: 'Equity',
     description: 'Cumulative net income retained in the business (not distributed to owners). Updated at year-end.',
-    normalBalance: 'credit',
-  },
-  {
-    code: '3200',
-    name: 'Opening Balance Equity',
-    type: 'equity',
-    accountCategory: 'Equity',
-    description: 'Temporary account for recording opening balances when setting up inventory or other assets. Typically cleared during setup.',
     normalBalance: 'credit',
   },
 
@@ -206,14 +190,6 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
     type: 'expense',
     accountCategory: 'Operating Expenses',
     description: 'Losses from foreign currency translation and settlement. Per IFRS IAS 21 and IFRS for SMEs Section 30.',
-    normalBalance: 'debit',
-  },
-  {
-    code: '5910',
-    name: 'Inventory Adjustment',
-    type: 'expense',
-    accountCategory: 'Operating Expenses',
-    description: 'Gains and losses from inventory adjustments (shrinkage, damage, corrections). Debited for losses, credited for gains.',
     normalBalance: 'debit',
   },
 ];
