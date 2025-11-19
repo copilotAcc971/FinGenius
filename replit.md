@@ -15,10 +15,12 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 **UI/UX:**
 - Shadcn UI components with React Hook Form + Zod for validation and TanStack Query for data fetching.
 - `data-testid` attributes for all interactive elements.
-- **Brand Identity:** Crimson professional theme (#DC143C) with charcoal sidebar, white backgrounds, and "Copilot Accountant" branding.
+- **Brand Identity:** Monochrome design system inspired by Notion/Vercel/NYT (black/white/grays) with sophisticated typography.
+- **Typography System:** WCAG AA compliant 8-tier typography with semantic color tokens for perfect dark mode adaptation.
 - **Navigation:** Global Cmd/Ctrl+K command palette, contextual breadcrumbs, TenantBadge for multi-tenant awareness, and a redesigned collapsible sidebar with RBAC-based filtering.
 - **Dashboard:** Quick action cards, recent documents, and pending items summary.
-- **UX Improvements:** Comprehensive empty states, loading skeletons, StatusBadge, and instant tenant initialization.
+- **UX Improvements:** Comprehensive empty states, advanced table skeleton loading system, StatusBadge, instant tenant initialization, toast notifications (3s auto-dismiss), reduced motion support, mobile responsiveness, and accessibility audit passed.
+- **Loading States:** Production-ready table skeleton system with shared column-width contract (`table-columns.tsx`), type-safe `TableColumnDef` interface, `<colgroup>` enforcement for zero horizontal CLS, `minHeight` for vertical stability. Applied to all 9 table pages (invoices, bills, customers, vendors, items, payments, expenses, customer-payments, purchase-orders). 900% improvement over original spinner animations.
 
 **Technical Implementations & Feature Specifications:**
 - **Core Accounting:** Modules for Company Profile, Customers, Vendors, Items, Taxes, Invoices (auto-numbering, audit trail, soft delete, tax compliance), Bills (AI extraction), Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices.
