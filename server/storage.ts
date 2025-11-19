@@ -207,6 +207,16 @@ import {
   alertRules,
   type AlertRule,
   type InsertAlertRule,
+  transactionHistory,
+  type TransactionHistory,
+  type InsertTransactionHistory,
+  complianceDeadlines,
+  type ComplianceDeadline,
+  type InsertComplianceDeadline,
+  complianceTraining,
+  type ComplianceTraining,
+  type InsertComplianceTraining,
+  openBankingConnections,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
@@ -760,6 +770,24 @@ export interface IStorage {
   createAlertRule(data: InsertAlertRule): Promise<AlertRule>;
   updateAlertRule(id: string, tenantId: string, data: Partial<InsertAlertRule>): Promise<AlertRule>;
   deleteAlertRule(id: string, tenantId: string): Promise<void>;
+
+  // Transaction History
+  createTransactionHistoryRecord(data: InsertTransactionHistory): Promise<TransactionHistory>;
+  getTransactionHistory(tenantId: string, filters?: {
+    customerId?: string;
+    vendorId?: string;
+    transactionType?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<TransactionHistory[]>;
+
+  // Compliance Dashboard & Reporting
+  getComplianceDeadlines(tenantId: string): Promise<ComplianceDeadline[]>;
+  createComplianceDeadline(data: InsertComplianceDeadline): Promise<ComplianceDeadline>;
+  updateComplianceDeadline(id: string, tenantId: string, data: Partial<InsertComplianceDeadline>): Promise<ComplianceDeadline>;
+  getComplianceTraining(tenantId: string, filters?: { userId?: string }): Promise<ComplianceTraining[]>;
+  updateComplianceTraining(id: string, tenantId: string, data: Partial<InsertComplianceTraining>): Promise<ComplianceTraining>;
+  getBankConnections(tenantId: string): Promise<any[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -8699,6 +8727,114 @@ export class DatabaseStorage implements IStorage {
       .delete(alertRules)
       .where(and(eq(alertRules.id, id), eq(alertRules.tenantId, tenantId)));
   }
+
+  // Transaction History
+  async createTransactionHistoryRecord(data: InsertTransactionHistory): Promise<TransactionHistory> {
+    const [record] = await db
+      .insert(transactionHistory)
+      .values(data)
+      .returning();
+    return record;
+  }
+
+  async getTransactionHistory(tenantId: string, filters?: {
+    customerId?: string;
+    vendorId?: string;
+    transactionType?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<TransactionHistory[]> {
+    const conditions = [eq(transactionHistory.tenantId, tenantId)];
+
+    if (filters?.customerId) {
+      conditions.push(eq(transactionHistory.customerId, filters.customerId));
+    }
+    if (filters?.vendorId) {
+      conditions.push(eq(transactionHistory.vendorId, filters.vendorId));
+    }
+    if (filters?.transactionType) {
+      conditions.push(eq(transactionHistory.transactionType, filters.transactionType));
+    }
+    if (filters?.startDate) {
+      conditions.push(gte(transactionHistory.transactionDate, filters.startDate.toISOString().split('T')[0]));
+    }
+    if (filters?.endDate) {
+      conditions.push(lte(transactionHistory.transactionDate, filters.endDate.toISOString().split('T')[0]));
+    }
+
+    return await db
+      .select()
+      .from(transactionHistory)
+      .where(and(...conditions))
+      .orderBy(desc(transactionHistory.transactionDate));
+  }
+
+  // Compliance Dashboard & Reporting
+  async getComplianceDeadlines(tenantId: string): Promise<ComplianceDeadline[]> {
+    return await db
+      .select()
+      .from(complianceDeadlines)
+      .where(eq(complianceDeadlines.tenantId, tenantId))
+      .orderBy(asc(complianceDeadlines.dueDate));
+  }
+
+  async createComplianceDeadline(data: InsertComplianceDeadline): Promise<ComplianceDeadline> {
+    const [deadline] = await db
+      .insert(complianceDeadlines)
+      .values(data)
+      .returning();
+    return deadline;
+  }
+
+  async updateComplianceDeadline(id: string, tenantId: string, data: Partial<InsertComplianceDeadline>): Promise<ComplianceDeadline> {
+    const [deadline] = await db
+      .update(complianceDeadlines)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(complianceDeadlines.id, id), eq(complianceDeadlines.tenantId, tenantId)))
+      .returning();
+    
+    if (!deadline) {
+      throw new Error('Compliance deadline not found');
+    }
+    
+    return deadline;
+  }
+
+  async getComplianceTraining(tenantId: string, filters?: { userId?: string }): Promise<ComplianceTraining[]> {
+    const conditions = [eq(complianceTraining.tenantId, tenantId)];
+    
+    if (filters?.userId) {
+      conditions.push(eq(complianceTraining.userId, filters.userId));
+    }
+
+    return await db
+      .select()
+      .from(complianceTraining)
+      .where(and(...conditions))
+      .orderBy(desc(complianceTraining.createdAt));
+  }
+
+  async updateComplianceTraining(id: string, tenantId: string, data: Partial<InsertComplianceTraining>): Promise<ComplianceTraining> {
+    const [training] = await db
+      .update(complianceTraining)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(complianceTraining.id, id), eq(complianceTraining.tenantId, tenantId)))
+      .returning();
+    
+    if (!training) {
+      throw new Error('Compliance training not found');
+    }
+    
+    return training;
+  }
+
+  async getBankConnections(tenantId: string): Promise<any[]> {
+    return await db
+      .select()
+      .from(openBankingConnections)
+      .where(eq(openBankingConnections.tenantId, tenantId))
+      .orderBy(desc(openBankingConnections.createdAt));
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -8721,6 +8857,9 @@ export class MemStorage implements IStorage {
   private customerPayments: CustomerPayment[] = [];
   private customerPaymentSequenceCounters: Map<string, number> = new Map();
   private auditLogs: AuditLog[] = [];
+  private transactionHistory: TransactionHistory[] = [];
+  private complianceDeadlines: ComplianceDeadline[] = [];
+  private complianceTraining: ComplianceTraining[] = [];
 
   // User operations
   async getUser(id: string): Promise<User | undefined> {
@@ -10268,6 +10407,118 @@ export class MemStorage implements IStorage {
 
   async deleteAlertRule(id: string, tenantId: string): Promise<void> {
     throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  // Transaction History
+  async createTransactionHistoryRecord(data: InsertTransactionHistory): Promise<TransactionHistory> {
+    const record: TransactionHistory = {
+      id: crypto.randomUUID(),
+      ...data,
+      recordedAt: new Date(),
+    };
+    
+    this.transactionHistory.push(record);
+    return record;
+  }
+
+  async getTransactionHistory(tenantId: string, filters?: {
+    customerId?: string;
+    vendorId?: string;
+    transactionType?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<TransactionHistory[]> {
+    let results = this.transactionHistory.filter(record => record.tenantId === tenantId);
+    
+    if (filters) {
+      if (filters.customerId) {
+        results = results.filter(r => r.customerId === filters.customerId);
+      }
+      if (filters.vendorId) {
+        results = results.filter(r => r.vendorId === filters.vendorId);
+      }
+      if (filters.transactionType) {
+        results = results.filter(r => r.transactionType === filters.transactionType);
+      }
+      if (filters.startDate) {
+        results = results.filter(r => 
+          r.transactionDate && new Date(r.transactionDate) >= filters.startDate!
+        );
+      }
+      if (filters.endDate) {
+        results = results.filter(r => 
+          r.transactionDate && new Date(r.transactionDate) <= filters.endDate!
+        );
+      }
+    }
+    
+    return results;
+  }
+
+  // Compliance Dashboard & Reporting
+  async getComplianceDeadlines(tenantId: string): Promise<ComplianceDeadline[]> {
+    return this.complianceDeadlines
+      .filter(d => d.tenantId === tenantId)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  }
+
+  async createComplianceDeadline(data: InsertComplianceDeadline): Promise<ComplianceDeadline> {
+    const deadline: ComplianceDeadline = {
+      id: crypto.randomUUID(),
+      ...data,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    
+    this.complianceDeadlines.push(deadline);
+    return deadline;
+  }
+
+  async updateComplianceDeadline(id: string, tenantId: string, data: Partial<InsertComplianceDeadline>): Promise<ComplianceDeadline> {
+    const index = this.complianceDeadlines.findIndex(d => d.id === id && d.tenantId === tenantId);
+    
+    if (index === -1) {
+      throw new Error('Compliance deadline not found');
+    }
+    
+    this.complianceDeadlines[index] = {
+      ...this.complianceDeadlines[index],
+      ...data,
+      updatedAt: new Date(),
+    };
+    
+    return this.complianceDeadlines[index];
+  }
+
+  async getComplianceTraining(tenantId: string, filters?: { userId?: string }): Promise<ComplianceTraining[]> {
+    let results = this.complianceTraining.filter(t => t.tenantId === tenantId);
+    
+    if (filters?.userId) {
+      results = results.filter(t => t.userId === filters.userId);
+    }
+    
+    return results;
+  }
+
+  async updateComplianceTraining(id: string, tenantId: string, data: Partial<InsertComplianceTraining>): Promise<ComplianceTraining> {
+    const index = this.complianceTraining.findIndex(t => t.id === id && t.tenantId === tenantId);
+    
+    if (index === -1) {
+      throw new Error('Compliance training not found');
+    }
+    
+    this.complianceTraining[index] = {
+      ...this.complianceTraining[index],
+      ...data,
+      updatedAt: new Date(),
+    };
+    
+    return this.complianceTraining[index];
+  }
+
+  async getBankConnections(tenantId: string): Promise<any[]> {
+    // For MemStorage, return empty array (bank connections are typically in database)
+    return [];
   }
 }
 

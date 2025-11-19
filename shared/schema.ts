@@ -4229,6 +4229,127 @@ export const insertAlertRuleSchema = createInsertSchema(alertRules, {
 export type InsertAlertRule = z.infer<typeof insertAlertRuleSchema>;
 export type AlertRule = typeof alertRules.$inferSelect;
 
+// Transaction History (Dedicated table for storing all transactions for AML analysis)
+// NOTE: This table stores ALL transactions regardless of whether they triggered alerts
+// This prevents data commingling between transactional history and alert records
+export const transactionHistory = pgTable("transaction_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").references(() => customers.id),
+  vendorId: varchar("vendor_id").references(() => vendors.id),
+  
+  // Transaction Details
+  transactionType: varchar("transaction_type", { length: 50 }).notNull(), // 'invoice', 'payment', 'bill', 'customer_payment'
+  transactionId: varchar("transaction_id", { length: 255 }).notNull(),
+  amount: varchar("amount").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  transactionDate: date("transaction_date").notNull(),
+  
+  // Metadata
+  metadata: jsonb("metadata"), // Additional transaction details
+  
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (table) => [
+  index("transaction_history_tenant_idx").on(table.tenantId),
+  index("transaction_history_tenant_customer_idx").on(table.tenantId, table.customerId),
+  index("transaction_history_tenant_vendor_idx").on(table.tenantId, table.vendorId),
+  index("transaction_history_tenant_date_idx").on(table.tenantId, table.transactionDate),
+  index("transaction_history_type_idx").on(table.transactionType),
+  index("transaction_history_transaction_id_idx").on(table.transactionId),
+]);
+
+export const insertTransactionHistorySchema = createInsertSchema(transactionHistory).omit({
+  id: true,
+  recordedAt: true,
+});
+
+export type InsertTransactionHistory = z.infer<typeof insertTransactionHistorySchema>;
+export type TransactionHistory = typeof transactionHistory.$inferSelect;
+
+// ============================================================================
+// COMPLIANCE DASHBOARD & REPORTING
+// ============================================================================
+
+// Compliance Metrics (calculated compliance metrics for dashboard)
+export const complianceMetrics = pgTable("compliance_metrics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  complianceArea: varchar("compliance_area", { length: 50 }).notNull(), // 'sox', 'pci_dss', 'gdpr', 'aml_kyc', 'psd2'
+  metricType: varchar("metric_type", { length: 100 }).notNull(), // 'audit_logs_count', 'kyc_pending', 'training_completion_rate', etc.
+  metricValue: varchar("metric_value", { length: 255 }).notNull(),
+  calculatedAt: timestamp("calculated_at").defaultNow().notNull(),
+  metadata: jsonb("metadata"),
+}, (table) => [
+  index("idx_compliance_metrics_tenant_area").on(table.tenantId, table.complianceArea),
+  index("idx_compliance_metrics_calculated_at").on(table.calculatedAt),
+]);
+
+export const insertComplianceMetricSchema = createInsertSchema(complianceMetrics).omit({
+  id: true,
+  calculatedAt: true,
+});
+
+export type InsertComplianceMetric = z.infer<typeof insertComplianceMetricSchema>;
+export type ComplianceMetric = typeof complianceMetrics.$inferSelect;
+
+// Compliance Training (training assignments and completion tracking)
+export const complianceTraining = pgTable("compliance_training", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  trainingModule: varchar("training_module", { length: 100 }).notNull(), // 'sox_basics', 'aml_procedures', 'gdpr_awareness', etc.
+  status: varchar("status", { length: 50 }).notNull(), // 'not_started', 'in_progress', 'completed', 'expired'
+  completedAt: timestamp("completed_at"),
+  expiresAt: timestamp("expires_at"),
+  score: integer("score"), // 0-100
+  dueDate: date("due_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_compliance_training_tenant_user").on(table.tenantId, table.userId),
+  index("idx_compliance_training_status").on(table.status),
+  index("idx_compliance_training_due_date").on(table.dueDate),
+]);
+
+export const insertComplianceTrainingSchema = createInsertSchema(complianceTraining).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertComplianceTraining = z.infer<typeof insertComplianceTrainingSchema>;
+export type ComplianceTraining = typeof complianceTraining.$inferSelect;
+
+// Compliance Deadlines (regulatory and internal compliance deadlines)
+export const complianceDeadlines = pgTable("compliance_deadlines", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  complianceArea: varchar("compliance_area", { length: 50 }).notNull(), // 'sox', 'pci_dss', 'gdpr', 'aml_kyc', 'psd2', 'tax', 'general'
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  dueDate: date("due_date").notNull(),
+  status: varchar("status", { length: 50 }).notNull(), // 'upcoming', 'overdue', 'completed'
+  priority: varchar("priority", { length: 50 }).notNull(), // 'low', 'medium', 'high', 'critical'
+  assignedTo: varchar("assigned_to").references(() => users.id),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_compliance_deadlines_tenant").on(table.tenantId),
+  index("idx_compliance_deadlines_due_date").on(table.dueDate),
+  index("idx_compliance_deadlines_status").on(table.status),
+  index("idx_compliance_deadlines_assigned_to").on(table.assignedTo),
+]);
+
+export const insertComplianceDeadlineSchema = createInsertSchema(complianceDeadlines).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertComplianceDeadline = z.infer<typeof insertComplianceDeadlineSchema>;
+export type ComplianceDeadline = typeof complianceDeadlines.$inferSelect;
+
 // ============================================================================
 // PROJECT MANAGEMENT & TIME TRACKING
 // ============================================================================

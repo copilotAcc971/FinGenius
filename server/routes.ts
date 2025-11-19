@@ -9679,8 +9679,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: 'Customer not found' });
       }
       
-      // Calculate risk score
-      const assessment = riskScoringService.calculateCustomerRiskScore(customer);
+      // Calculate risk score with actual transaction history
+      // ENHANCEMENT: Use real transaction data from invoices for accurate risk assessment
+      const transactionHistory = await riskScoringService.getCustomerTransactionHistory(
+        storage,
+        customerId,
+        req.tenantId,
+        90 // Last 90 days
+      );
+      
+      const assessment = riskScoringService.calculateCustomerRiskScore(customer, transactionHistory);
       const nextReviewDate = riskScoringService.getNextReviewDate(assessment.riskLevel);
       const reviewFrequency = riskScoringService.getReviewFrequency(assessment.riskLevel);
       
@@ -9931,6 +9939,167 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('[AlertRules] Delete rule error:', error);
       res.status(400).json({ message: error.message || 'Failed to delete alert rule' });
+    }
+  });
+
+  // ==========================================
+  // COMPLIANCE DASHBOARD & REPORTING ROUTES
+  // ==========================================
+
+  // Get compliance dashboard overview
+  app.get('/api/compliance/dashboard', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.dashboard.view'), async (req: any, res) => {
+    try {
+      // SOX Compliance Stats
+      const auditLogsCount = (await storage.getAuditLogs(req.tenantId, {})).length;
+      const recentAuditLogs = (await storage.getAuditLogs(req.tenantId, {})).filter(log => 
+        new Date(log.timestamp) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      ).length;
+      
+      // AML/KYC Stats
+      const kycVerifications = await storage.getKYCVerifications(req.tenantId, {});
+      const pendingKYC = kycVerifications.filter(v => v.status === 'pending').length;
+      const verifiedKYC = kycVerifications.filter(v => v.status === 'verified').length;
+      const eddRequired = kycVerifications.filter(v => v.eddRequired).length;
+      
+      const transactionAlerts = await storage.getTransactionAlerts(req.tenantId, {});
+      const openAlerts = transactionAlerts.filter(a => a.status === 'open').length;
+      const criticalAlerts = transactionAlerts.filter(a => a.severity === 'critical' && a.status === 'open').length;
+      const highAlerts = transactionAlerts.filter(a => a.severity === 'high' && a.status === 'open').length;
+      const mediumAlerts = transactionAlerts.filter(a => a.severity === 'medium' && a.status === 'open').length;
+      const lowAlerts = transactionAlerts.filter(a => a.severity === 'low' && a.status === 'open').length;
+      
+      const sars = await storage.getSuspiciousActivityReports(req.tenantId, {});
+      const pendingSARs = sars.filter(s => s.status === 'under_review' || s.status === 'approved').length;
+      
+      // GDPR Stats (placeholder - implement when GDPR module is built)
+      const dataSubjectRequests = 0;
+      const pendingDSRs = 0;
+      
+      // PCI-DSS Stats (placeholder - implement when payment security module is built)
+      const secureTransactions = 0;
+      const failedTransactions = 0;
+      
+      // PSD2 Stats (can pull from Lean Technologies integration)
+      const bankConnections = (await storage.getBankConnections(req.tenantId)).length;
+      const activeConnections = (await storage.getBankConnections(req.tenantId)).filter(c => c.connectionStatus === 'active').length;
+      
+      const overview = {
+        sox: {
+          status: auditLogsCount > 0 ? 'compliant' : 'attention_required',
+          auditLogsCount,
+          recentAuditLogs,
+          lastAuditDate: new Date().toISOString(),
+        },
+        amlKyc: {
+          status: pendingKYC === 0 && openAlerts === 0 ? 'compliant' : criticalAlerts > 0 ? 'critical' : 'attention_required',
+          verifiedKYC,
+          pendingKYC,
+          eddRequired,
+          openAlerts,
+          criticalAlerts,
+          highAlerts,
+          mediumAlerts,
+          lowAlerts,
+          pendingSARs,
+        },
+        gdpr: {
+          status: 'not_applicable',
+          dataSubjectRequests,
+          pendingDSRs,
+        },
+        pciDss: {
+          status: 'not_applicable',
+          secureTransactions,
+          failedTransactions,
+        },
+        psd2: {
+          status: bankConnections > 0 && activeConnections === bankConnections ? 'compliant' : 'attention_required',
+          bankConnections,
+          activeConnections,
+        },
+      };
+      
+      res.json(overview);
+    } catch (error: any) {
+      console.error('[Compliance] Dashboard error:', error);
+      res.status(500).json({ message: 'Failed to fetch compliance dashboard' });
+    }
+  });
+
+  // Get compliance deadlines
+  app.get('/api/compliance/deadlines', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.dashboard.view'), async (req: any, res) => {
+    try {
+      const deadlines = await storage.getComplianceDeadlines(req.tenantId);
+      res.json(deadlines);
+    } catch (error: any) {
+      console.error('[Compliance] Get deadlines error:', error);
+      res.status(500).json({ message: 'Failed to fetch compliance deadlines' });
+    }
+  });
+
+  // Create compliance deadline
+  app.post('/api/compliance/deadlines', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.dashboard.manage'), async (req: any, res) => {
+    try {
+      const data = { ...req.body, tenantId: req.tenantId };
+      const deadline = await storage.createComplianceDeadline(data);
+      res.status(201).json(deadline);
+    } catch (error: any) {
+      console.error('[Compliance] Create deadline error:', error);
+      res.status(400).json({ message: error.message || 'Failed to create compliance deadline' });
+    }
+  });
+
+  // Update compliance deadline
+  app.patch('/api/compliance/deadlines/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.dashboard.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const deadline = await storage.updateComplianceDeadline(id, req.tenantId, req.body);
+      res.json(deadline);
+    } catch (error: any) {
+      console.error('[Compliance] Update deadline error:', error);
+      res.status(400).json({ message: error.message || 'Failed to update compliance deadline' });
+    }
+  });
+
+  // Get compliance training for current user
+  app.get('/api/compliance/training', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const userId = req.user!.claims.sub;
+      const training = await storage.getComplianceTraining(req.tenantId, { userId });
+      res.json(training);
+    } catch (error: any) {
+      console.error('[Compliance] Get training error:', error);
+      res.status(500).json({ message: 'Failed to fetch compliance training' });
+    }
+  });
+
+  // Get all training (for admins)
+  app.get('/api/compliance/training/all', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.dashboard.manage'), async (req: any, res) => {
+    try {
+      const training = await storage.getComplianceTraining(req.tenantId, {});
+      res.json(training);
+    } catch (error: any) {
+      console.error('[Compliance] Get all training error:', error);
+      res.status(500).json({ message: 'Failed to fetch all training' });
+    }
+  });
+
+  // Mark training as completed
+  app.patch('/api/compliance/training/:id/complete', isAuthenticated, verifyTenantAccess, loadAuthContext, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { score } = req.body;
+      
+      const training = await storage.updateComplianceTraining(id, req.tenantId, {
+        status: 'completed',
+        completedAt: new Date(),
+        score: score || null,
+      });
+      
+      res.json(training);
+    } catch (error: any) {
+      console.error('[Compliance] Complete training error:', error);
+      res.status(400).json({ message: error.message || 'Failed to complete training' });
     }
   });
 

@@ -41,6 +41,37 @@ export interface ScreeningResult {
   };
 }
 
+/**
+ * Mock sanctions list entries for development
+ * PRODUCTION: Replace with real API calls to OFAC/UN/EU/UK/PEP databases
+ */
+const MOCK_SANCTIONS_LISTS = {
+  ofac: [
+    { name: 'al qaeda', matchType: 'entity', sanctionType: 'terrorism', confidence: 0.95 },
+    { name: 'taliban', matchType: 'organization', sanctionType: 'terrorism', confidence: 0.95 },
+    { name: 'kim jong', matchType: 'individual', sanctionType: 'proliferation', confidence: 0.92 },
+    { name: 'hezbollah', matchType: 'organization', sanctionType: 'terrorism', confidence: 0.95 },
+    { name: 'islamic state', matchType: 'organization', sanctionType: 'terrorism', confidence: 0.95 },
+  ],
+  un: [
+    { name: 'al qaeda', matchType: 'entity', sanctionType: 'terrorism', confidence: 0.95 },
+    { name: 'isil', matchType: 'organization', sanctionType: 'terrorism', confidence: 0.95 },
+    { name: 'taliban', matchType: 'organization', sanctionType: 'terrorism', confidence: 0.95 },
+    { name: 'al-shabaab', matchType: 'organization', sanctionType: 'terrorism', confidence: 0.95 },
+  ],
+  eu: [
+    { name: 'russian federation', matchType: 'country', sanctionType: 'invasion', confidence: 0.98 },
+    { name: 'iran', matchType: 'country', sanctionType: 'nuclear', confidence: 0.98 },
+    { name: 'syria', matchType: 'country', sanctionType: 'conflict', confidence: 0.98 },
+    { name: 'north korea', matchType: 'country', sanctionType: 'nuclear', confidence: 0.98 },
+  ],
+  uk: [
+    { name: 'belarus', matchType: 'country', sanctionType: 'political', confidence: 0.98 },
+    { name: 'myanmar', matchType: 'country', sanctionType: 'human_rights', confidence: 0.98 },
+    { name: 'venezuela', matchType: 'country', sanctionType: 'political', confidence: 0.98 },
+  ],
+};
+
 export class SanctionsScreeningService {
   constructor(private storage: IStorage) {}
   
@@ -115,34 +146,49 @@ export class SanctionsScreeningService {
   private async checkOFAC(entity: ScreeningEntity): Promise<{ result: 'clear' | 'match'; confidence?: number; details?: any }> {
     // MOCK: Replace with actual OFAC API call
     // Real implementation: Call OFAC SDN API or third-party provider
-    
-    const normalizedName = entity.entityName.toLowerCase();
-    
-    // Simple mock: flag suspicious keywords
-    const suspiciousKeywords = ['sanction', 'blocked', 'denied'];
-    if (suspiciousKeywords.some(kw => normalizedName.includes(kw))) {
-      return {
-        result: 'match',
-        confidence: 0.95,
-        details: { list: 'OFAC SDN', matchType: 'keyword', name: entity.entityName },
-      };
-    }
-    
-    return { result: 'clear' };
+    return this.checkSanctionsList('ofac', entity);
   }
   
   private async checkUN(entity: ScreeningEntity): Promise<{ result: 'clear' | 'match'; confidence?: number; details?: any }> {
     // MOCK: Replace with UN Sanctions List API
-    return { result: 'clear' };
+    return this.checkSanctionsList('un', entity);
   }
   
   private async checkEU(entity: ScreeningEntity): Promise<{ result: 'clear' | 'match'; confidence?: number; details?: any }> {
     // MOCK: Replace with EU Sanctions List API
-    return { result: 'clear' };
+    return this.checkSanctionsList('eu', entity);
   }
   
   private async checkUK(entity: ScreeningEntity): Promise<{ result: 'clear' | 'match'; confidence?: number; details?: any }> {
     // MOCK: Replace with UK Sanctions List API
+    return this.checkSanctionsList('uk', entity);
+  }
+
+  /**
+   * Check entity against a sanctions list using structured mock data
+   * PRODUCTION: Replace with real API calls to authoritative databases
+   */
+  private async checkSanctionsList(listName: 'ofac' | 'un' | 'eu' | 'uk', entity: ScreeningEntity): Promise<{ result: 'clear' | 'match'; confidence?: number; details?: any }> {
+    const normalizedName = entity.entityName.toLowerCase();
+    const list = MOCK_SANCTIONS_LISTS[listName];
+    
+    for (const entry of list) {
+      if (normalizedName.includes(entry.name)) {
+        return {
+          result: 'match',
+          confidence: entry.confidence,
+          details: {
+            listName: listName.toUpperCase(),
+            matchedEntry: entry.name,
+            matchType: entry.matchType,
+            sanctionType: entry.sanctionType,
+            requiresManualReview: true,
+            // PRODUCTION: Would include additional fields like sanctions date, reference number, etc.
+          },
+        };
+      }
+    }
+    
     return { result: 'clear' };
   }
   

@@ -1,10 +1,11 @@
 import type { IStorage } from '../storage';
-import type { InsertTransactionAlert } from '@shared/schema';
+import type { InsertTransactionAlert, InsertTransactionHistory } from '@shared/schema';
 
 export interface Transaction {
   id: string;
   type: 'invoice' | 'payment' | 'bank_transaction';
   customerId: string;
+  vendorId?: string;
   amount: number;
   currency: string;
   date: Date;
@@ -15,33 +16,33 @@ export class TransactionMonitoringService {
   
   /**
    * Monitor transaction and generate alerts based on configured rules
+   * ARCHITECTURE: Uses dedicated transaction_history table to separate transaction
+   * tracking from alert generation (prevents data commingling)
    */
   async monitorTransaction(
     tenantId: string,
     transaction: Transaction
   ): Promise<void> {
-    // CRITICAL: Store ALL transactions for historical analysis (not just alerts)
-    // Create a "monitored" record first
-    const monitoredRecord: InsertTransactionAlert = {
+    // Store in dedicated transaction history table (NOT in alerts table)
+    const historyRecord: InsertTransactionHistory = {
       tenantId,
       customerId: transaction.customerId,
-      alertType: 'transaction_recorded',
-      severity: 'low',
-      alertDate: new Date(),
+      vendorId: transaction.vendorId,
       transactionType: transaction.type,
       transactionId: transaction.id,
-      transactionAmount: transaction.amount.toString(),
-      transactionCurrency: transaction.currency,
-      transactionDate: transaction.date,
-      status: 'closed', // Not an actual alert, just a record
-      resolution: 'monitored',
-      riskScore: 0,
+      amount: transaction.amount.toString(),
+      currency: transaction.currency,
+      transactionDate: transaction.date.toISOString().split('T')[0],
+      metadata: {
+        source: 'transaction_monitoring',
+        monitoredAt: new Date().toISOString(),
+      },
     };
     
     try {
-      await this.storage.createTransactionAlert(monitoredRecord);
+      await this.storage.createTransactionHistoryRecord(historyRecord);
     } catch (error) {
-      console.error('[TransactionMonitoring] Failed to record transaction:', error);
+      console.error('[TransactionMonitoring] Failed to record transaction history:', error);
     }
     
     // Get active alert rules for tenant
@@ -67,21 +68,19 @@ export class TransactionMonitoringService {
     }
     
     // Velocity rules (multiple transactions in short period)
+    // ARCHITECTURE: Query dedicated transaction_history table (NOT alerts)
     if (rule.ruleType === 'velocity') {
       const period = rule.thresholdPeriod || 'daily';
       const lookbackHours = period === 'daily' ? 24 : period === 'weekly' ? 168 : 720;
       const startDate = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
       
-      // Count ALL monitored transactions (not just alerts) from this customer in period
-      const allRecords = await this.storage.getTransactionAlerts(tenantId, {
+      // Query dedicated transaction history table (separated from alerts)
+      const history = await this.storage.getTransactionHistory(tenantId, {
         customerId: transaction.customerId,
         startDate,
       });
       
-      // Filter to actual transactions (includes both monitored records and alerts)
-      const transactionCount = allRecords.filter(record => 
-        record.transactionId && record.transactionId !== 'unknown'
-      ).length + 1; // +1 for current transaction
+      const transactionCount = history.length + 1; // +1 for current transaction
       
       // Velocity threshold: configurable via rule
       const velocityThreshold = parseInt(rule.thresholdAmount) || 5;
@@ -93,6 +92,7 @@ export class TransactionMonitoringService {
     }
     
     // Pattern rules (round amounts, structuring)
+    // ARCHITECTURE: Query dedicated transaction_history table (NOT alerts)
     if (rule.ruleType === 'pattern') {
       // Check for round amounts (possible structuring)
       if (this.isRoundAmount(transaction.amount)) {
@@ -102,20 +102,19 @@ export class TransactionMonitoringService {
       // Check for structuring (multiple transactions just below threshold)
       const structuringThreshold = 10000; // $10,000 reporting threshold
       if (transaction.amount >= structuringThreshold * 0.9 && transaction.amount < structuringThreshold) {
-        // Count recent near-threshold transactions (all monitored records)
-        const allRecords = await this.storage.getTransactionAlerts(tenantId, {
+        // Query dedicated transaction history table (separated from alerts)
+        const history = await this.storage.getTransactionHistory(tenantId, {
           customerId: transaction.customerId,
           startDate: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
         });
         
-        const nearThresholdTransactions = allRecords.filter(record => {
-          if (!record.transactionAmount) return false;
-          const amt = parseFloat(record.transactionAmount);
+        const nearThresholdCount = history.filter(h => {
+          const amt = parseFloat(h.amount);
           return amt >= structuringThreshold * 0.9 && amt < structuringThreshold;
-        });
+        }).length;
         
-        if (nearThresholdTransactions.length >= 2) {
-          console.log(`[TransactionMonitoring] Structuring pattern detected: ${nearThresholdTransactions.length + 1} transactions near $10K threshold`);
+        if (nearThresholdCount >= 2) {
+          console.log(`[TransactionMonitoring] Structuring pattern detected: ${nearThresholdCount + 1} transactions near $10K threshold`);
           return true;
         }
       }

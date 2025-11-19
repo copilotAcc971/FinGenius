@@ -53,6 +53,7 @@ import ConsolidatedReports from "@/features/reports/pages/consolidated-reports-p
 import ConsolidatedProjects from "@/features/projects/pages/consolidated-projects-page";
 import AdvancedTableDemo from "@/shared/pages/advanced-table-demo-page";
 import AuditLogsPage from "@/pages/audit-logs-page";
+import ComplianceDashboardPage from "@/features/compliance/pages/compliance-dashboard-page";
 import KYCVerificationsPage from "@/features/compliance/pages/kyc-verifications-page";
 import SanctionsScreeningPage from "@/features/compliance/pages/sanctions-screening-page";
 import TransactionAlertsPage from "@/features/compliance/pages/transaction-alerts-page";
@@ -101,6 +102,7 @@ function Router() {
           <Route path="/settings/users" component={UserManagement} />
           <Route path="/settings/currencies" component={CurrenciesPage} />
           <Route path="/audit-logs" component={AuditLogsPage} />
+          <Route path="/compliance" component={ComplianceDashboardPage} />
           <Route path="/compliance/kyc" component={KYCVerificationsPage} />
           <Route path="/compliance/sanctions" component={SanctionsScreeningPage} />
           <Route path="/compliance/alerts" component={TransactionAlertsPage} />

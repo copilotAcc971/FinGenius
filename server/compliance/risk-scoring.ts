@@ -1,4 +1,5 @@
 import type { Customer, CustomerRiskProfile } from '@shared/schema';
+import type { IStorage } from '../storage';
 
 export interface RiskFactors {
   geographicRisk: number;       // 0-20 based on country risk ratings
@@ -8,12 +9,26 @@ export interface RiskFactors {
   customerTypeRisk: number;      // 0-20 based on customer category
 }
 
+export interface TransactionHistory {
+  totalVolume: number;
+  transactionCount: number;
+  avgAmount: number;
+}
+
 export class RiskScoringService {
   /**
    * Calculate overall customer risk score (0-100)
    * Risk Levels: Low (0-33), Medium (34-66), High (67-89), Critical (90-100)
+   * 
+   * @param customer - Customer to assess
+   * @param transactionHistory - Optional actual transaction data for enhanced risk scoring
+   * @param factors - Optional pre-calculated risk factors (for partial overrides)
    */
-  calculateCustomerRiskScore(customer: Customer, factors: Partial<RiskFactors> = {}): {
+  calculateCustomerRiskScore(
+    customer: Customer, 
+    transactionHistory?: TransactionHistory,
+    factors: Partial<RiskFactors> = {}
+  ): {
     riskScore: number;
     riskLevel: 'low' | 'medium' | 'high' | 'critical';
     factors: RiskFactors;
@@ -27,8 +42,8 @@ export class RiskScoringService {
     // 3. Product/Service Risk (0-20)
     const productServiceRisk = factors.productServiceRisk ?? this.assessProductServiceRisk(customer);
     
-    // 4. Transaction Risk (0-20) - to be enhanced with actual transaction data
-    const transactionRisk = factors.transactionRisk ?? 5; // Default medium-low
+    // 4. Transaction Risk (0-20) - enhanced with actual transaction data
+    const transactionRisk = factors.transactionRisk ?? this.assessTransactionRisk(transactionHistory);
     
     // 5. Customer Type Risk (0-20)
     const customerTypeRisk = factors.customerTypeRisk ?? this.assessCustomerTypeRisk(customer);
@@ -144,6 +159,75 @@ export class RiskScoringService {
     }
     
     return 4; // Individuals
+  }
+
+  /**
+   * Assess transaction risk using actual transaction data
+   * Uses real invoices/payments data to identify suspicious patterns
+   */
+  private assessTransactionRisk(transactionHistory?: TransactionHistory): number {
+    if (!transactionHistory) {
+      return 5; // Default medium-low when no transaction data available
+    }
+
+    let transactionRisk = 5; // Default medium
+
+    // High transaction volume increases risk
+    if (transactionHistory.totalVolume > 100000) {
+      transactionRisk = 8; // High risk
+    } else if (transactionHistory.totalVolume > 50000) {
+      transactionRisk = 6; // Medium-high
+    } else if (transactionHistory.totalVolume < 5000) {
+      transactionRisk = 3; // Low risk for small volumes
+    }
+
+    // Unusual average transaction size
+    if (transactionHistory.avgAmount > 10000) {
+      transactionRisk = Math.min(20, transactionRisk + 2);
+    }
+
+    // Many small transactions (possible structuring)
+    if (transactionHistory.transactionCount > 20 && transactionHistory.avgAmount < 5000) {
+      transactionRisk = Math.min(20, transactionRisk + 1);
+    }
+
+    return transactionRisk;
+  }
+
+  /**
+   * Fetch customer transaction history from actual invoices/payments
+   * Analyzes real transaction data over a specified lookback period
+   * 
+   * @param storage - Storage interface to query payments
+   * @param customerId - Customer ID to fetch transactions for
+   * @param tenantId - Tenant ID
+   * @param lookbackDays - Number of days to look back (default: 90 days)
+   * @returns Transaction history summary with volume, count, and average amount
+   */
+  async getCustomerTransactionHistory(
+    storage: IStorage,
+    customerId: string,
+    tenantId: string,
+    lookbackDays: number = 90
+  ): Promise<TransactionHistory> {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - lookbackDays);
+
+    // Use getCustomerPayments which exists in IStorage
+    const payments = await storage.getCustomerPayments(tenantId);
+    
+    const recentPayments = payments.filter(payment => 
+      payment.customerId === customerId &&
+      payment.paymentDate && 
+      new Date(payment.paymentDate) >= startDate && 
+      payment.amount
+    );
+
+    const totalVolume = recentPayments.reduce((sum, payment) => sum + parseFloat(payment.amount || '0'), 0);
+    const transactionCount = recentPayments.length;
+    const avgAmount = transactionCount > 0 ? totalVolume / transactionCount : 0;
+
+    return { totalVolume, transactionCount, avgAmount };
   }
   
   /**
