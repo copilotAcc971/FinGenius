@@ -82,6 +82,7 @@ import {
   insertProjectExpenseSchema,
   insertProjectMilestoneSchema,
   insertProjectInvoiceSchema,
+  insertAttachmentSchema,
   openBankingConnections,
   openBankingPayments,
   bankAccounts,
@@ -5345,6 +5346,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching documents:", error);
       res.status(500).json({ message: "Failed to fetch documents" });
+    }
+  });
+
+  // Attachment routes
+  app.post('/api/attachments', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      const { fileName, fileSize, fileType, fileData, entityType, entityId } = req.body;
+
+      // Validate file size (10MB max)
+      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+      if (fileSize > MAX_FILE_SIZE) {
+        return res.status(400).json({ message: "File size exceeds 10MB limit" });
+      }
+
+      const attachment = await storage.createAttachment({
+        tenantId,
+        fileName,
+        fileSize,
+        fileType,
+        fileData,
+        entityType,
+        entityId,
+        uploadedBy: userId,
+      });
+
+      res.status(201).json(attachment);
+    } catch (error: any) {
+      console.error("Error uploading attachment:", error);
+      res.status(500).json({ message: error.message || "Failed to upload attachment" });
+    }
+  });
+
+  app.get('/api/attachments/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+
+      const attachment = await storage.getAttachment(id, tenantId);
+      if (!attachment) {
+        return res.status(404).json({ message: "Attachment not found" });
+      }
+
+      res.json(attachment);
+    } catch (error: any) {
+      console.error("Error fetching attachment:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch attachment" });
+    }
+  });
+
+  app.get('/api/:entityType/:entityId/attachments', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      const tenantId = req.tenantId!;
+
+      const attachments = await storage.getAttachmentsByEntity(tenantId, entityType, entityId);
+      res.json(attachments);
+    } catch (error: any) {
+      console.error("Error fetching attachments:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch attachments" });
+    }
+  });
+
+  app.delete('/api/attachments/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+
+      // Verify attachment exists before deleting
+      const attachment = await storage.getAttachment(id, tenantId);
+      if (!attachment) {
+        return res.status(404).json({ message: "Attachment not found" });
+      }
+
+      await storage.deleteAttachment(id, tenantId);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting attachment:", error);
+      res.status(500).json({ message: error.message || "Failed to delete attachment" });
     }
   });
 

@@ -25,6 +25,7 @@ import {
   expenses,
   payments,
   documents,
+  attachments,
   quotes,
   quoteLineItems,
   salesOrders,
@@ -99,6 +100,8 @@ import {
   type InsertPayment,
   type Document,
   type InsertDocument,
+  type Attachment,
+  type InsertAttachment,
   type Quote,
   type InsertQuote,
   type QuoteLineItem,
@@ -313,6 +316,12 @@ export interface IStorage {
   getDocumentsByTenant(tenantId: string): Promise<Document[]>;
   createDocument(document: InsertDocument): Promise<Document>;
   updateDocument(id: string, tenantId: string, document: Partial<InsertDocument>): Promise<Document>;
+
+  // Attachment operations
+  createAttachment(attachment: InsertAttachment): Promise<Attachment>;
+  getAttachmentsByEntity(tenantId: string, entityType: string, entityId: string): Promise<Attachment[]>;
+  getAttachment(id: string, tenantId: string): Promise<Attachment | null>;
+  deleteAttachment(id: string, tenantId: string): Promise<void>;
 
   // Quote operations
   getQuotes(tenantId: string): Promise<Quote[]>;
@@ -2177,6 +2186,53 @@ export class DatabaseStorage implements IStorage {
       .where(eq(documents.id, id))
       .returning();
     return updatedDocument;
+  }
+
+  // Attachment operations
+  async createAttachment(attachmentData: InsertAttachment): Promise<Attachment> {
+    const [attachment] = await db
+      .insert(attachments)
+      .values(attachmentData)
+      .returning();
+    return attachment;
+  }
+
+  async getAttachmentsByEntity(tenantId: string, entityType: string, entityId: string): Promise<Attachment[]> {
+    return await db
+      .select()
+      .from(attachments)
+      .where(
+        and(
+          eq(attachments.tenantId, tenantId),
+          eq(attachments.entityType, entityType),
+          eq(attachments.entityId, entityId)
+        )
+      )
+      .orderBy(desc(attachments.uploadedAt));
+  }
+
+  async getAttachment(id: string, tenantId: string): Promise<Attachment | null> {
+    const [attachment] = await db
+      .select()
+      .from(attachments)
+      .where(
+        and(
+          eq(attachments.id, id),
+          eq(attachments.tenantId, tenantId)
+        )
+      );
+    return attachment || null;
+  }
+
+  async deleteAttachment(id: string, tenantId: string): Promise<void> {
+    await db
+      .delete(attachments)
+      .where(
+        and(
+          eq(attachments.id, id),
+          eq(attachments.tenantId, tenantId)
+        )
+      );
   }
 
   // Invoice sequencing
@@ -8187,6 +8243,7 @@ export class MemStorage implements IStorage {
   private expenses: Expense[] = [];
   private payments: Payment[] = [];
   private documents: Document[] = [];
+  private attachments: Attachment[] = [];
   private invoiceSequenceCounters: Map<string, number> = new Map();
   private customerPayments: CustomerPayment[] = [];
   private customerPaymentSequenceCounters: Map<string, number> = new Map();
@@ -8877,6 +8934,39 @@ export class MemStorage implements IStorage {
     const index = this.documents.findIndex(d => d.id === id);
     this.documents[index] = updated;
     return updated;
+  }
+
+  // Attachment operations
+  async createAttachment(attachment: InsertAttachment): Promise<Attachment> {
+    const newAttachment: Attachment = {
+      ...attachment,
+      id: `attachment-${Date.now()}-${Math.random()}`,
+      uploadedAt: new Date(),
+    };
+    this.attachments.push(newAttachment);
+    return newAttachment;
+  }
+
+  async getAttachmentsByEntity(tenantId: string, entityType: string, entityId: string): Promise<Attachment[]> {
+    return this.attachments
+      .filter(a => 
+        a.tenantId === tenantId && 
+        a.entityType === entityType && 
+        a.entityId === entityId
+      )
+      .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
+  }
+
+  async getAttachment(id: string, tenantId: string): Promise<Attachment | null> {
+    const attachment = this.attachments.find(a => a.id === id && a.tenantId === tenantId);
+    return attachment || null;
+  }
+
+  async deleteAttachment(id: string, tenantId: string): Promise<void> {
+    const index = this.attachments.findIndex(a => a.id === id && a.tenantId === tenantId);
+    if (index !== -1) {
+      this.attachments.splice(index, 1);
+    }
   }
 
   // Quotes - stub implementation

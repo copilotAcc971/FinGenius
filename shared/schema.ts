@@ -317,6 +317,9 @@ export const tenantCompanyProfiles = pgTable("tenant_company_profiles", {
   fxGainAccountId: varchar("fx_gain_account_id", { length: 255 }),
   fxLossAccountId: varchar("fx_loss_account_id", { length: 255 }),
   
+  // E-Invoicing Compliance
+  jurisdiction: varchar("jurisdiction", { length: 50 }), // 'UAE', 'KSA', 'UK', 'US', etc.
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -618,6 +621,24 @@ export const invoices = pgTable("invoices", {
   emailSentTo: varchar("email_sent_to"),
   emailStatus: varchar("email_status"), // 'pending', 'sent', 'failed'
   emailError: text("email_error"),
+  
+  // UAE Peppol E-Invoicing Fields
+  peppolQrCode: text("peppol_qr_code"), // QR code data
+  peppolTransmissionDeadline: timestamp("peppol_transmission_deadline"), // Invoice date + 14 days
+  peppolTransmittedAt: timestamp("peppol_transmitted_at"),
+  peppolTransmissionStatus: varchar("peppol_transmission_status", { length: 50 }), // pending, transmitted, failed
+  peppolAspReference: varchar("peppol_asp_reference", { length: 255 }), // ASP transaction ID
+  peppolUblXml: text("peppol_ubl_xml"), // Generated UBL XML (store for audit)
+  
+  // KSA ZATCA E-Invoicing Fields
+  zatcaUuid: varchar("zatca_uuid", { length: 255 }), // Unique invoice UUID
+  zatcaHash: varchar("zatca_hash", { length: 512 }), // Cryptographic hash
+  zatcaPreviousInvoiceHash: varchar("zatca_previous_invoice_hash", { length: 512 }), // Hash chaining
+  zatcaQrCode: text("zatca_qr_code"), // ZATCA-compliant QR code
+  zatcaClearanceStatus: varchar("zatca_clearance_status", { length: 50 }), // cleared, rejected, pending
+  zatcaClearedAt: timestamp("zatca_cleared_at"),
+  zatcaReportedAt: timestamp("zatca_reported_at"),
+  zatcaFatoorahXml: text("zatca_fatoorah_xml"), // FATOORAH XML
   
   deletedAt: timestamp("deleted_at"), // Soft delete
   createdAt: timestamp("created_at").defaultNow(),
@@ -1201,6 +1222,31 @@ export const insertDocumentSchema = createInsertSchema(documents).omit({
 export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type Document = typeof documents.$inferSelect;
 
+// Attachments (Universal attachment system for all entities)
+export const attachments = pgTable("attachments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileSize: integer("file_size").notNull(), // Size in bytes
+  fileType: varchar("file_type", { length: 100 }).notNull(), // MIME type
+  fileData: text("file_data").notNull(), // Base64 encoded file data (for MVP)
+  entityType: varchar("entity_type", { length: 50 }).notNull(), // 'invoice', 'bill', 'purchase_order', 'credit_note', 'expense', 'payment'
+  entityId: varchar("entity_id", { length: 255 }).notNull(), // ID of the related entity
+  uploadedBy: varchar("uploaded_by").references(() => users.id),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+}, (table) => [
+  index("attachments_tenant_idx").on(table.tenantId),
+  index("attachments_entity_idx").on(table.entityType, table.entityId),
+]);
+
+export const insertAttachmentSchema = createInsertSchema(attachments).omit({
+  id: true,
+  uploadedAt: true,
+});
+
+export type InsertAttachment = z.infer<typeof insertAttachmentSchema>;
+export type Attachment = typeof attachments.$inferSelect;
+
 // Quotes (Sales Quotations)
 export const quotes = pgTable("quotes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1423,6 +1469,24 @@ export const creditNotes = pgTable("credit_notes", {
   transactionTotalAmount: decimal("transaction_total_amount", { precision: 20, scale: 10 }),
   
   notes: text("notes"),
+  
+  // UAE Peppol E-Invoicing Fields
+  peppolQrCode: text("peppol_qr_code"),
+  peppolTransmissionDeadline: timestamp("peppol_transmission_deadline"),
+  peppolTransmittedAt: timestamp("peppol_transmitted_at"),
+  peppolTransmissionStatus: varchar("peppol_transmission_status", { length: 50 }),
+  peppolAspReference: varchar("peppol_asp_reference", { length: 255 }),
+  peppolUblXml: text("peppol_ubl_xml"),
+  
+  // KSA ZATCA E-Invoicing Fields
+  zatcaUuid: varchar("zatca_uuid", { length: 255 }),
+  zatcaHash: varchar("zatca_hash", { length: 512 }),
+  zatcaPreviousInvoiceHash: varchar("zatca_previous_invoice_hash", { length: 512 }),
+  zatcaQrCode: text("zatca_qr_code"),
+  zatcaClearanceStatus: varchar("zatca_clearance_status", { length: 50 }),
+  zatcaClearedAt: timestamp("zatca_cleared_at"),
+  zatcaReportedAt: timestamp("zatca_reported_at"),
+  zatcaFatoorahXml: text("zatca_fatoorah_xml"),
   
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow(),

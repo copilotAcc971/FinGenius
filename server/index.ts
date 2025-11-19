@@ -7,6 +7,7 @@ import { initializeTransactionSync } from "./jobs/transaction-sync";
 import { seedPermissions } from './scripts/seed-rbac';
 import { initializeRBACForAllTenants } from './scripts/update-owner-permissions';
 import { webhookRouter } from './routes-webhook';
+import { createAICopilotWebSocketServer } from './ai-copilot/websocket-server';
 
 const app = express();
 
@@ -57,6 +58,9 @@ app.use((req, res, next) => {
     res.status(status).json({ message });
     throw err;
   });
+
+  // Initialize AI Copilot WebSocket server
+  createAICopilotWebSocketServer(server);
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route

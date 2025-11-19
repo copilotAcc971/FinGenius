@@ -93,10 +93,13 @@ The application implements a production-ready optimistic UI system for instant f
 - `data-testid` attributes for all interactive elements.
 - **Brand Identity:** Monochrome design system inspired by Notion/Vercel/NYT (black/white/grays) with sophisticated typography.
 - **Typography System:** WCAG AA compliant 8-tier typography with semantic color tokens for perfect dark mode adaptation.
-- **Navigation:** Global Cmd/Ctrl+K command palette, contextual breadcrumbs, TenantBadge for multi-tenant awareness, and a redesigned collapsible sidebar with RBAC-based filtering.
+- **Navigation:** Global Cmd/Ctrl+K command palette, contextual breadcrumbs, OrganizationSwitcher for multi-tenant awareness, and a redesigned collapsible sidebar with RBAC-based filtering.
+- **Terminology:** User-facing UI uses "organization" consistently (backend uses "tenant" for technical multi-tenancy implementation).
 - **Dashboard:** Quick action cards, recent documents, and pending items summary.
 - **UX Improvements:** Comprehensive empty states, advanced table skeleton loading system, StatusBadge, instant tenant initialization, toast notifications (3s auto-dismiss), reduced motion support, mobile responsiveness, and accessibility audit passed.
 - **Loading States:** Production-ready table skeleton system with shared column-width contract (`table-columns.tsx`), type-safe `TableColumnDef` interface, `<colgroup>` enforcement for zero horizontal CLS, `minHeight` for vertical stability. Applied to all 9 table pages (invoices, bills, customers, vendors, items, payments, expenses, customer-payments, purchase-orders). 900% improvement over original spinner animations.
+- **Advanced Data Tables (TanStack Table v8):** Enterprise-grade table system with sorting, global search, advanced filtering, column visibility management, row selection, bulk actions, CSV/Excel export, pagination, localStorage persistence. Demo available at `/demo/advanced-table`.
+- **Enterprise-Grade Forms:** All major accounting forms enhanced with collapsible sections (Accordion UI), AttachmentManager for document uploads, ApprovalStatusBanner for workflow integration, AuditTrailDisplay for change history, and conditional UAE Peppol/KSA ZATCA e-invoicing fields.
 
 **Technical Implementations & Feature Specifications:**
 - **Core Accounting:** Modules for Company Profile, Customers, Vendors, Items, Taxes, Invoices (auto-numbering, audit trail, soft delete, tax compliance), Bills (AI extraction), Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices.

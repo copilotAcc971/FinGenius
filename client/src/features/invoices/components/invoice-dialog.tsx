@@ -55,6 +55,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/components/ui/aler
 import { Link } from "wouter";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
 import { useOptimisticCreate } from "@/shared/hooks/optimistic-ui/useOptimisticCreate";
+import { AttachmentManager } from "@/shared/components/common/attachment-manager";
+import { ApprovalStatusBanner } from "@/shared/components/common/approval-status-banner";
+import { AuditTrailDisplay } from "@/shared/components/common/audit-trail-display";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/shared/components/ui/accordion";
 
 const safeParseFloat = (value: string | number | null | undefined): number => {
   if (value === '' || value === null || value === undefined) return 0;
@@ -719,6 +723,30 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[1000px] max-h-[90vh] overflow-y-auto" data-testid="dialog-invoice">
+        {invoice && (
+          <ApprovalStatusBanner
+            status={(invoice as any).approvalStatus || "draft"}
+            approverNames={["John Doe", "Jane Smith"]} // TODO: Fetch from approval workflow
+            approvedBy={(invoice as any).approvedBy}
+            approvedAt={(invoice as any).approvedAt}
+            rejectedBy={(invoice as any).rejectedBy}
+            rejectedAt={(invoice as any).rejectedAt}
+            rejectionReason={(invoice as any).rejectionReason}
+            isCurrentUserApprover={false} // TODO: Check from RBAC permissions
+            onApprove={async () => {
+              // TODO: Implement approval API call
+              console.log("Approve invoice:", invoice.id);
+            }}
+            onReject={async (reason: string) => {
+              // TODO: Implement rejection API call
+              console.log("Reject invoice:", invoice.id, reason);
+            }}
+            onSubmitForApproval={async () => {
+              // TODO: Implement submit for approval API call
+              console.log("Submit invoice for approval:", invoice.id);
+            }}
+          />
+        )}
         <DialogHeader>
           <DialogTitle>{invoice ? "Edit Invoice" : "Create Invoice"}</DialogTitle>
           <DialogDescription>
@@ -744,9 +772,18 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             
-            {/* Issuer Section */}
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold">Issuer Information</h3>
+            <Accordion type="multiple" defaultValue={["details", "customer", "line-items", "totals"]} className="space-y-4">
+              
+              {/* Section 1: Document Details */}
+              <AccordionItem value="details">
+                <AccordionTrigger className="text-lg font-semibold">
+                  Document Details
+                </AccordionTrigger>
+                <AccordionContent className="space-y-4">
+                  
+                  {/* Issuer Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold">Issuer Information</h3>
               {profileLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -779,11 +816,11 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                   </div>
                 </div>
               )}
-            </div>
+                  </div>
 
-            {/* Header Section */}
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold">Invoice Details</h3>
+                  {/* Invoice Details */}
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold">Invoice Details</h3>
               <div className="grid grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
@@ -884,11 +921,17 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                   )}
                 />
               </div>
-            </div>
+                  </div>
+                  
+                </AccordionContent>
+              </AccordionItem>
 
-            {/* Customer Section */}
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold">Customer Information</h3>
+              {/* Section 2: Customer Information */}
+              <AccordionItem value="customer">
+                <AccordionTrigger className="text-lg font-semibold">
+                  Customer Information
+                </AccordionTrigger>
+                <AccordionContent className="space-y-4">
               <div className="grid grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
@@ -953,12 +996,18 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                   </div>
                 </div>
               </div>
-            </div>
+                
+                </AccordionContent>
+              </AccordionItem>
 
-            {/* Line Items Section */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Line Items</h3>
+              {/* Section 3: Line Items */}
+              <AccordionItem value="line-items">
+                <AccordionTrigger className="text-lg font-semibold">
+                  Line Items
+                </AccordionTrigger>
+                <AccordionContent className="space-y-4">
+                  
+                  <div className="flex items-center justify-between">
                 <Button
                   type="button"
                   variant="outline"
@@ -1151,10 +1200,18 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                   </div>
                 ))}
               </div>
-            </div>
+                
+                </AccordionContent>
+              </AccordionItem>
 
-            {/* Totals Section */}
-            <div className="space-y-2 border-t pt-4">
+              {/* Section 4: Totals & Summary */}
+              <AccordionItem value="totals">
+                <AccordionTrigger className="text-lg font-semibold">
+                  Totals & Summary
+                </AccordionTrigger>
+                <AccordionContent className="space-y-4">
+                  
+                  <div className="space-y-2 border-t pt-4">
               <div className="flex justify-end gap-4">
                 <span className="text-sm text-muted-foreground min-w-32 text-right">Subtotal:</span>
                 <span className="font-mono font-medium min-w-24 text-right" data-testid="text-subtotal">
@@ -1179,22 +1236,78 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                   {formatCurrency(parseFloat(calculatedValues.total), selectedCurrencyCode || baseCurrency?.code || 'USD', currenciesLoading ? [] : currencies)}
                 </span>
               </div>
-            </div>
+                  </div>
+                  
+                </AccordionContent>
+              </AccordionItem>
 
-            {/* Notes Section */}
-            <FormField
-              control={form.control}
-              name="invoice.notes"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Notes</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="Additional notes..." rows={3} {...field} data-testid="input-notes" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
+              {/* Section 5: Additional Information */}
+              <AccordionItem value="additional">
+                <AccordionTrigger className="text-lg font-semibold">
+                  Additional Information
+                </AccordionTrigger>
+                <AccordionContent className="space-y-4">
+                  
+                  <FormField
+                    control={form.control}
+                    name="invoice.notes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Notes</FormLabel>
+                        <FormControl>
+                          <Textarea placeholder="Additional notes..." rows={3} {...field} data-testid="input-notes" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Section 6: Attachments */}
+              <AccordionItem value="attachments">
+                <AccordionTrigger className="text-lg font-semibold">
+                  Attachments
+                </AccordionTrigger>
+                <AccordionContent>
+                  <AttachmentManager
+                    entityType="invoice"
+                    entityId={invoice?.id}
+                  />
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Section 7: E-Invoice Compliance (Conditional - only for UAE/KSA) */}
+              {companyProfile?.jurisdiction && ["UAE", "KSA"].includes(companyProfile.jurisdiction) && (
+                <AccordionItem value="e-invoice">
+                  <AccordionTrigger className="text-lg font-semibold">
+                    E-Invoice Compliance ({companyProfile.jurisdiction})
+                  </AccordionTrigger>
+                  <AccordionContent className="space-y-4">
+                    {companyProfile.jurisdiction === "UAE" && (
+                      <div className="space-y-3">
+                        <h4 className="font-medium">UAE Peppol Status</h4>
+                        {/* TODO: Add Peppol fields when invoice object has them */}
+                        <div className="text-muted-foreground text-sm">
+                          Peppol e-invoicing features will be available after database migration.
+                        </div>
+                      </div>
+                    )}
+                    {companyProfile.jurisdiction === "KSA" && (
+                      <div className="space-y-3">
+                        <h4 className="font-medium">ZATCA Compliance Status</h4>
+                        {/* TODO: Add ZATCA fields when invoice object has them */}
+                        <div className="text-muted-foreground text-sm">
+                          ZATCA e-invoicing features will be available after database migration.
+                        </div>
+                      </div>
+                    )}
+                  </AccordionContent>
+                </AccordionItem>
               )}
-            />
+              
+            </Accordion>
 
             {/* Action Buttons */}
             <DialogFooter className="gap-2">
@@ -1264,6 +1377,26 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
             </DialogFooter>
           </form>
         </Form>
+        
+        {invoice && (
+          <div className="border-t pt-4">
+            <AuditTrailDisplay
+              auditInfo={{
+                createdBy: (invoice as any).createdBy,
+                createdByName: (invoice as any).createdByName || (invoice as any).createdBy || "System",
+                createdAt: invoice.createdAt,
+                modifiedBy: (invoice as any).modifiedBy,
+                modifiedByName: (invoice as any).modifiedByName || (invoice as any).modifiedBy,
+                modifiedAt: invoice.updatedAt,
+                versionCount: (invoice as any).version || 1,
+              }}
+              onViewHistory={() => {
+                // TODO: Implement version history dialog
+                console.log("View history for invoice:", invoice.id);
+              }}
+            />
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
