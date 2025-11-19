@@ -1,18 +1,9 @@
-import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
-import { ConsolidatedPageLayout, VerticalTab } from "@/components/ui/vertical-tabs";
-import {
-  TrendingUp,
-  FileBarChart,
-  Clock,
-  FileSpreadsheet,
-  Calendar,
-} from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTenant } from "@/hooks/useTenant";
-import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useQueryTabState } from "@/hooks/useQueryTabState";
 
-// Import existing report page components (we'll use them as tab content)
+// Import existing report page components
 import FinancialReports from "@/pages/financial-reports";
 import ChartOfAccountsReport from "@/pages/chart-of-accounts-report";
 import ARAgingReport from "@/pages/ar-aging";
@@ -21,44 +12,15 @@ import CustomReportBuilder from "@/pages/custom-report-builder";
 import ScheduledReportsPage from "@/pages/scheduled-reports";
 
 export default function ConsolidatedReports() {
-  const [location, setLocation] = useLocation();
   const { currentTenant } = useTenant();
-  const { toast } = useToast();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [activeTab, setActiveTab] = useQueryTabState("financial");
 
-  // Parse active tab from URL query param
-  const searchParams = new URLSearchParams(window.location.search);
-  const tabFromUrl = searchParams.get("tab") || "financial";
-  const [activeTab, setActiveTab] = useState(tabFromUrl);
-
-  // Update URL when tab changes
-  const handleTabChange = (tabId: string) => {
-    setActiveTab(tabId);
-    const newUrl = `/reports?tab=${tabId}`;
-    window.history.pushState({}, "", newUrl);
-  };
-
-  // Sync tab with URL on load
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get("tab");
-    if (tab && tab !== activeTab) {
-      setActiveTab(tab);
-    }
-  }, [location]);
-
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
-        variant: "destructive",
-      });
-      setTimeout(() => {
-        window.location.href = "/api/login";
-      }, 500);
-    }
-  }, [isAuthenticated, authLoading, toast]);
+  if (!authLoading && !isAuthenticated) {
+    setTimeout(() => {
+      window.location.href = "/api/login";
+    }, 500);
+  }
 
   if (!currentTenant) {
     return (
@@ -75,72 +37,63 @@ export default function ConsolidatedReports() {
     );
   }
 
-  const tabs: VerticalTab[] = [
-    {
-      id: "financial",
-      label: "Financial Reports",
-      icon: TrendingUp,
-    },
-    {
-      id: "chart-of-accounts",
-      label: "Chart of Accounts",
-      icon: FileBarChart,
-    },
-    {
-      id: "ar-aging",
-      label: "AR Aging",
-      icon: Clock,
-    },
-    {
-      id: "ap-aging",
-      label: "AP Aging",
-      icon: Clock,
-    },
-    {
-      id: "custom",
-      label: "Custom Reports",
-      icon: FileSpreadsheet,
-    },
-    {
-      id: "scheduled",
-      label: "Scheduled Reports",
-      icon: Calendar,
-    },
-  ];
-
-  // Render content based on active tab
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case "financial":
-        return <FinancialReports />;
-      case "chart-of-accounts":
-        return <ChartOfAccountsReport />;
-      case "ar-aging":
-        return <ARAgingReport />;
-      case "ap-aging":
-        return <APAgingReport />;
-      case "custom":
-        return <CustomReportBuilder />;
-      case "scheduled":
-        return <ScheduledReportsPage />;
-      default:
-        return <FinancialReports />;
-    }
-  };
-
   return (
-    <ConsolidatedPageLayout
-      header={{
-        title: "Reports",
-        description: "Comprehensive financial insights, analytics, and reporting",
-      }}
-      tabs={tabs}
-      activeTab={activeTab}
-      onTabChange={handleTabChange}
-    >
-      <div className="p-6" data-testid="reports-tab-content">
-        {renderTabContent()}
+    <div className="p-6" data-testid="reports-page">
+      <div className="mb-6">
+        <h1 className="text-3xl font-semibold text-gray-900 dark:text-white mb-2">
+          Reports & Analytics
+        </h1>
+        <p className="text-gray-500 dark:text-gray-400">
+          Financial reports, aging analysis, and custom reporting
+        </p>
       </div>
-    </ConsolidatedPageLayout>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="mb-6">
+          <TabsTrigger value="financial" data-testid="tab-financial-reports">
+            Financial Reports
+          </TabsTrigger>
+          <TabsTrigger value="chart-of-accounts" data-testid="tab-chart-of-accounts">
+            Chart of Accounts
+          </TabsTrigger>
+          <TabsTrigger value="ar-aging" data-testid="tab-ar-aging">
+            AR Aging
+          </TabsTrigger>
+          <TabsTrigger value="ap-aging" data-testid="tab-ap-aging">
+            AP Aging
+          </TabsTrigger>
+          <TabsTrigger value="custom" data-testid="tab-custom-reports">
+            Custom Reports
+          </TabsTrigger>
+          <TabsTrigger value="scheduled" data-testid="tab-scheduled-reports">
+            Scheduled Reports
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="financial" data-testid="content-financial-reports">
+          <FinancialReports />
+        </TabsContent>
+
+        <TabsContent value="chart-of-accounts" data-testid="content-chart-of-accounts">
+          <ChartOfAccountsReport />
+        </TabsContent>
+
+        <TabsContent value="ar-aging" data-testid="content-ar-aging">
+          <ARAgingReport />
+        </TabsContent>
+
+        <TabsContent value="ap-aging" data-testid="content-ap-aging">
+          <APAgingReport />
+        </TabsContent>
+
+        <TabsContent value="custom" data-testid="content-custom-reports">
+          <CustomReportBuilder />
+        </TabsContent>
+
+        <TabsContent value="scheduled" data-testid="content-scheduled-reports">
+          <ScheduledReportsPage />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }

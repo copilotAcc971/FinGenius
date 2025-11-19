@@ -50,39 +50,52 @@ interface NavigationItem {
 const navigationItems: NavigationItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, url: "/", category: "Overview", keywords: ["home", "overview"] },
   
-  { id: "invoices", label: "Invoices", icon: FileText, url: "/invoices", category: "Sales", keywords: ["sales", "billing"] },
-  { id: "quotes", label: "Quotes", icon: FileText, url: "/quotes", category: "Sales", keywords: ["sales", "estimate"] },
-  { id: "sales-orders", label: "Sales Orders", icon: FileText, url: "/sales-orders", category: "Sales" },
-  { id: "credit-notes", label: "Credit Notes", icon: FileText, url: "/credit-notes", category: "Sales" },
-  { id: "recurring-invoices", label: "Recurring Invoices", icon: RefreshCw, url: "/recurring-invoices", category: "Sales" },
-  { id: "retainer-invoices", label: "Retainer Invoices", icon: Wallet, url: "/retainer-invoices", category: "Sales" },
+  // Sales Transactions - Consolidated
+  { id: "invoices", label: "Invoices", icon: FileText, url: "/sales?tab=invoices", category: "Sales", keywords: ["sales", "billing"] },
+  { id: "quotes", label: "Quotes", icon: FileText, url: "/sales?tab=quotes", category: "Sales", keywords: ["sales", "estimate"] },
+  { id: "sales-orders", label: "Sales Orders", icon: FileText, url: "/sales?tab=sales-orders", category: "Sales" },
+  { id: "credit-notes", label: "Credit Notes", icon: FileText, url: "/sales?tab=credit-notes", category: "Sales" },
+  { id: "recurring-invoices", label: "Recurring Invoices", icon: RefreshCw, url: "/sales?tab=recurring", category: "Sales" },
+  { id: "retainer-invoices", label: "Retainer Invoices", icon: Wallet, url: "/sales?tab=retainer", category: "Sales" },
   { id: "customers", label: "Customers", icon: Users, url: "/customers", category: "Sales", keywords: ["clients"] },
   { id: "items", label: "Items", icon: Package, url: "/items", category: "Sales", keywords: ["products", "services"] },
   { id: "taxes", label: "Taxes", icon: Percent, url: "/taxes", category: "Sales", keywords: ["vat", "gst"] },
   
-  { id: "purchase-orders", label: "Purchase Orders", icon: ShoppingCart, url: "/purchase-orders", category: "Purchases" },
-  { id: "bills", label: "Bills", icon: Receipt, url: "/bills", category: "Purchases", keywords: ["payables"] },
+  // Purchase Transactions - Consolidated
+  { id: "purchase-orders", label: "Purchase Orders", icon: ShoppingCart, url: "/purchases?tab=purchase-orders", category: "Purchases" },
+  { id: "bills", label: "Bills", icon: Receipt, url: "/purchases?tab=bills", category: "Purchases", keywords: ["payables"] },
+  { id: "expenses", label: "Expenses", icon: FileText, url: "/purchases?tab=expenses", category: "Purchases" },
   { id: "vendors", label: "Vendors", icon: Building2, url: "/vendors", category: "Purchases", keywords: ["suppliers"] },
-  { id: "expenses", label: "Expenses", icon: FileText, url: "/expenses", category: "Purchases" },
   
-  { id: "vendor-payments", label: "Vendor Payments", icon: CreditCard, url: "/payments", category: "Payments" },
-  { id: "customer-payments", label: "Customer Payments", icon: DollarSign, url: "/customer-payments", category: "Payments", keywords: ["receivables"] },
+  // Payments - Consolidated
+  { id: "vendor-payments", label: "Vendor Payments", icon: CreditCard, url: "/payments?tab=vendor-payments", category: "Payments" },
+  { id: "customer-payments", label: "Customer Payments", icon: DollarSign, url: "/payments?tab=customer-payments", category: "Payments", keywords: ["receivables"] },
   
+  // Accounting
   { id: "accounts", label: "Chart of Accounts", icon: BookOpen, url: "/accounts", category: "Accounting", keywords: ["coa"] },
   { id: "journal-entries", label: "Journal Entries", icon: FileText, url: "/journal-entries", category: "Accounting" },
-  { id: "approvals", label: "Pending Approvals", icon: CheckCircle, url: "/approvals", category: "Accounting", keywords: ["workflow"] },
-  { id: "workflows", label: "Approval Workflows", icon: Workflow, url: "/workflows", category: "Accounting" },
   { id: "account-balances", label: "Account Balances", icon: PieChart, url: "/account-balances", category: "Accounting" },
   { id: "assets", label: "Fixed Assets", icon: Package, url: "/assets", category: "Accounting", keywords: ["depreciation"] },
-  { id: "bank-reconciliations", label: "Bank Reconciliation", icon: CreditCard, url: "/bank-reconciliations", category: "Accounting" },
-  { id: "bank-connections", label: "Bank Connections", icon: Landmark, url: "/bank-connections", category: "Accounting", keywords: ["open banking"] },
   { id: "employee-expenses", label: "Employee Expenses", icon: Receipt, url: "/employee-expenses", category: "Accounting", keywords: ["reimbursement", "claims", "receipts"] },
-  { id: "financial-reports", label: "Financial Reports", icon: TrendingUp, url: "/financial-reports", category: "Reports", keywords: ["p&l", "balance sheet"] },
-  { id: "ar-aging", label: "AR Aging Report", icon: Clock, url: "/ar-aging", category: "Reports", keywords: ["receivables"] },
-  { id: "ap-aging", label: "AP Aging Report", icon: Clock, url: "/ap-aging", category: "Reports", keywords: ["payables"] },
   
+  // Approvals - Consolidated
+  { id: "approvals", label: "Pending Approvals", icon: CheckCircle, url: "/approvals?tab=pending", category: "Approvals", keywords: ["workflow"] },
+  { id: "workflows", label: "Approval Workflows", icon: Workflow, url: "/approvals?tab=workflows", category: "Approvals" },
+  
+  // Banking - Consolidated
+  { id: "bank-connections", label: "Bank Connections", icon: Landmark, url: "/banking?tab=connections", category: "Banking", keywords: ["open banking"] },
+  { id: "bank-reconciliations", label: "Bank Reconciliation", icon: CreditCard, url: "/banking?tab=reconciliation", category: "Banking" },
+  
+  // Reports - Consolidated
+  { id: "financial-reports", label: "Financial Reports", icon: TrendingUp, url: "/reports?tab=financial", category: "Reports", keywords: ["p&l", "balance sheet"] },
+  { id: "chart-of-accounts-report", label: "Chart of Accounts Report", icon: BarChart3, url: "/reports?tab=chart-of-accounts", category: "Reports" },
+  { id: "ar-aging", label: "AR Aging Report", icon: Clock, url: "/reports?tab=ar-aging", category: "Reports", keywords: ["receivables"] },
+  { id: "ap-aging", label: "AP Aging Report", icon: Clock, url: "/reports?tab=ap-aging", category: "Reports", keywords: ["payables"] },
+  { id: "custom-reports", label: "Custom Reports", icon: BarChart3, url: "/reports?tab=custom", category: "Reports" },
+  { id: "scheduled-reports", label: "Scheduled Reports", icon: Clock, url: "/reports?tab=scheduled", category: "Reports" },
+  
+  // Other
   { id: "documents", label: "Documents", icon: Upload, url: "/documents", category: "Other" },
-  { id: "reports", label: "Reports", icon: BarChart3, url: "/reports", category: "Other" },
   { id: "company-profile", label: "Company Profile", icon: Building2, url: "/company-profile", category: "Settings" },
   { id: "settings", label: "Settings", icon: Settings, url: "/settings", category: "Settings" },
   { id: "role-management", label: "Role Management", icon: Shield, url: "/settings/roles", category: "Administration" },

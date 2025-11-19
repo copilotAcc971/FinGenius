@@ -66,45 +66,32 @@ import {
 } from "@/lib/sidebar-storage";
 
 const salesItems = [
-  { title: "Invoices", url: "/invoices", icon: FileText },
-  { title: "Quotes", url: "/quotes", icon: FileText },
-  { title: "Sales Orders", url: "/sales-orders", icon: FileText },
-  { title: "Credit Notes", url: "/credit-notes", icon: FileText },
-  { title: "Recurring Invoices", url: "/recurring-invoices", icon: RefreshCw },
-  { title: "Retainer Invoices", url: "/retainer-invoices", icon: Wallet },
+  { title: "Sales Transactions", url: "/sales", icon: FileText },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Items", url: "/items", icon: Package },
   { title: "Taxes", url: "/taxes", icon: Percent },
 ];
 
 const purchasesItems = [
-  { title: "Purchase Orders", url: "/purchase-orders", icon: ShoppingCart },
-  { title: "Bills", url: "/bills", icon: Receipt },
+  { title: "Purchase Transactions", url: "/purchases", icon: ShoppingCart },
   { title: "Vendors", url: "/vendors", icon: Building },
-  { title: "Expenses", url: "/expenses", icon: FileText },
 ];
 
 const paymentsItems = [
-  { title: "Vendor Payments", url: "/payments", icon: CreditCard },
-  { title: "Customer Payments", url: "/customer-payments", icon: DollarSign },
+  { title: "Payments", url: "/payments", icon: CreditCard },
 ];
 
 const projectsItems = [
-  { title: "Projects", url: "/projects", icon: FolderKanban },
-  { title: "Project Reports", url: "/projects/reports", icon: ChartBar },
-  { title: "Time Tracking", url: "/time-tracking", icon: Clock },
-  { title: "Timesheets", url: "/timesheets", icon: Calendar },
+  { title: "Projects & Time Tracking", url: "/projects", icon: FolderKanban },
 ];
 
 const accountingItems = [
   { title: "Chart of Accounts", url: "/accounts", icon: BookOpen },
   { title: "Journal Entries", url: "/journal-entries", icon: FileText },
   { title: "Approvals", url: "/approvals", icon: CheckCircle },
-  { title: "Approval Workflows", url: "/workflows", icon: Workflow },
   { title: "Account Balances", url: "/account-balances", icon: PieChart },
   { title: "Fixed Assets", url: "/assets", icon: Package },
-  { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
-  { title: "Bank Connections", url: "/bank-connections", icon: Landmark },
+  { title: "Banking", url: "/banking", icon: Landmark },
   { title: "Employee Expenses", url: "/employee-expenses", icon: Receipt },
 ];
 

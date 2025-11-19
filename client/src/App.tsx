@@ -26,16 +26,9 @@ import Items from "@/pages/items";
 import Taxes from "@/pages/taxes";
 import Accounts from "@/pages/accounts";
 import AccountBalances from "@/pages/account-balances";
-import Invoices from "@/pages/invoices";
-import Quotes from "@/pages/quotes";
-import SalesOrders from "@/pages/sales-orders";
-import CreditNotes from "@/pages/credit-notes";
-import RecurringInvoices from "@/pages/recurring-invoices";
-import RetainerInvoices from "@/pages/retainer-invoices";
-import Bills from "@/pages/bills";
-import Expenses from "@/pages/expenses";
-import Payments from "@/pages/payments";
-import CustomerPayments from "@/pages/customer-payments";
+import ConsolidatedSales from "@/pages/consolidated-sales";
+import ConsolidatedPurchases from "@/pages/consolidated-purchases";
+import ConsolidatedPayments from "@/pages/consolidated-payments";
 import Documents from "@/pages/documents";
 import Settings from "@/pages/settings";
 import CompanyProfile from "@/pages/company-profile";
@@ -43,22 +36,17 @@ import JournalEntries from "@/pages/journal-entries";
 import JournalEntryDetailPage from "@/pages/JournalEntryDetailPage";
 import Assets from "@/pages/assets";
 import PurchaseOrders from "@/pages/purchase-orders";
-import BankReconciliations from "@/pages/bank-reconciliations";
-import BankConnections from "@/pages/bank-connections";
 import RoleManagement from "@/pages/role-management";
 import UserManagement from "@/pages/user-management";
 import CurrenciesPage from "@/pages/settings/currencies";
-import PendingApprovals from "@/pages/pending-approvals";
-import Workflows from "@/pages/workflows";
 import WorkflowForm from "@/pages/workflow-form";
+import ConsolidatedBanking from "@/pages/consolidated-banking";
+import ConsolidatedApprovals from "@/pages/consolidated-approvals";
 import EmployeeExpenses from "@/pages/employee-expenses";
-import Projects from "@/pages/projects";
 import ProjectDetail from "@/pages/project-detail";
-import ProjectReports from "@/pages/project-reports";
 import ProjectProfitabilityReport from "@/pages/project-profitability-report";
-import TimeTracking from "@/pages/time-tracking";
-import Timesheets from "@/pages/timesheets";
 import ConsolidatedReports from "@/pages/consolidated-reports";
+import ConsolidatedProjects from "@/pages/consolidated-projects";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -78,30 +66,17 @@ function Router() {
           <Route path="/account-balances" component={AccountBalances} />
           <Route path="/journal-entries/:id" component={JournalEntryDetailPage} />
           <Route path="/journal-entries" component={JournalEntries} />
-          <Route path="/approvals" component={PendingApprovals} />
+          <Route path="/approvals" component={ConsolidatedApprovals} />
           <Route path="/workflows/:id" component={WorkflowForm} />
-          <Route path="/workflows" component={Workflows} />
           <Route path="/assets" component={Assets} />
-          <Route path="/bank-reconciliations" component={BankReconciliations} />
-          <Route path="/bank-connections" component={BankConnections} />
-          <Route path="/invoices" component={Invoices} />
-          <Route path="/quotes" component={Quotes} />
-          <Route path="/sales-orders" component={SalesOrders} />
-          <Route path="/credit-notes" component={CreditNotes} />
-          <Route path="/recurring-invoices" component={RecurringInvoices} />
-          <Route path="/retainer-invoices" component={RetainerInvoices} />
-          <Route path="/bills" component={Bills} />
-          <Route path="/purchase-orders" component={PurchaseOrders} />
-          <Route path="/expenses" component={Expenses} />
+          <Route path="/banking" component={ConsolidatedBanking} />
+          <Route path="/sales" component={ConsolidatedSales} />
+          <Route path="/purchases" component={ConsolidatedPurchases} />
           <Route path="/employee-expenses" component={EmployeeExpenses} />
-          <Route path="/payments" component={Payments} />
-          <Route path="/customer-payments" component={CustomerPayments} />
+          <Route path="/payments" component={ConsolidatedPayments} />
           <Route path="/reports/projects/profitability" component={ProjectProfitabilityReport} />
-          <Route path="/projects/reports" component={ProjectReports} />
           <Route path="/projects/:id" component={ProjectDetail} />
-          <Route path="/projects" component={Projects} />
-          <Route path="/time-tracking" component={TimeTracking} />
-          <Route path="/timesheets" component={Timesheets} />
+          <Route path="/projects" component={ConsolidatedProjects} />
           <Route path="/documents" component={Documents} />
           <Route path="/reports" component={ConsolidatedReports} />
           <Route path="/company-profile" component={CompanyProfile} />
