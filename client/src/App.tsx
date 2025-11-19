@@ -37,7 +37,6 @@ import Expenses from "@/pages/expenses";
 import Payments from "@/pages/payments";
 import CustomerPayments from "@/pages/customer-payments";
 import Documents from "@/pages/documents";
-import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
 import CompanyProfile from "@/pages/company-profile";
 import JournalEntries from "@/pages/journal-entries";
@@ -45,9 +44,6 @@ import JournalEntryDetailPage from "@/pages/JournalEntryDetailPage";
 import Assets from "@/pages/assets";
 import PurchaseOrders from "@/pages/purchase-orders";
 import BankReconciliations from "@/pages/bank-reconciliations";
-import FinancialReports from "@/pages/financial-reports";
-import ARAgingReport from "@/pages/ar-aging";
-import APAgingReport from "@/pages/ap-aging";
 import BankConnections from "@/pages/bank-connections";
 import RoleManagement from "@/pages/role-management";
 import UserManagement from "@/pages/user-management";
@@ -55,9 +51,6 @@ import CurrenciesPage from "@/pages/settings/currencies";
 import PendingApprovals from "@/pages/pending-approvals";
 import Workflows from "@/pages/workflows";
 import WorkflowForm from "@/pages/workflow-form";
-import ChartOfAccountsReport from "@/pages/chart-of-accounts-report";
-import CustomReportBuilder from "@/pages/custom-report-builder";
-import ScheduledReports from "@/pages/scheduled-reports";
 import EmployeeExpenses from "@/pages/employee-expenses";
 import Projects from "@/pages/projects";
 import ProjectDetail from "@/pages/project-detail";
@@ -65,6 +58,7 @@ import ProjectReports from "@/pages/project-reports";
 import ProjectProfitabilityReport from "@/pages/project-profitability-report";
 import TimeTracking from "@/pages/time-tracking";
 import Timesheets from "@/pages/timesheets";
+import ConsolidatedReports from "@/pages/consolidated-reports";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -109,13 +103,7 @@ function Router() {
           <Route path="/time-tracking" component={TimeTracking} />
           <Route path="/timesheets" component={Timesheets} />
           <Route path="/documents" component={Documents} />
-          <Route path="/reports" component={Reports} />
-          <Route path="/reports/chart-of-accounts" component={ChartOfAccountsReport} />
-          <Route path="/custom-reports" component={CustomReportBuilder} />
-          <Route path="/scheduled-reports" component={ScheduledReports} />
-          <Route path="/financial-reports" component={FinancialReports} />
-          <Route path="/ar-aging" component={ARAgingReport} />
-          <Route path="/ap-aging" component={APAgingReport} />
+          <Route path="/reports" component={ConsolidatedReports} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/settings" component={Settings} />
           <Route path="/settings/roles" component={RoleManagement} />

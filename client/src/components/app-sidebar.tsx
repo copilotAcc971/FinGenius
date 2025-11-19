@@ -98,7 +98,6 @@ const projectsItems = [
 
 const accountingItems = [
   { title: "Chart of Accounts", url: "/accounts", icon: BookOpen },
-  { title: "Chart of Accounts Report", url: "/reports/chart-of-accounts", icon: FileBarChart },
   { title: "Journal Entries", url: "/journal-entries", icon: FileText },
   { title: "Approvals", url: "/approvals", icon: CheckCircle },
   { title: "Approval Workflows", url: "/workflows", icon: Workflow },
@@ -107,11 +106,6 @@ const accountingItems = [
   { title: "Bank Reconciliation", url: "/bank-reconciliations", icon: CreditCard },
   { title: "Bank Connections", url: "/bank-connections", icon: Landmark },
   { title: "Employee Expenses", url: "/employee-expenses", icon: Receipt },
-  { title: "Financial Reports", url: "/financial-reports", icon: TrendingUp },
-  { title: "Custom Reports", url: "/custom-reports", icon: FileSpreadsheet },
-  { title: "Scheduled Reports", url: "/scheduled-reports", icon: Calendar },
-  { title: "AR Aging Report", url: "/ar-aging", icon: Clock },
-  { title: "AP Aging Report", url: "/ap-aging", icon: Clock },
 ];
 
 const otherItems = [
