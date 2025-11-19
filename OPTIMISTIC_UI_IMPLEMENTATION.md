@@ -570,6 +570,157 @@ Potential improvements for future iterations:
 4. **Offline Queue**: Queue mutations when offline
 5. **Optimistic Relationships**: Update related queries automatically
 
+## E2E Testing with Playwright
+
+### Tenant Context Bootstrap for Tests
+
+The application requires tenant/workspace context before accessing any pages. For E2E testing, a test-only hook is exposed to set tenant context programmatically.
+
+**Test Hook**: `window.__setTenantForTesting(tenant)`
+
+**Location**: Exposed by `TenantProvider` in `client/src/shared/contexts/TenantContext.tsx`
+
+**Availability**: Only in development/test mode (`import.meta.env.MODE === 'development' || 'test'`)
+
+### Usage in Playwright Tests
+
+**Step 1: Login and Fetch Tenant**
+
+```typescript
+// 1. Configure OIDC auto-login
+await page.evaluate(() => {
+  window.__setOIDCClaims({
+    sub: "test-user-optimistic",
+    email: "optimistic@test.com",
+    first_name: "Test",
+    last_name: "User"
+  });
+});
+
+// 2. Navigate to login
+await page.goto('/login');
+
+// 3. Click login button (auto-login with OIDC claims)
+await page.click('[data-testid*="login"]');
+
+// 4. Wait for redirect to dashboard
+await page.waitForURL('/dashboard');
+
+// 5. Fetch tenants from API
+const response = await page.request.get('/api/tenants');
+const tenants = await response.json();
+const testTenant = tenants[0]; // Use first tenant
+```
+
+**Step 2: Set Tenant Context Using Test Hook**
+
+```typescript
+// Set tenant context programmatically
+await page.evaluate((tenant) => {
+  (window as any).__setTenantForTesting(tenant);
+}, testTenant);
+
+// Wait for tenant context to be ready
+await page.waitForTimeout(500); // Allow tenant session to propagate
+```
+
+**Step 3: Navigate to Feature Pages**
+
+```typescript
+// Now you can navigate to any tenant-protected page
+await page.goto('/invoices');
+
+// Page will render with tenant context
+await page.waitForSelector('[data-testid="table-invoices"]');
+```
+
+### Complete E2E Test Example: Optimistic Invoice Creation
+
+```typescript
+test('optimistic UI - concurrent invoice creates', async ({ page }) => {
+  // SETUP: Login and set tenant context
+  await page.evaluate(() => {
+    (window as any).__setOIDCClaims({
+      sub: "test-user-concurrent",
+      email: "concurrent@test.com",
+      first_name: "Test",
+      last_name: "User"
+    });
+  });
+  
+  await page.goto('/login');
+  await page.click('[data-testid*="login"]');
+  await page.waitForURL('/dashboard');
+  
+  const response = await page.request.get('/api/tenants');
+  const tenants = await response.json();
+  
+  await page.evaluate((tenant) => {
+    (window as any).__setTenantForTesting(tenant);
+  }, tenants[0]);
+  
+  await page.waitForTimeout(500);
+  
+  // TEST: Navigate to invoices page
+  await page.goto('/invoices');
+  await page.waitForSelector('[data-testid="button-create-invoice"]');
+  
+  // TEST: Create first invoice (optimistic)
+  await page.click('[data-testid="button-create-invoice"]');
+  await page.fill('[data-testid="input-customer"]', 'Customer A');
+  await page.fill('[data-testid="input-amount"]', '100');
+  await page.click('[data-testid="button-submit"]');
+  
+  // VERIFY: Optimistic item appears immediately with pending badge
+  await expect(page.locator('[data-testid*="invoice"][data-testid*="pending"]'))
+    .toBeVisible({ timeout: 500 });
+  
+  // TEST: Create second invoice concurrently
+  await page.click('[data-testid="button-create-invoice"]');
+  await page.fill('[data-testid="input-customer"]', 'Customer B');
+  await page.fill('[data-testid="input-amount"]', '200');
+  await page.click('[data-testid="button-submit"]');
+  
+  // VERIFY: Both invoices visible (one or both may be pending)
+  const invoices = await page.locator('[data-testid*="invoice"]').count();
+  expect(invoices).toBeGreaterThanOrEqual(2);
+  
+  // VERIFY: Wait for server confirmation - pending badges disappear
+  await expect(page.locator('[data-testid*="pending"]'))
+    .toHaveCount(0, { timeout: 3000 });
+  
+  // VERIFY: Both invoices have real IDs (not temp-)
+  const firstInvoiceId = await page.locator('[data-testid*="invoice"]').first()
+    .getAttribute('data-testid');
+  expect(firstInvoiceId).not.toContain('temp-');
+});
+```
+
+### Test Hook Security
+
+**Important**: The `window.__setTenantForTesting` hook is:
+- ✅ Only exposed in development/test mode
+- ✅ Automatically cleaned up on component unmount
+- ✅ Uses the same `tenantSession.setTenant()` logic as `WorkspaceSwitcher`
+- ✅ Properly triggers all tenant context events and updates
+- ❌ NOT available in production builds
+
+**Production Safety**: In production builds (`import.meta.env.MODE === 'production'`), the hook is never exposed, ensuring security.
+
+### Troubleshooting E2E Tests
+
+**Issue**: "No workspace selected" error
+**Solution**: Ensure you call `window.__setTenantForTesting(tenant)` after login and before navigating to feature pages
+
+**Issue**: Tenant context timeout
+**Solution**: Add `await page.waitForTimeout(500)` after setting tenant to allow session propagation
+
+**Issue**: 404 on feature pages
+**Solution**: Verify tenant was fetched from `/api/tenants` and passed to test hook correctly
+
+**Issue**: Test hook not found
+**Solution**: Check that `import.meta.env.MODE` is 'development' or 'test', not 'production'
+
 ## Conclusion
 
 This Optimistic UI system provides:
@@ -580,5 +731,6 @@ This Optimistic UI system provides:
 ✅ **Multi-Tenancy**: Works with tenant-scoped queries
 ✅ **Developer Experience**: Simple, consistent API
 ✅ **User Experience**: Clear visual feedback at all stages
+✅ **E2E Testing**: Test-only hook for Playwright integration
 
 The system is production-ready and can be used throughout the application for all mutation operations.

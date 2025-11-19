@@ -7,14 +7,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useOptimisticCreate } from "@/hooks/useOptimisticCreate";
-import { useOptimisticUpdate } from "@/hooks/useOptimisticUpdate";
-import { useOptimisticDelete } from "@/hooks/useOptimisticDelete";
-import { PendingBadge } from "@/components/ui/pending-badge";
-import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useOptimisticCreate } from "@/shared/hooks/optimistic-ui/useOptimisticCreate";
+import { useOptimisticUpdate } from "@/shared/hooks/optimistic-ui/useOptimisticUpdate";
+import { useOptimisticDelete } from "@/shared/hooks/optimistic-ui/useOptimisticDelete";
+import { PendingBadge } from "@/shared/components/ui/pending-badge";
+import { Button } from "@/shared/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/shared/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/components/ui/select";
 import { Plus, Trash2 } from "lucide-react";
 
 // ============================================================================
@@ -237,8 +237,8 @@ export function CustomerListExample() {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/shared/components/ui/form";
+import { Input } from "@/shared/components/ui/input";
 
 const invoiceSchema = z.object({
   customerName: z.string().min(1, 'Customer name is required'),
