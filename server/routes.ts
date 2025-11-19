@@ -900,6 +900,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // IAS 7 Cash Flow Classification Routes
+  app.get('/api/accounts/cash-flow-classification/:classification', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.read'), async (req: any, res) => {
+    try {
+      const { classification } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Validate classification parameter
+      if (!['operating', 'investing', 'financing'].includes(classification)) {
+        return res.status(400).json({ message: "Invalid classification. Must be 'operating', 'investing', or 'financing'" });
+      }
+      
+      const accounts = await storage.getAccountsByCashFlowClassification(tenantId, classification as 'operating' | 'investing' | 'financing');
+      res.json(accounts);
+    } catch (error: any) {
+      console.error("Error fetching accounts by cash flow classification:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch accounts" });
+    }
+  });
+
+  app.get('/api/accounts/cash-equivalents', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const accounts = await storage.getCashEquivalentAccounts(tenantId);
+      res.json(accounts);
+    } catch (error: any) {
+      console.error("Error fetching cash equivalent accounts:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch cash equivalent accounts" });
+    }
+  });
+
+  app.put('/api/accounts/:id/cash-flow-classification', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.update'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      // Verify account exists and belongs to this tenant
+      const existingAccount = await storage.getAccount(id);
+      if (!existingAccount) {
+        return res.status(404).json({ message: "Account not found" });
+      }
+      
+      if (existingAccount.tenantId !== tenantId) {
+        return res.status(404).json({ message: "Account not found" });
+      }
+      
+      // Validate the request body
+      const updateClassificationSchema = z.object({
+        cashFlowClassification: z.enum(['operating', 'investing', 'financing', 'none']),
+        isCashEquivalent: z.boolean().optional(),
+        cashEquivalentMaturityDays: z.number().nullable().optional(),
+      }).refine((data) => {
+        // IAS 7.7: Cash equivalents must have maturity ≤90 days
+        if (data.isCashEquivalent && data.cashEquivalentMaturityDays != null && data.cashEquivalentMaturityDays > 90) {
+          return false;
+        }
+        return true;
+      }, {
+        message: "Cash equivalents must have maturity ≤90 days (IAS 7.7)",
+        path: ["cashEquivalentMaturityDays"],
+      });
+      
+      const validationResult = updateClassificationSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ message: "Validation error", errors: validationResult.error.errors });
+      }
+      
+      // Update the account with cash flow classification
+      const updated = await storage.updateAccount(id, tenantId, validationResult.data);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating account cash flow classification:", error);
+      res.status(400).json({ message: error.message || "Failed to update cash flow classification" });
+    }
+  });
+
   /**
    * GET /api/accounts/:id/balance
    * Get current or historical balance for an account

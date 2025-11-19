@@ -38,12 +38,8 @@ import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import { useTenant } from "@/shared/hooks/useTenant";
 
-const formSchema = insertAccountSchema.omit({
-  code: true,
-  tenantId: true,
-  currentBalance: true,
-  isSystemAccount: true,
-});
+// Use insertAccountSchema directly - it already omits code, tenantId, currentBalance, etc.
+const formSchema = insertAccountSchema;
 
 interface AccountDialogProps {
   open: boolean;
@@ -71,6 +67,9 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
       description: "",
       openingBalance: "0",
       isActive: true,
+      cashFlowClassification: "none",
+      isCashEquivalent: false,
+      cashEquivalentMaturityDays: null,
     },
   });
 
@@ -85,6 +84,9 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
         description: account.description || "",
         openingBalance: account.openingBalance,
         isActive: account.isActive ?? true,
+        cashFlowClassification: account.cashFlowClassification || "none",
+        isCashEquivalent: account.isCashEquivalent || false,
+        cashEquivalentMaturityDays: account.cashEquivalentMaturityDays || null,
       });
     } else {
       form.reset({
@@ -96,6 +98,9 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
         description: "",
         openingBalance: "0",
         isActive: true,
+        cashFlowClassification: "none",
+        isCashEquivalent: false,
+        cashEquivalentMaturityDays: null,
       });
     }
   }, [account, form]);
@@ -345,6 +350,85 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name="cashFlowClassification"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cash Flow Classification (IAS 7)</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-cash-flow-classification">
+                            <SelectValue placeholder="Select classification" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none" data-testid="select-option-none">None</SelectItem>
+                          <SelectItem value="operating" data-testid="select-option-operating">Operating</SelectItem>
+                          <SelectItem value="investing" data-testid="select-option-investing">Investing</SelectItem>
+                          <SelectItem value="financing" data-testid="select-option-financing">Financing</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Select the cash flow statement category for this account (IAS 7)
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="isCashEquivalent"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          data-testid="checkbox-is-cash-equivalent"
+                        />
+                      </FormControl>
+                      <div className="space-y-1 leading-none">
+                        <FormLabel>
+                          This is a cash equivalent
+                        </FormLabel>
+                        <FormDescription>
+                          Highly liquid investments with maturity ≤90 days (IAS 7.7)
+                        </FormDescription>
+                      </div>
+                    </FormItem>
+                  )}
+                />
+
+                {form.watch("isCashEquivalent") && (
+                  <FormField
+                    control={form.control}
+                    name="cashEquivalentMaturityDays"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Maturity Days</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min="1"
+                            max="90"
+                            placeholder="e.g., 30"
+                            {...field}
+                            value={field.value ?? ""}
+                            onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : null)}
+                            data-testid="input-cash-equivalent-maturity-days"
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Maximum maturity period in days (must be ≤90 days)
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
               </TabsContent>
             </Tabs>
 

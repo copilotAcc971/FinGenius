@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Calendar as CalendarIcon, TrendingUp, DollarSign, FileBarChart, Activity, Download, ChevronDown, ChevronRight, ArrowUp, ArrowDown, FileSpreadsheet, FileText, AlertTriangle } from "lucide-react";
+import { Calendar as CalendarIcon, TrendingUp, DollarSign, FileBarChart, Activity, Download, ChevronDown, ChevronRight, ArrowUp, ArrowDown, FileSpreadsheet, FileText, AlertTriangle, Info } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/components/ui/select";
 import { Skeleton } from "@/shared/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/shared/components/ui/tooltip";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/components/ui/collapsible";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useAuth } from "@/shared/hooks/useAuth";
@@ -200,13 +201,39 @@ interface EnhancedCashFlowReport {
   tenantId: string;
   startDate: string;
   endDate: string;
-  operating: Array<{ activity: string; amount: number }>;
-  netOperating: number;
-  investing: Array<{ activity: string; amount: number }>;
-  netInvesting: number;
-  financing: Array<{ activity: string; amount: number }>;
-  netFinancing: number;
-  netCashFlow: number;
+  
+  // IAS 7 - Beginning balances
+  beginningCash: string;
+  beginningCashEquivalents: string;
+  beginningCashAndEquivalents: string;
+  
+  // Activity classifications (IAS 7)
+  operatingActivities: Array<{ accountName: string; amount: string }>;
+  netCashFromOperating: string;
+  investingActivities: Array<{ accountName: string; amount: string }>;
+  netCashFromInvesting: string;
+  financingActivities: Array<{ accountName: string; amount: string }>;
+  netCashFromFinancing: string;
+  
+  // IAS 7 - Ending balances
+  netChangeInCash: string;
+  endingCash: string;
+  endingCashEquivalents: string;
+  endingCashAndEquivalents: string;
+  
+  // IAS 7 - Reconciliation
+  isReconciled: boolean;
+  
+  // Legacy fields for backward compatibility
+  operating?: Array<{ activity: string; amount: number }>;
+  netOperating?: number;
+  investing?: Array<{ activity: string; amount: number }>;
+  netInvesting?: number;
+  financing?: Array<{ activity: string; amount: number }>;
+  netFinancing?: number;
+  netCashFlow?: number;
+  
+  // Comparison support
   comparisonStartDate?: string;
   comparisonEndDate?: string;
   comparisonData?: {
@@ -222,6 +249,7 @@ interface EnhancedCashFlowReport {
   investingVariance?: number;
   financingVariance?: number;
   netVariance?: number;
+  
   baseCurrency?: string;
   ifrsComplianceEnabled?: boolean;
   fxTranslationStandard?: string | null;
@@ -2932,6 +2960,44 @@ export default function FinancialReports() {
             </CardContent>
           </Card>
 
+          {/* IAS 7 Classification Help Panel */}
+          <Collapsible>
+            <Card className="border-muted">
+              <CollapsibleTrigger className="w-full hover-elevate" data-testid="button-toggle-ias7-help">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Info className="h-4 w-4 text-primary" />
+                    <CardTitle className="text-sm font-medium">IAS 7 Cash Flow Classification Guide</CardTitle>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200" />
+                </CardHeader>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="pt-0">
+                  <div className="space-y-3 text-sm">
+                    <div className="border-l-4 border-l-blue-500 pl-3">
+                      <p className="font-semibold text-blue-900 dark:text-blue-100">Operating Activities</p>
+                      <p className="text-muted-foreground mt-1">Normal business operations, customer receipts, supplier payments, employee salaries, and other day-to-day cash flows.</p>
+                    </div>
+                    <div className="border-l-4 border-l-green-500 pl-3">
+                      <p className="font-semibold text-green-900 dark:text-green-100">Investing Activities</p>
+                      <p className="text-muted-foreground mt-1">Purchase and sale of long-term assets, investments in securities, loans made to other parties, and collections from such loans.</p>
+                    </div>
+                    <div className="border-l-4 border-l-purple-500 pl-3">
+                      <p className="font-semibold text-purple-900 dark:text-purple-100">Financing Activities</p>
+                      <p className="text-muted-foreground mt-1">Equity transactions (issuing/buying back shares), borrowings, repayment of debt principal, and dividends paid to shareholders.</p>
+                    </div>
+                    <div className="mt-4 p-3 bg-muted/50 rounded-md">
+                      <p className="text-xs text-muted-foreground">
+                        <strong>Cash Equivalents:</strong> Short-term, highly liquid investments with maturity of 90 days or less from the date of acquisition (IAS 7.7). Examples include treasury bills, commercial paper, and money market funds.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+
           {cfLoading && (
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -2963,6 +3029,35 @@ export default function FinancialReports() {
                 </div>
               </div>
 
+              {/* IAS 7 - Beginning Balance */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Beginning Balance (IAS 7)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Cash</span>
+                      <span className="font-mono font-medium" data-testid="text-beginning-cash">
+                        {formatCurrency(parseFloat(cfReport.beginningCash), baseCurrency?.code || "USD", currencies)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Cash Equivalents</span>
+                      <span className="font-mono font-medium">
+                        {formatCurrency(parseFloat(cfReport.beginningCashEquivalents), baseCurrency?.code || "USD", currencies)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center border-t pt-2">
+                      <span className="text-sm font-semibold">Total Cash and Cash Equivalents</span>
+                      <span className="font-mono font-semibold" data-testid="text-beginning-cash-and-equivalents">
+                        {formatCurrency(parseFloat(cfReport.beginningCashAndEquivalents), baseCurrency?.code || "USD", currencies)}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardHeader>
                   <CardTitle>Cash Flow Visualization</CardTitle>
@@ -2971,9 +3066,9 @@ export default function FinancialReports() {
                   <ResponsiveContainer width="100%" height={300}>
                     <AreaChart
                       data={[
-                        { name: 'Operating', amount: cfReport.netOperating },
-                        { name: 'Investing', amount: cfReport.netInvesting },
-                        { name: 'Financing', amount: cfReport.netFinancing },
+                        { name: 'Operating', amount: parseFloat(cfReport.netCashFromOperating) },
+                        { name: 'Investing', amount: parseFloat(cfReport.netCashFromInvesting) },
+                        { name: 'Financing', amount: parseFloat(cfReport.netCashFromFinancing) },
                       ]}
                     >
                       <CartesianGrid strokeDasharray="3 3" />
@@ -2988,34 +3083,35 @@ export default function FinancialReports() {
               </Card>
 
               <div className="grid gap-6 md:grid-cols-3">
-                <Card>
+                <Card data-testid="section-operating-activities">
                   <CardHeader>
                     <CardTitle>Operating Activities</CardTitle>
+                    <CardDescription className="text-xs">Normal business operations (IAS 7)</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {cfReport.operating.length === 0 ? (
+                    {cfReport.operatingActivities?.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No operating activities</p>
                     ) : (
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Activity</TableHead>
+                            <TableHead>Account</TableHead>
                             <TableHead className="text-right">Amount</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {cfReport.operating.map((item, idx) => (
+                          {cfReport.operatingActivities?.map((item, idx) => (
                             <TableRow key={idx} data-testid={`row-operating-${idx}`}>
-                              <TableCell className="text-sm">{item.activity}</TableCell>
+                              <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
+                                {formatCurrency(parseFloat(item.amount), baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
-                            <TableCell>Net Operating</TableCell>
+                            <TableCell>Net Cash from Operating</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-net-operating">
-                              {formatCurrency(cfReport.netOperating, baseCurrency?.code || "USD", currencies)}
+                              {formatCurrency(parseFloat(cfReport.netCashFromOperating), baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -3024,34 +3120,35 @@ export default function FinancialReports() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card data-testid="section-investing-activities">
                   <CardHeader>
                     <CardTitle>Investing Activities</CardTitle>
+                    <CardDescription className="text-xs">Purchase/sale of long-term assets (IAS 7)</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {cfReport.investing.length === 0 ? (
+                    {cfReport.investingActivities?.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No investing activities</p>
                     ) : (
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Activity</TableHead>
+                            <TableHead>Account</TableHead>
                             <TableHead className="text-right">Amount</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {cfReport.investing.map((item, idx) => (
+                          {cfReport.investingActivities?.map((item, idx) => (
                             <TableRow key={idx} data-testid={`row-investing-${idx}`}>
-                              <TableCell className="text-sm">{item.activity}</TableCell>
+                              <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
+                                {formatCurrency(parseFloat(item.amount), baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
-                            <TableCell>Net Investing</TableCell>
+                            <TableCell>Net Cash from Investing</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-net-investing">
-                              {formatCurrency(cfReport.netInvesting, baseCurrency?.code || "USD", currencies)}
+                              {formatCurrency(parseFloat(cfReport.netCashFromInvesting), baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -3060,34 +3157,35 @@ export default function FinancialReports() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card data-testid="section-financing-activities">
                   <CardHeader>
                     <CardTitle>Financing Activities</CardTitle>
+                    <CardDescription className="text-xs">Equity transactions and borrowings (IAS 7)</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {cfReport.financing.length === 0 ? (
+                    {cfReport.financingActivities?.length === 0 ? (
                       <p className="text-muted-foreground text-sm">No financing activities</p>
                     ) : (
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Activity</TableHead>
+                            <TableHead>Account</TableHead>
                             <TableHead className="text-right">Amount</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {cfReport.financing.map((item, idx) => (
+                          {cfReport.financingActivities?.map((item, idx) => (
                             <TableRow key={idx} data-testid={`row-financing-${idx}`}>
-                              <TableCell className="text-sm">{item.activity}</TableCell>
+                              <TableCell className="text-sm">{item.accountName}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                {formatCurrency(item.amount, baseCurrency?.code || "USD", currencies)}
+                                {formatCurrency(parseFloat(item.amount), baseCurrency?.code || "USD", currencies)}
                               </TableCell>
                             </TableRow>
                           ))}
                           <TableRow className="font-semibold bg-muted/50">
-                            <TableCell>Net Financing</TableCell>
+                            <TableCell>Net Cash from Financing</TableCell>
                             <TableCell className="text-right font-mono" data-testid="cell-net-financing">
-                              {formatCurrency(cfReport.netFinancing, baseCurrency?.code || "USD", currencies)}
+                              {formatCurrency(parseFloat(cfReport.netCashFromFinancing), baseCurrency?.code || "USD", currencies)}
                             </TableCell>
                           </TableRow>
                         </TableBody>
@@ -3096,6 +3194,60 @@ export default function FinancialReports() {
                   </CardContent>
                 </Card>
               </div>
+
+              {/* IAS 7 - Ending Balance */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <div>
+                    <CardTitle>Ending Balance (IAS 7)</CardTitle>
+                    <CardDescription className="text-xs mt-1">Cash and cash equivalents at period end</CardDescription>
+                  </div>
+                  <Badge 
+                    variant={cfReport.isReconciled ? "default" : "destructive"}
+                    data-testid="badge-reconciliation-status"
+                    className="ml-2"
+                  >
+                    {cfReport.isReconciled ? "Reconciled ✓" : "Not Reconciled ⚠"}
+                  </Badge>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Net Change in Cash</span>
+                      <span className="font-mono font-medium">
+                        {formatCurrency(parseFloat(cfReport.netChangeInCash), baseCurrency?.code || "USD", currencies)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center border-t pt-2">
+                      <span className="text-sm text-muted-foreground">Ending Cash</span>
+                      <span className="font-mono font-medium">
+                        {formatCurrency(parseFloat(cfReport.endingCash), baseCurrency?.code || "USD", currencies)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Ending Cash Equivalents</span>
+                      <span className="font-mono font-medium">
+                        {formatCurrency(parseFloat(cfReport.endingCashEquivalents), baseCurrency?.code || "USD", currencies)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center border-t pt-2">
+                      <span className="text-sm font-semibold">Total Cash and Cash Equivalents</span>
+                      <span className="font-mono font-semibold" data-testid="text-ending-cash-and-equivalents">
+                        {formatCurrency(parseFloat(cfReport.endingCashAndEquivalents), baseCurrency?.code || "USD", currencies)}
+                      </span>
+                    </div>
+                    {!cfReport.isReconciled && (
+                      <div className="flex items-start gap-2 mt-4 p-3 bg-destructive/10 rounded-md">
+                        <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
+                        <div className="text-xs text-destructive">
+                          <p className="font-medium">Reconciliation Warning</p>
+                          <p className="mt-1">The beginning balance plus net changes does not equal the ending balance. Please review your transactions and account classifications.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
               <Card>
                 <CardHeader>

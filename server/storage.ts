@@ -269,6 +269,8 @@ export interface IStorage {
   updateAccount(id: string, tenantId: string, account: Partial<InsertAccount>): Promise<Account>;
   deleteAccount(id: string, tenantId: string): Promise<void>;
   getNextAccountNumber(tenantId: string): Promise<string>;
+  getAccountsByCashFlowClassification(tenantId: string, classification: 'operating' | 'investing' | 'financing'): Promise<Account[]>;
+  getCashEquivalentAccounts(tenantId: string): Promise<Account[]>;
 
   // Item operations
   getItems(tenantId: string): Promise<Item[]>;
@@ -1215,6 +1217,28 @@ export class DatabaseStorage implements IStorage {
       
       return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
     });
+  }
+
+  async getAccountsByCashFlowClassification(tenantId: string, classification: 'operating' | 'investing' | 'financing'): Promise<Account[]> {
+    return await db
+      .select()
+      .from(accounts)
+      .where(and(
+        eq(accounts.tenantId, tenantId),
+        eq(accounts.cashFlowClassification, classification)
+      ))
+      .orderBy(asc(accounts.code));
+  }
+
+  async getCashEquivalentAccounts(tenantId: string): Promise<Account[]> {
+    return await db
+      .select()
+      .from(accounts)
+      .where(and(
+        eq(accounts.tenantId, tenantId),
+        eq(accounts.isCashEquivalent, true)
+      ))
+      .orderBy(asc(accounts.code));
   }
 
   // Item operations
@@ -5441,96 +5465,154 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCashFlowReport(tenantId: string, startDate: Date, endDate: Date): Promise<CashFlowReport> {
-    // Simplified Cash Flow Report
-    // Operating activities: income and expense accounts
-    const incomeAccounts = await db
+    // IAS 7 Compliant Cash Flow Report
+    // Step 1: Get cash accounts (excluding cash equivalents)
+    const cashAccounts = await db
       .select()
       .from(accounts)
       .where(
         and(
           eq(accounts.tenantId, tenantId),
-          eq(accounts.type, 'income'),
-          eq(accounts.isActive, true)
+          eq(accounts.type, 'asset'),
+          eq(accounts.isCashEquivalent, false),
+          eq(accounts.isActive, true),
+          or(
+            sql`LOWER(${accounts.name}) LIKE '%cash%'`,
+            sql`LOWER(${accounts.name}) LIKE '%bank%'`,
+            sql`LOWER(${accounts.accountCategory}) LIKE '%cash%'`
+          )
         )
       );
 
-    const expenseAccounts = await db
-      .select()
-      .from(accounts)
-      .where(
-        and(
-          eq(accounts.tenantId, tenantId),
-          eq(accounts.type, 'expense'),
-          eq(accounts.isActive, true)
-        )
-      );
+    // Step 2: Get cash equivalent accounts (IAS 7.7 - maturity ≤90 days)
+    const cashEquivalentAccounts = await this.getCashEquivalentAccounts(tenantId);
 
-    // Calculate operating activities
-    const operatingAccountLines = await Promise.all(
-      [...incomeAccounts, ...expenseAccounts].map(async (account) => {
-        const result = await db
-          .select({
-            total: sum(sql`CASE 
-              WHEN ${journalEntryLegs.type} = 'Debit' AND ${accounts.type} = 'expense' THEN ${journalEntryLegs.amount}
-              WHEN ${journalEntryLegs.type} = 'Credit' AND ${accounts.type} = 'income' THEN ${journalEntryLegs.amount}
-              ELSE -${journalEntryLegs.amount}
-            END`),
-          })
-          .from(journalEntryLegs)
-          .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
-          .innerJoin(accounts, eq(journalEntryLegs.accountId, accounts.id))
-          .where(
-            and(
-              eq(journalEntryLegs.tenantId, tenantId),
-              eq(journalEntryLegs.accountId, account.id),
-              gte(journalEntries.entryDate, startDate),
-              lte(journalEntries.entryDate, endDate),
-              eq(journalEntries.status, 'posted')
-            )
-          );
+    // Helper to calculate account balance before start date
+    const getAccountBalanceBeforeDate = async (accountId: string, beforeDate: Date): Promise<number> => {
+      const result = await db
+        .select({
+          total: sum(sql`CASE 
+            WHEN ${journalEntryLegs.type} = 'Debit' THEN ${journalEntryLegs.amount}
+            ELSE -${journalEntryLegs.amount}
+          END`),
+        })
+        .from(journalEntryLegs)
+        .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(journalEntryLegs.tenantId, tenantId),
+            eq(journalEntryLegs.accountId, accountId),
+            lt(journalEntries.entryDate, beforeDate),
+            eq(journalEntries.status, 'posted')
+          )
+        );
+      return parseFloat(result[0]?.total || '0');
+    };
 
-        const balance = result[0]?.total || '0';
-
-        return {
-          accountId: account.id,
-          accountCode: account.code,
-          accountName: account.name,
-          balance: balance.toString(),
-        };
-      })
+    // Step 3: Calculate beginning balances
+    const beginningCashBalances = await Promise.all(
+      cashAccounts.map(acc => getAccountBalanceBeforeDate(acc.id, startDate))
     );
+    const beginningCash = beginningCashBalances.reduce((sum, bal) => sum + bal, 0);
 
-    const operatingTotal = operatingAccountLines.reduce((sum, line) => sum + parseFloat(line.balance), 0);
+    const beginningCashEquivBalances = await Promise.all(
+      cashEquivalentAccounts.map(acc => getAccountBalanceBeforeDate(acc.id, startDate))
+    );
+    const beginningCashEquivalents = beginningCashEquivBalances.reduce((sum, bal) => sum + bal, 0);
 
-    // Investing activities (simplified - asset purchases/sales)
-    // For simplicity, we'll leave this empty for now
-    const investingAccountLines: any[] = [];
-    const investingTotal = 0;
+    const beginningCashAndEquivalents = beginningCash + beginningCashEquivalents;
 
-    // Financing activities (simplified - equity and long-term liabilities)
-    // For simplicity, we'll leave this empty for now
-    const financingAccountLines: any[] = [];
-    const financingTotal = 0;
+    // Helper to get activity line items by classification
+    const getActivityLines = async (classification: 'operating' | 'investing' | 'financing') => {
+      const classifiedAccounts = await this.getAccountsByCashFlowClassification(tenantId, classification);
+      
+      const lines = await Promise.all(
+        classifiedAccounts.map(async (account) => {
+          const result = await db
+            .select({
+              total: sum(sql`CASE 
+                WHEN ${journalEntryLegs.type} = 'Debit' THEN ${journalEntryLegs.amount}
+                ELSE -${journalEntryLegs.amount}
+              END`),
+            })
+            .from(journalEntryLegs)
+            .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+            .where(
+              and(
+                eq(journalEntryLegs.tenantId, tenantId),
+                eq(journalEntryLegs.accountId, account.id),
+                gte(journalEntries.entryDate, startDate),
+                lte(journalEntries.entryDate, endDate),
+                eq(journalEntries.status, 'posted')
+              )
+            );
 
-    const netCashFlow = operatingTotal + investingTotal + financingTotal;
+          const amount = parseFloat(result[0]?.total || '0');
+          
+          // Only include accounts with non-zero activity
+          if (Math.abs(amount) > 0.01) {
+            return {
+              accountName: account.name,
+              amount: amount.toFixed(2),
+            };
+          }
+          return null;
+        })
+      );
+
+      return lines.filter(line => line !== null) as Array<{accountName: string; amount: string}>;
+    };
+
+    // Step 4: Get activity lines for each classification
+    const operatingActivities = await getActivityLines('operating');
+    const netCashFromOperating = operatingActivities.reduce((sum, line) => sum + parseFloat(line.amount), 0);
+
+    const investingActivities = await getActivityLines('investing');
+    const netCashFromInvesting = investingActivities.reduce((sum, line) => sum + parseFloat(line.amount), 0);
+
+    const financingActivities = await getActivityLines('financing');
+    const netCashFromFinancing = financingActivities.reduce((sum, line) => sum + parseFloat(line.amount), 0);
+
+    // Step 5: Calculate ending balances
+    const netChangeInCash = netCashFromOperating + netCashFromInvesting + netCashFromFinancing;
+    const endingCash = beginningCash + netChangeInCash;
+    const endingCashEquivalents = beginningCashEquivalents; // Cash equivalents balance change should be minimal
+    const endingCashAndEquivalents = endingCash + endingCashEquivalents;
+
+    // Step 6: Reconciliation check (IAS 7 - verify beginning + changes = ending)
+    const calculatedEnding = beginningCashAndEquivalents + netChangeInCash;
+    const isReconciled = Math.abs(calculatedEnding - endingCashAndEquivalents) < 0.01;
 
     return {
       tenantId,
       startDate,
       endDate,
-      operatingActivities: {
-        accounts: operatingAccountLines,
-        total: operatingTotal.toFixed(2),
-      },
-      investingActivities: {
-        accounts: investingAccountLines,
-        total: investingTotal.toFixed(2),
-      },
-      financingActivities: {
-        accounts: financingAccountLines,
-        total: financingTotal.toFixed(2),
-      },
-      netCashFlow: netCashFlow.toFixed(2),
+      
+      // Beginning balance
+      beginningCash: beginningCash.toFixed(2),
+      beginningCashEquivalents: beginningCashEquivalents.toFixed(2),
+      beginningCashAndEquivalents: beginningCashAndEquivalents.toFixed(2),
+      
+      // Operating activities
+      operatingActivities,
+      netCashFromOperating: netCashFromOperating.toFixed(2),
+      
+      // Investing activities
+      investingActivities,
+      netCashFromInvesting: netCashFromInvesting.toFixed(2),
+      
+      // Financing activities
+      financingActivities,
+      netCashFromFinancing: netCashFromFinancing.toFixed(2),
+      
+      // Ending balance
+      netChangeInCash: netChangeInCash.toFixed(2),
+      endingCash: endingCash.toFixed(2),
+      endingCashEquivalents: endingCashEquivalents.toFixed(2),
+      endingCashAndEquivalents: endingCashAndEquivalents.toFixed(2),
+      
+      // Reconciliation
+      isReconciled,
     };
   }
 
@@ -9377,6 +9459,7 @@ export class MemStorage implements IStorage {
   private tenantCompanyProfiles: TenantCompanyProfile[] = [];
   private customers: Customer[] = [];
   private vendors: Vendor[] = [];
+  private accounts: Account[] = [];
   private items: Item[] = [];
   private taxes: Tax[] = [];
   private invoices: Invoice[] = [];
@@ -9601,6 +9684,47 @@ export class MemStorage implements IStorage {
     const index = this.vendors.findIndex(v => v.id === id && v.tenantId === tenantId);
     if (index === -1) throw new Error("Vendor not found");
     this.vendors.splice(index, 1);
+  }
+
+  // Account operations - Stubs
+  async getAccounts(tenantId: string): Promise<Account[]> {
+    throw new Error('Accounts not implemented in MemStorage');
+  }
+
+  async getAccount(id: string): Promise<Account | undefined> {
+    throw new Error('Accounts not implemented in MemStorage');
+  }
+
+  async getAccountByCode(tenantId: string, code: string): Promise<Account[]> {
+    throw new Error('Accounts not implemented in MemStorage');
+  }
+
+  async createAccount(account: InsertAccount & { tenantId: string }): Promise<Account> {
+    throw new Error('Accounts not implemented in MemStorage');
+  }
+
+  async updateAccount(id: string, tenantId: string, account: Partial<InsertAccount>): Promise<Account> {
+    throw new Error('Accounts not implemented in MemStorage');
+  }
+
+  async deleteAccount(id: string, tenantId: string): Promise<void> {
+    throw new Error('Accounts not implemented in MemStorage');
+  }
+
+  async getNextAccountNumber(tenantId: string): Promise<string> {
+    throw new Error('Accounts not implemented in MemStorage');
+  }
+
+  async getAccountsByCashFlowClassification(tenantId: string, classification: 'operating' | 'investing' | 'financing'): Promise<Account[]> {
+    return this.accounts.filter(
+      account => account.tenantId === tenantId && account.cashFlowClassification === classification
+    );
+  }
+
+  async getCashEquivalentAccounts(tenantId: string): Promise<Account[]> {
+    return this.accounts.filter(
+      account => account.tenantId === tenantId && account.isCashEquivalent === true
+    );
   }
 
   // Item operations

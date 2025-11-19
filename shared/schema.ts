@@ -507,13 +507,23 @@ export const accounts = pgTable("accounts", {
   openingBalance: decimal("opening_balance", { precision: 12, scale: 2 }).default("0"),
   currentBalance: decimal("current_balance", { precision: 12, scale: 2 }).default("0"),
   isActive: boolean("is_active").default(true),
+  
+  // IAS 7 Cash Flow Statement classification
+  cashFlowClassification: varchar("cash_flow_classification", { length: 50 }).notNull().default("none"), // operating, investing, financing, none
+  isCashEquivalent: boolean("is_cash_equivalent").default(false).notNull(), // Short-term highly liquid investments (IAS 7.7)
+  cashEquivalentMaturityDays: integer("cash_equivalent_maturity_days"), // Must be <=90 days if isCashEquivalent=true
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  index("accounts_cash_flow_classification_idx").on(table.tenantId, table.cashFlowClassification),
+  index("accounts_cash_equivalent_idx").on(table.tenantId, table.isCashEquivalent),
+]);
 
 export const insertAccountSchema = createInsertSchema(accounts, {
   type: z.enum(['asset', 'liability', 'equity', 'income', 'expense']),
   openingBalance: decimalString,
+  cashFlowClassification: z.enum(['operating', 'investing', 'financing', 'none']).default('none'),
 }).omit({
   id: true,
   code: true,
@@ -521,6 +531,15 @@ export const insertAccountSchema = createInsertSchema(accounts, {
   tenantId: true,
   createdAt: true,
   updatedAt: true,
+}).refine((data) => {
+  // IAS 7.7: Cash equivalents must have maturity ≤90 days
+  if (data.isCashEquivalent && data.cashEquivalentMaturityDays != null && data.cashEquivalentMaturityDays > 90) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Cash equivalents must have maturity ≤90 days (IAS 7.7)",
+  path: ["cashEquivalentMaturityDays"],
 });
 
 export type InsertAccount = z.infer<typeof insertAccountSchema>;
@@ -2729,7 +2748,14 @@ export const trialBalanceReportSchema = z.object({
 
 export type TrialBalanceReport = z.infer<typeof trialBalanceReportSchema>;
 
-// Cash Flow Report (Simplified)
+// Cash Flow Report (IAS 7 Compliant)
+export const cashFlowActivityLineSchema = z.object({
+  accountName: z.string(),
+  amount: z.string(),
+});
+
+export type CashFlowActivityLine = z.infer<typeof cashFlowActivityLineSchema>;
+
 export const cashFlowSectionSchema = z.object({
   accounts: z.array(reportAccountLineSchema),
   total: z.string(),
@@ -2742,17 +2768,37 @@ export const cashFlowReportSchema = z.object({
   startDate: z.date(),
   endDate: z.date(),
   
-  // Operating activities (revenue and expenses)
-  operatingActivities: cashFlowSectionSchema,
+  // Beginning balance (IAS 7 - Cash and Cash Equivalents)
+  beginningCash: z.string(),
+  beginningCashEquivalents: z.string(),
+  beginningCashAndEquivalents: z.string(),
   
-  // Investing activities (asset purchases/sales)
-  investingActivities: cashFlowSectionSchema,
+  // Operating activities
+  operatingActivities: z.array(cashFlowActivityLineSchema),
+  netCashFromOperating: z.string(),
   
-  // Financing activities (equity, loans)
-  financingActivities: cashFlowSectionSchema,
+  // Investing activities
+  investingActivities: z.array(cashFlowActivityLineSchema),
+  netCashFromInvesting: z.string(),
   
-  // Net cash flow
-  netCashFlow: z.string(),
+  // Financing activities
+  financingActivities: z.array(cashFlowActivityLineSchema),
+  netCashFromFinancing: z.string(),
+  
+  // Ending balance
+  netChangeInCash: z.string(),
+  endingCash: z.string(),
+  endingCashEquivalents: z.string(),
+  endingCashAndEquivalents: z.string(),
+  
+  // Reconciliation (IAS 7 - ensure beginning + changes = ending)
+  isReconciled: z.boolean(),
+  
+  // Legacy section-based structure (deprecated, for backwards compatibility)
+  operatingActivitiesSection: cashFlowSectionSchema.optional(),
+  investingActivitiesSection: cashFlowSectionSchema.optional(),
+  financingActivitiesSection: cashFlowSectionSchema.optional(),
+  netCashFlow: z.string().optional(),
 });
 
 export type CashFlowReport = z.infer<typeof cashFlowReportSchema>;
