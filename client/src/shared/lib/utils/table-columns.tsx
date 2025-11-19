@@ -1,3 +1,5 @@
+import { AdvancedColumnDef } from './advanced-table-types';
+
 export interface TableColumnDef {
   key: string;                    // Column identifier
   header: string;                 // Header text
@@ -7,6 +9,9 @@ export interface TableColumnDef {
   align?: 'left' | 'center' | 'right';
   className?: string;             // Additional classes
 }
+
+// Re-export AdvancedColumnDef for backward compatibility
+export type { AdvancedColumnDef };
 
 // Helper to generate <colgroup> from column definitions
 export function renderColgroup(columns: TableColumnDef[]) {

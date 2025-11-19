@@ -47,6 +47,7 @@ import ProjectDetail from "@/features/projects/pages/project-detail-page";
 import ProjectProfitabilityReport from "@/features/reports/pages/project-profitability-report-page";
 import ConsolidatedReports from "@/features/reports/pages/consolidated-reports-page";
 import ConsolidatedProjects from "@/features/projects/pages/consolidated-projects-page";
+import AdvancedTableDemo from "@/shared/pages/advanced-table-demo-page";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -84,6 +85,7 @@ function Router() {
           <Route path="/settings/roles" component={RoleManagement} />
           <Route path="/settings/users" component={UserManagement} />
           <Route path="/settings/currencies" component={CurrenciesPage} />
+          <Route path="/demo/advanced-table" component={AdvancedTableDemo} />
         </>
       )}
       <Route component={NotFound} />
