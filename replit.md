@@ -108,7 +108,7 @@ The application implements a production-ready optimistic UI system for instant f
 - **Auto-numbering & Audit Trails:** Sequential numbering and comprehensive change tracking for critical entities.
 - **Advanced Accounting:** Chart of Accounts, Journal Entries (double-entry validation), Fixed Assets, Purchase Orders, Bank Reconciliation, Products/Inventory, Tax Management.
 - **Multi-Currency Support:** Full foundation for multi-currency operations with UI, automated daily exchange rate updates, and IFRS Foreign Currency Translation compliance (IAS 21).
-- **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with 143 granular permissions, default/custom roles, multi-role support, and route/UI protection.
+- **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with 180 granular permissions, default/custom roles, multi-role support, and route/UI protection.
 - **Automatic Journal Entries:** Automated double-entry bookkeeping for all major document types with atomic transactions, historical balance tracking, and cascade recalculation.
 - **Approval Workflow Engine:** Multi-stage routing system for journal entries with workflow matching, multi-approver support, and auto-posting.
 - **Approval Workflow UI:** Pending approvals dashboard, journal entry detail workflow panel, sidebar approvals badge, and full CRUD for workflow management.
@@ -121,7 +121,7 @@ The application implements a production-ready optimistic UI system for instant f
     - Scheduled Reports with Email Delivery via Microsoft Graph API.
 - **IFRS Compliance:** Adherence to IAS 1 (Presentation of Financial Statements), IAS 2 (Inventories), IAS 7 (Statement of Cash Flows - Indirect Method), and IAS 21 (Foreign Currency Translation).
 - **Employee Expense Management & Reimbursement:** Expense submission with receipt upload, permission-based access (6 new RBAC permissions), approval workflow, reimbursement processing, and automatic journal entries for approvals and reimbursements.
-- **Inventory Management System:** Complete inventory module with FIFO/Weighted Average costing, stock adjustments, opening stock, composite items, inventory valuation reports, and automatic journal entries compliant with IAS 2 (Inventories). Includes 15 database tables, 13 RBAC permissions (total 168), 58 storage methods, and 57 API endpoints.
+- **Inventory Management System:** Complete inventory module with FIFO/Weighted Average costing, stock adjustments, opening stock, composite items, inventory valuation reports, and automatic journal entries compliant with IAS 2 (Inventories). Includes 15 database tables, 13 RBAC permissions, 58 storage methods, and 57 API endpoints.
 - **Bills Form Enhancement:** Displays vendor tax registration number conditionally.
 - **Open Banking Integration - Lean Technologies:**
     - Provider-agnostic architecture with current implementation for Lean Technologies (UAE).
@@ -132,7 +132,7 @@ The application implements a production-ready optimistic UI system for instant f
     - Automated daily transaction sync system with 90-day backfill and duplicate detection.
     - AI-Powered Bank Reconciliation using OpenAI GPT-4o-mini with confidence scoring and graceful fallback to rule-based matching.
     - Payment Initiation API routes with database persistence and webhook-based status updates.
-    - 8 new Open Banking RBAC permissions (total 151).
+    - 8 Open Banking RBAC permissions.
     - Database schema includes 4 tables with encryption for sensitive data, indexing, foreign keys, and multi-tenant isolation.
     - Security Features: AES-256-GCM token encryption, HMAC webhook verification, buffer length validation, and multi-tenant data isolation.
     - Data Integrity: Unique constraints, atomic database transactions, incremental sync, and comprehensive error handling.
