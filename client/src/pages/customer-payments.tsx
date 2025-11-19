@@ -3,7 +3,9 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { DollarSign, Plus, Edit, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PendingBadge } from "@/components/ui/pending-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -31,16 +33,16 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { formatCurrency } from "@/lib/currency-utils";
 import { customerPaymentColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
-import type { CustomerPayment, Customer, Invoice, Currency } from "@shared/schema";
+import type { CustomerPaymentWithOptimistic, Customer, Invoice, Currency } from "@shared/schema";
 
 export default function CustomerPayments() {
   const { currentTenant } = useTenant();
   const { toast } = useToast();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selectedPayment, setSelectedPayment] = useState<CustomerPayment | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<CustomerPaymentWithOptimistic | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [paymentToDelete, setPaymentToDelete] = useState<CustomerPayment | null>(null);
+  const [paymentToDelete, setPaymentToDelete] = useState<CustomerPaymentWithOptimistic | null>(null);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -55,7 +57,7 @@ export default function CustomerPayments() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: payments = [], isLoading } = useQuery<CustomerPayment[]>({
+  const { data: payments = [], isLoading } = useQuery<CustomerPaymentWithOptimistic[]>({
     queryKey: ["/api/customer-payments", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
@@ -144,12 +146,12 @@ export default function CustomerPayments() {
     return invoice ? invoice.invoiceNumber : invoiceId;
   };
 
-  const handleEdit = (payment: CustomerPayment) => {
+  const handleEdit = (payment: CustomerPaymentWithOptimistic) => {
     setSelectedPayment(payment);
     setDialogOpen(true);
   };
 
-  const handleDelete = (payment: CustomerPayment) => {
+  const handleDelete = (payment: CustomerPaymentWithOptimistic) => {
     setPaymentToDelete(payment);
     setDeleteDialogOpen(true);
   };
@@ -231,9 +233,16 @@ export default function CustomerPayments() {
             </TableHeader>
             <TableBody>
               {payments.map((payment) => (
-                <TableRow key={payment.id} data-testid={`row-payment-${payment.id}`}>
+                <TableRow 
+                  key={payment.id} 
+                  data-testid={`row-payment-${payment.id}`}
+                  className={cn(payment.isPending && "opacity-50")}
+                >
                   <TableCell className={`${getColumnClassName(customerPaymentColumns[0])} font-medium`} data-testid={`text-payment-number-${payment.id}`}>
-                    {payment.paymentNumber || "-"}
+                    <div className="flex items-center gap-2">
+                      {payment.paymentNumber || "-"}
+                      {payment.isPending && <PendingBadge />}
+                    </div>
                   </TableCell>
                   <TableCell className={getColumnClassName(customerPaymentColumns[1])} data-testid={`text-customer-${payment.id}`}>
                     {getCustomerName(payment.customerId)}
@@ -260,6 +269,7 @@ export default function CustomerPayments() {
                         size="icon"
                         variant="ghost"
                         onClick={() => handleEdit(payment)}
+                        disabled={payment.isPending}
                         data-testid={`button-edit-${payment.id}`}
                       >
                         <Edit className="h-4 w-4" />
@@ -268,6 +278,7 @@ export default function CustomerPayments() {
                         size="icon"
                         variant="ghost"
                         onClick={() => handleDelete(payment)}
+                        disabled={payment.isPending}
                         data-testid={`button-delete-${payment.id}`}
                       >
                         <Trash2 className="h-4 w-4" />

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreVertical, Pencil, Trash2, Upload } from "lucide-react";
+import { Plus, MoreVertical, Pencil, Trash2, Upload, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useOptimisticUpdate } from "@/hooks/useOptimisticUpdate";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,8 +27,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { BillDialog } from "@/components/bill-dialog";
 import { BulkBillUpload } from "@/components/bulk-bill-upload";
+import { PendingBadge } from "@/components/ui/pending-badge";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Bill, Vendor, Currency } from "@shared/schema";
+import type { Bill, BillWithOptimistic, Vendor, Currency } from "@shared/schema";
 import { formatCurrency } from "@/lib/currency-utils";
 import { billColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 
@@ -52,7 +54,7 @@ export default function Bills() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: bills = [], isLoading } = useQuery<Bill[]>({
+  const { data: bills = [], isLoading } = useQuery<BillWithOptimistic[]>({
     queryKey: ["/api/bills", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
@@ -88,6 +90,15 @@ export default function Bills() {
     },
   });
 
+  // Optimistic update for marking bill as paid
+  const markAsPaidMutation = useOptimisticUpdate<BillWithOptimistic[]>({
+    endpoint: '/api/bills',
+    queryKey: ['/api/bills', { tenantId: currentTenant?.id }],
+    idKey: 'id',
+    successMessage: 'Bill marked as paid',
+    errorMessage: 'Failed to mark bill as paid',
+  });
+
   const handleAddBill = () => {
     setEditingBill(null);
     setShowDialog(true);
@@ -116,7 +127,10 @@ export default function Bills() {
     .filter(bill => bill.status === 'unpaid' || bill.status === 'overdue')
     .reduce((sum, bill) => sum + parseFloat(bill.total), 0);
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, isPending?: boolean) => {
+    if (isPending) {
+      return <PendingBadge />;
+    }
     const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
       unpaid: "outline",
       scheduled: "secondary",
@@ -222,7 +236,7 @@ export default function Bills() {
             </TableHeader>
             <TableBody>
               {bills.map((bill) => (
-                <TableRow key={bill.id} data-testid={`row-bill-${bill.id}`}>
+                <TableRow key={bill.id} data-testid={`row-bill-${bill.id}`} className={bill.isPending ? "opacity-60" : ""}>
                   <TableCell className={`${getColumnClassName(billColumns[0])} font-medium font-mono`}>{bill.billNumber}</TableCell>
                   <TableCell className={getColumnClassName(billColumns[1])}>{getVendorName(bill.vendorId)}</TableCell>
                   <TableCell className={getColumnClassName(billColumns[2])}>{new Date(bill.billDate).toLocaleDateString()}</TableCell>
@@ -230,11 +244,11 @@ export default function Bills() {
                   <TableCell className={`${getColumnClassName(billColumns[4])} font-mono`} data-testid={`amount-${bill.id}`}>
                     {currenciesLoading ? '...' : formatCurrency(parseFloat(bill.total), bill.currencyCode, currencies)}
                   </TableCell>
-                  <TableCell className={getColumnClassName(billColumns[5])}>{getStatusBadge(bill.status)}</TableCell>
+                  <TableCell className={getColumnClassName(billColumns[5])}>{getStatusBadge(bill.status, bill.isPending)}</TableCell>
                   <TableCell className={getColumnClassName(billColumns[6])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-bill-actions-${bill.id}`}>
+                        <Button variant="ghost" size="icon" data-testid={`button-bill-actions-${bill.id}`} disabled={bill.isPending}>
                           <MoreVertical className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -242,16 +256,39 @@ export default function Bills() {
                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem 
-                          onClick={() => handleEditBill(bill)}
+                          onClick={() => handleEditBill(bill as Bill)}
                           data-testid={`button-edit-bill-${bill.id}`}
+                          disabled={bill.isPending}
                         >
                           <Pencil className="mr-2 h-4 w-4" />
                           Edit
                         </DropdownMenuItem>
+                        {bill.status !== 'paid' && bill.status !== 'cancelled' && (
+                          <DropdownMenuItem
+                            onClick={() => {
+                              markAsPaidMutation.mutate({
+                                id: bill.id,
+                                data: { 
+                                  status: 'paid',
+                                }
+                              });
+                            }}
+                            disabled={markAsPaidMutation.isPending || bill.isPending}
+                            data-testid={`button-mark-paid-${bill.id}`}
+                          >
+                            {markAsPaidMutation.isPending ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="mr-2 h-4 w-4" />
+                            )}
+                            Mark as Paid
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem 
                           onClick={() => handleDeleteBill(bill.id)}
                           className="text-destructive"
                           data-testid={`button-delete-bill-${bill.id}`}
+                          disabled={bill.isPending}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
                           Delete

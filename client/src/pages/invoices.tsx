@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreHorizontal, Edit, Trash2, Mail, Download } from "lucide-react";
+import { Plus, MoreHorizontal, Edit, Trash2, Mail, Download, Loader2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useOptimisticUpdate } from "@/hooks/useOptimisticUpdate";
 import {
   Table,
   TableBody,
@@ -23,10 +24,13 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import type { Invoice, Customer, Currency } from "@shared/schema";
+import type { Invoice, InvoiceWithOptimistic, Customer, Currency } from "@shared/schema";
 import { InvoiceDialog } from "@/components/invoice-dialog";
 import { formatCurrency } from "@/lib/currency-utils";
 import { invoiceColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
+import { useOptimisticCreate } from "@/hooks/useOptimisticCreate";
+import { PendingBadge } from "@/components/ui/pending-badge";
+import { cn } from "@/lib/utils";
 
 export default function Invoices() {
   const [showDialog, setShowDialog] = useState(false);
@@ -48,7 +52,7 @@ export default function Invoices() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: invoices = [], isLoading } = useQuery<Invoice[]>({
+  const { data: invoices = [], isLoading } = useQuery<InvoiceWithOptimistic[]>({
     queryKey: ["/api/invoices", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
@@ -146,6 +150,15 @@ export default function Invoices() {
     },
   });
 
+  // Optimistic update for marking invoice as paid
+  const markAsPaidMutation = useOptimisticUpdate<InvoiceWithOptimistic[]>({
+    endpoint: '/api/invoices',
+    queryKey: ['/api/invoices', { tenantId: currentTenant?.id }],
+    idKey: 'id',
+    successMessage: 'Invoice marked as paid',
+    errorMessage: 'Failed to mark invoice as paid',
+  });
+
   const handleSendEmail = (invoiceId: string) => {
     sendEmailMutation.mutate(invoiceId);
   };
@@ -226,7 +239,14 @@ export default function Invoices() {
             </TableHeader>
             <TableBody>
               {invoices.map((invoice) => (
-                <TableRow key={invoice.id} data-testid={`row-invoice-${invoice.id}`}>
+                <TableRow 
+                  key={invoice.id} 
+                  className={cn(
+                    "hover-elevate",
+                    invoice.isPending && "opacity-60"
+                  )}
+                  data-testid={`row-invoice-${invoice.id}`}
+                >
                   <TableCell className={`${getColumnClassName(invoiceColumns[0])} font-medium font-mono`}>{invoice.invoiceNumber}</TableCell>
                   <TableCell className={getColumnClassName(invoiceColumns[1])}>{getCustomerName(invoice.customerId)}</TableCell>
                   <TableCell className={getColumnClassName(invoiceColumns[2])}>{new Date(invoice.invoiceDate).toLocaleDateString()}</TableCell>
@@ -234,7 +254,15 @@ export default function Invoices() {
                   <TableCell className={`${getColumnClassName(invoiceColumns[4])} font-mono`} data-testid={`text-amount-${invoice.id}`}>
                     {currenciesLoading ? '...' : formatCurrency(parseFloat(invoice.total), invoice.currencyCode, currencies)}
                   </TableCell>
-                  <TableCell className={getColumnClassName(invoiceColumns[5])}>{getStatusBadge(invoice.status)}</TableCell>
+                  <TableCell className={getColumnClassName(invoiceColumns[5])}>
+                    <div className="flex items-center gap-2">
+                      {invoice.isPending ? (
+                        <PendingBadge isPending={true} />
+                      ) : (
+                        getStatusBadge(invoice.status)
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell className={getColumnClassName(invoiceColumns[6])}>
                     {!invoice.emailStatus || invoice.emailStatus === 'pending' ? (
                       <Badge variant="outline" data-testid={`badge-email-status-not-sent-${invoice.id}`}>Not Sent</Badge>
@@ -254,7 +282,12 @@ export default function Invoices() {
                   <TableCell className={getColumnClassName(invoiceColumns[7])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${invoice.id}`}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          disabled={invoice.isPending}
+                          data-testid={`button-actions-${invoice.id}`}
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -264,6 +297,7 @@ export default function Invoices() {
                             setEditingInvoice(invoice);
                             setShowDialog(true);
                           }}
+                          disabled={invoice.isPending}
                           data-testid={`button-edit-${invoice.id}`}
                         >
                           <Edit className="mr-2 h-4 w-4" />
@@ -271,12 +305,34 @@ export default function Invoices() {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => handleSendEmail(invoice.id)}
-                          disabled={sendEmailMutation.isPending}
+                          disabled={sendEmailMutation.isPending || invoice.isPending}
                           data-testid={`button-send-email-${invoice.id}`}
                         >
                           <Mail className="mr-2 h-4 w-4" />
                           Send Email
                         </DropdownMenuItem>
+                        {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
+                          <DropdownMenuItem
+                            onClick={() => {
+                              markAsPaidMutation.mutate({
+                                id: invoice.id,
+                                data: { 
+                                  status: 'paid',
+                                  amountPaid: invoice.total,
+                                }
+                              });
+                            }}
+                            disabled={markAsPaidMutation.isPending || invoice.isPending}
+                            data-testid={`button-mark-paid-${invoice.id}`}
+                          >
+                            {markAsPaidMutation.isPending ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="mr-2 h-4 w-4" />
+                            )}
+                            Mark as Paid
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           onClick={() => {
                             if (!currentTenant?.id) {
@@ -285,7 +341,7 @@ export default function Invoices() {
                             }
                             window.open(`/api/invoices/${invoice.id}/pdf?tenantId=${currentTenant.id}`, '_blank');
                           }}
-                          disabled={!currentTenant?.id}
+                          disabled={!currentTenant?.id || invoice.isPending}
                           data-testid={`button-download-pdf-${invoice.id}`}
                         >
                           <Download className="mr-2 h-4 w-4" />
@@ -294,6 +350,7 @@ export default function Invoices() {
                         <DropdownMenuItem
                           onClick={() => deleteMutation.mutate(invoice.id)}
                           className="text-destructive"
+                          disabled={invoice.isPending}
                           data-testid={`button-delete-${invoice.id}`}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />

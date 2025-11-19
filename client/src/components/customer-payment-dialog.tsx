@@ -2,9 +2,10 @@ import { useEffect, useMemo } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { insertCustomerPaymentSchema, type CustomerPayment, type Customer, type Invoice, type Currency } from "@shared/schema";
+import { insertCustomerPaymentSchema, type CustomerPayment, type CustomerPaymentWithOptimistic, type Customer, type Invoice, type Currency } from "@shared/schema";
 import { z } from "zod";
 import { formatCurrency } from "@/lib/currency-utils";
+import { useOptimisticCreate } from "@/hooks/useOptimisticCreate";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -168,24 +169,56 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
     });
   }, [open, payment, currenciesLoading, baseCurrency, form]);
 
-  const saveMutation = useMutation({
+  // Optimistic create mutation for new payments
+  const createPaymentMutation = useOptimisticCreate<CustomerPaymentWithOptimistic[], CustomerPaymentWithOptimistic, any>({
+    endpoint: `/api/customer-payments?tenantId=${currentTenant?.id}`,
+    queryKey: ['/api/customer-payments', { tenantId: currentTenant?.id }],
+    generateOptimisticItem: (data) => {
+      const paymentData = data.paymentDate ? new Date(data.paymentDate).toISOString() : new Date().toISOString();
+      return {
+        id: `temp-${crypto.randomUUID()}`,
+        tenantId: currentTenant?.id || "",
+        customerId: data.customerId,
+        invoiceId: data.invoiceId || null,
+        paymentNumber: null,
+        paymentDate: paymentData,
+        paymentMethod: data.paymentMethod,
+        referenceNumber: data.referenceNumber || null,
+        amount: data.amount,
+        currencyCode: data.currencyCode,
+        exchangeRate: "1.0",
+        baseCurrencyAmount: null,
+        transactionCurrencyCode: null,
+        transactionRateValue: null,
+        transactionAmount: null,
+        baseAmount: null,
+        exchangeRateId: null,
+        notes: data.notes || null,
+        deletedAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isPending: true,
+      };
+    },
+    successMessage: 'Payment created successfully',
+    errorMessage: 'Failed to create payment',
+  });
+
+  // Regular mutation for updates
+  const updatePaymentMutation = useMutation({
     mutationFn: async (data: PaymentFormValues) => {
       const payload = {
         ...data,
         paymentDate: new Date(data.paymentDate).toISOString(),
       };
-      if (payment) {
-        return apiRequest(`/api/customer-payments/${payment.id}`, "PATCH", payload);
-      } else {
-        return apiRequest("/api/customer-payments", "POST", { ...payload, tenantId: currentTenant?.id });
-      }
+      return apiRequest(`/api/customer-payments/${payment?.id}`, "PATCH", payload);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/customer-payments", currentTenant?.id] });
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices", currentTenant?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customer-payments", { tenantId: currentTenant?.id }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices", { tenantId: currentTenant?.id }] });
       toast({
-        title: payment ? "Payment updated" : "Payment recorded",
-        description: `Payment has been ${payment ? "updated" : "recorded"} successfully.`,
+        title: "Payment updated",
+        description: "Payment has been updated successfully.",
       });
       onOpenChange(false);
     },
@@ -203,14 +236,29 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
       }
       toast({
         title: "Error",
-        description: `Failed to ${payment ? "update" : "record"} payment.`,
+        description: "Failed to update payment.",
         variant: "destructive",
       });
     },
   });
 
   const onSubmit = (values: PaymentFormValues) => {
-    saveMutation.mutate(values);
+    const payload = {
+      ...values,
+      paymentDate: new Date(values.paymentDate).toISOString(),
+    };
+    
+    if (payment) {
+      updatePaymentMutation.mutate(values);
+    } else {
+      // For create, also invalidate invoices query on success
+      createPaymentMutation.mutate(payload, {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["/api/invoices", { tenantId: currentTenant?.id }] });
+          onOpenChange(false);
+        },
+      });
+    }
   };
 
   const customerInvoices = invoices.filter(inv => 
@@ -432,10 +480,10 @@ export function CustomerPaymentDialog({ open, onOpenChange, payment }: CustomerP
               </Button>
               <Button
                 type="submit"
-                disabled={currenciesLoading || currenciesError || saveMutation.isPending}
+                disabled={currenciesLoading || currenciesError || createPaymentMutation.isPending || updatePaymentMutation.isPending}
                 data-testid="button-save"
               >
-                {saveMutation.isPending ? "Saving..." : payment ? "Update" : "Save"}
+                {(createPaymentMutation.isPending || updatePaymentMutation.isPending) ? "Saving..." : payment ? "Update" : "Save"}
               </Button>
             </DialogFooter>
           </form>

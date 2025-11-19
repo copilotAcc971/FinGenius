@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { useMutation } from "@tanstack/react-query";
-import { customerFormSchema, type CustomerFormValues, type Customer, type InsertCustomer } from "@shared/schema";
+import { customerFormSchema, type CustomerFormValues, type Customer, type CustomerWithOptimistic, type InsertCustomer } from "@shared/schema";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,10 +34,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { useTenant } from "@/hooks/useTenant";
+import { useOptimisticCreate } from "@/hooks/useOptimisticCreate";
 
 interface CustomerDialogProps {
   open: boolean;
@@ -138,6 +140,21 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
     }
   }, [copyFromBilling, billingWatch, form]);
 
+  // Optimistic create mutation for new customers
+  const createCustomerMutation = useOptimisticCreate<CustomerWithOptimistic[], CustomerWithOptimistic, any>({
+    endpoint: `/api/customers?tenantId=${currentTenant?.id}`,
+    queryKey: ["/api/customers", { tenantId: currentTenant?.id }],
+    generateOptimisticItem: (data) => ({
+      ...data,
+      id: `temp-${crypto.randomUUID()}`,
+      tenantId: currentTenant?.id || "",
+      isPending: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    successMessage: 'Customer created successfully',
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (data: InsertCustomer | CustomerFormValues) => {
       if (customer) {
@@ -190,11 +207,13 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
     };
 
     if (customer) {
-      // PATCH: Send sanitized without tenantId
+      // Update existing customer - use regular mutation
       saveMutation.mutate(sanitized);
     } else {
-      // POST: Add tenantId
-      saveMutation.mutate({ ...sanitized, tenantId: currentTenant?.id! });
+      // Create new customer - use optimistic mutation
+      const payload = { ...sanitized, tenantId: currentTenant?.id! };
+      createCustomerMutation.mutate(payload);
+      onOpenChange(false);
     }
   };
 
@@ -586,8 +605,11 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel-customer">
                 Cancel
               </Button>
-              <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-customer">
-                {saveMutation.isPending ? "Saving..." : (customer ? "Update" : "Create")}
+              <Button type="submit" disabled={saveMutation.isPending || createCustomerMutation.isPending} data-testid="button-save-customer">
+                {(saveMutation.isPending || createCustomerMutation.isPending) && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {customer ? (saveMutation.isPending ? "Updating..." : "Update") : (createCustomerMutation.isPending ? "Creating..." : "Create")}
               </Button>
             </DialogFooter>
           </form>

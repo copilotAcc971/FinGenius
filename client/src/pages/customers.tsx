@@ -18,12 +18,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { TableSkeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { PendingBadge } from "@/components/ui/pending-badge";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import type { Customer } from "@shared/schema";
+import type { Customer, CustomerWithOptimistic } from "@shared/schema";
 import { CustomerDialog } from "@/components/customer-dialog";
 import { customerColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 
@@ -48,7 +50,7 @@ export default function Customers() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: customers = [], isLoading } = useQuery<Customer[]>({
+  const { data: customers = [], isLoading } = useQuery<CustomerWithOptimistic[]>({
     queryKey: ["/api/customers", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
@@ -169,25 +171,31 @@ export default function Customers() {
             </TableHeader>
             <TableBody>
               {filteredCustomers.map((customer) => (
-                <TableRow key={customer.id} data-testid={`row-customer-${customer.id}`}>
-                  <TableCell className={`${getColumnClassName(customerColumns[0])} font-medium`}>{customer.name}</TableCell>
+                <TableRow key={customer.id} data-testid={`row-customer-${customer.id}`} className={customer.isPending ? "opacity-60" : ""}>
+                  <TableCell className={`${getColumnClassName(customerColumns[0])} font-medium`}>
+                    <div className="flex items-center gap-2">
+                      {customer.name}
+                      {customer.isPending && <PendingBadge />}
+                    </div>
+                  </TableCell>
                   <TableCell className={getColumnClassName(customerColumns[1])}>{customer.email || "-"}</TableCell>
                   <TableCell className={getColumnClassName(customerColumns[2])}>{customer.phone || "-"}</TableCell>
                   <TableCell className={getColumnClassName(customerColumns[3])}>{customer.company || "-"}</TableCell>
                   <TableCell className={getColumnClassName(customerColumns[4])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${customer.id}`}>
+                        <Button variant="ghost" size="icon" data-testid={`button-actions-${customer.id}`} disabled={customer.isPending}>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem
                           onClick={() => {
-                            setEditingCustomer(customer);
+                            setEditingCustomer(customer as Customer);
                             setShowDialog(true);
                           }}
                           data-testid={`button-edit-${customer.id}`}
+                          disabled={customer.isPending}
                         >
                           <Edit className="mr-2 h-4 w-4" />
                           Edit
@@ -196,6 +204,7 @@ export default function Customers() {
                           onClick={() => deleteMutation.mutate(customer.id)}
                           className="text-destructive"
                           data-testid={`button-delete-${customer.id}`}
+                          disabled={customer.isPending}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
                           Delete

@@ -19,13 +19,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { TableSkeleton } from "@/components/ui/skeleton";
+import { PendingBadge } from "@/components/ui/pending-badge";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { vendorColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
-import type { Vendor } from "@shared/schema";
+import type { Vendor, VendorWithOptimistic } from "@shared/schema";
 import { VendorDialog } from "@/components/vendor-dialog";
 
 export default function Vendors() {
@@ -49,7 +50,7 @@ export default function Vendors() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: vendors = [], isLoading } = useQuery<Vendor[]>({
+  const { data: vendors = [], isLoading } = useQuery<VendorWithOptimistic[]>({
     queryKey: ["/api/vendors", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
@@ -171,13 +172,15 @@ export default function Vendors() {
             </TableHeader>
             <TableBody>
               {filteredVendors.map((vendor) => (
-                <TableRow key={vendor.id} data-testid={`row-vendor-${vendor.id}`}>
+                <TableRow key={vendor.id} data-testid={`row-vendor-${vendor.id}`} className={vendor.isPending ? "opacity-60" : ""}>
                   <TableCell className={`${getColumnClassName(vendorColumns[0])} font-medium`}>{vendor.name}</TableCell>
                   <TableCell className={getColumnClassName(vendorColumns[1])}>{vendor.email || "-"}</TableCell>
                   <TableCell className={getColumnClassName(vendorColumns[2])}>{vendor.phone || "-"}</TableCell>
                   <TableCell className={getColumnClassName(vendorColumns[3])}>{vendor.company || "-"}</TableCell>
                   <TableCell className={getColumnClassName(vendorColumns[4])}>
-                    {vendor.stripeAccountId ? (
+                    {vendor.isPending ? (
+                      <PendingBadge />
+                    ) : vendor.stripeAccountId ? (
                       <Badge variant="default" data-testid={`badge-connected-${vendor.id}`}>Connected</Badge>
                     ) : (
                       <Badge variant="secondary" data-testid={`badge-not-connected-${vendor.id}`}>Not Connected</Badge>
@@ -186,17 +189,18 @@ export default function Vendors() {
                   <TableCell className={getColumnClassName(vendorColumns[5])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${vendor.id}`}>
+                        <Button variant="ghost" size="icon" data-testid={`button-actions-${vendor.id}`} disabled={vendor.isPending}>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem
                           onClick={() => {
-                            setEditingVendor(vendor);
+                            setEditingVendor(vendor as Vendor);
                             setShowDialog(true);
                           }}
                           data-testid={`button-edit-${vendor.id}`}
+                          disabled={vendor.isPending}
                         >
                           <Edit className="mr-2 h-4 w-4" />
                           Edit
@@ -205,6 +209,7 @@ export default function Vendors() {
                           onClick={() => deleteMutation.mutate(vendor.id)}
                           className="text-destructive"
                           data-testid={`button-delete-${vendor.id}`}
+                          disabled={vendor.isPending}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
                           Delete

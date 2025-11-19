@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { 
   billPayloadSchema, 
   type Bill, 
+  type BillWithOptimistic,
   type Vendor, 
   type BillLineItem,
   type Currency
@@ -40,6 +41,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { useTenant } from "@/hooks/useTenant";
+import { useOptimisticCreate } from "@/hooks/useOptimisticCreate";
 import { Plus, Trash2, Loader2, Upload, X, Sparkles, Tag } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -430,6 +432,47 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
     }
   };
 
+  // Optimistic create mutation for new bills
+  const createBillMutation = useOptimisticCreate<BillWithOptimistic[], BillWithOptimistic, any>({
+    endpoint: `/api/bills?tenantId=${currentTenant?.id}`,
+    queryKey: ["/api/bills", { tenantId: currentTenant?.id }],
+    generateOptimisticItem: (payload) => {
+      const billData = payload.bill;
+      return {
+        id: `temp-${crypto.randomUUID()}`,
+        tenantId: currentTenant?.id || "",
+        vendorId: billData.vendorId,
+        currencyCode: billData.currencyCode,
+        billNumber: billData.billNumber || `TEMP-${Date.now()}`,
+        billDate: new Date(billData.billDate).toISOString(),
+        dueDate: new Date(billData.dueDate).toISOString(),
+        status: billData.status,
+        subtotal: billData.subtotal,
+        taxAmount: billData.taxAmount,
+        total: billData.total,
+        exchangeRate: "1.0",
+        baseCurrencyAmount: null,
+        transactionCurrencyCode: null,
+        transactionRateSource: null,
+        transactionRateValue: null,
+        exchangeRateId: null,
+        transactionTotalAmount: null,
+        notes: billData.notes || null,
+        documentUrl: null,
+        aiExtractionStatus: null,
+        aiConfidenceScore: null,
+        aiExtractedData: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        projectName: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isPending: true,
+      };
+    },
+    successMessage: 'Bill created successfully',
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
       const payload = {
@@ -491,7 +534,35 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
   });
 
   const handleSubmit = form.handleSubmit((values) => {
-    saveMutation.mutate(values);
+    if (bill) {
+      // Update existing bill - use regular mutation
+      saveMutation.mutate(values);
+    } else {
+      // Create new bill - use optimistic mutation
+      const payload = {
+        bill: {
+          tenantId: values.bill.tenantId,
+          vendorId: values.bill.vendorId,
+          currencyCode: values.bill.currencyCode,
+          billNumber: values.bill.billNumber || undefined,
+          billDate: new Date(values.bill.billDate).toISOString(),
+          dueDate: new Date(values.bill.dueDate).toISOString(),
+          status: values.bill.status,
+          subtotal: values.bill.subtotal,
+          taxAmount: values.bill.taxAmount,
+          total: values.bill.total,
+          notes: values.bill.notes || undefined,
+        },
+        lineItems: values.lineItems.map(item => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          amount: item.amount,
+        })),
+      };
+      createBillMutation.mutate(payload);
+      onOpenChange(false);
+    }
   });
 
   return (
@@ -936,13 +1007,13 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
               </Button>
               <Button 
                 type="submit" 
-                disabled={saveMutation.isPending || currenciesLoading || currenciesError}
+                disabled={saveMutation.isPending || createBillMutation.isPending || currenciesLoading || currenciesError}
                 data-testid="button-save-bill"
               >
-                {saveMutation.isPending && (
+                {(saveMutation.isPending || createBillMutation.isPending) && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
-                {bill ? "Update Bill" : "Create Bill"}
+                {bill ? "Update Bill" : (createBillMutation.isPending ? "Creating..." : "Create Bill")}
               </Button>
             </DialogFooter>
           </form>

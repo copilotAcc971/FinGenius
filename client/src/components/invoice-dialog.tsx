@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { 
   invoicePayloadSchema, 
   type Invoice, 
+  type InvoiceWithOptimistic,
   type Customer, 
   type InvoiceLineItem,
   type Item,
@@ -53,6 +54,7 @@ import { Plus, Trash2, Loader2, AlertCircle, Download } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Link } from "wouter";
 import { formatCurrency } from "@/lib/currency-utils";
+import { useOptimisticCreate } from "@/hooks/useOptimisticCreate";
 
 const safeParseFloat = (value: string | number | null | undefined): number => {
   if (value === '' || value === null || value === undefined) return 0;
@@ -460,6 +462,50 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
     });
   }, [invoice, currentTenant, companyProfile, baseCurrency, form, open]);
 
+  // Optimistic create mutation for new invoices
+  const createInvoiceMutation = useOptimisticCreate<InvoiceWithOptimistic[], InvoiceWithOptimistic, any>({
+    endpoint: `/api/invoices?tenantId=${currentTenant?.id}`,
+    queryKey: ["/api/invoices", { tenantId: currentTenant?.id }],
+    generateOptimisticItem: (payload) => {
+      const invoiceData = payload.invoice;
+      return {
+        id: `temp-${crypto.randomUUID()}`,
+        tenantId: currentTenant?.id || "",
+        customerId: invoiceData.customerId,
+        currencyCode: invoiceData.currencyCode,
+        invoiceNumber: invoiceData.invoiceNumber || `TEMP-${Date.now()}`,
+        poReference: invoiceData.poReference || null,
+        invoiceSubject: invoiceData.invoiceSubject || null,
+        issuerTaxId: invoiceData.issuerTaxId || null,
+        customerTaxId: invoiceData.customerTaxId || null,
+        projectName: invoiceData.projectName || null,
+        invoiceDate: new Date(invoiceData.invoiceDate).toISOString(),
+        dueDate: new Date(invoiceData.dueDate).toISOString(),
+        status: invoiceData.status,
+        subtotal: invoiceData.subtotal,
+        taxAmount: invoiceData.taxAmount,
+        total: invoiceData.total,
+        exchangeRate: "1.0",
+        baseCurrencyAmount: null,
+        transactionCurrencyCode: null,
+        transactionRateSource: null,
+        transactionRateValue: null,
+        exchangeRateId: null,
+        transactionTotalAmount: null,
+        notes: invoiceData.notes || null,
+        emailSentAt: null,
+        emailSentTo: null,
+        emailStatus: null,
+        emailError: null,
+        deletedAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isPending: true,
+      };
+    },
+    successMessage: 'Invoice created successfully',
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
       const payload = {
@@ -616,7 +662,46 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
   });
 
   const onSubmit = (values: FormValues) => {
-    saveMutation.mutate(values);
+    const payload = {
+      invoice: {
+        tenantId: values.invoice.tenantId,
+        customerId: values.invoice.customerId,
+        currencyCode: values.invoice.currencyCode,
+        invoiceNumber: values.invoice.invoiceNumber || undefined,
+        invoiceDate: new Date(values.invoice.invoiceDate).toISOString(),
+        dueDate: new Date(values.invoice.dueDate).toISOString(),
+        status: values.invoice.status,
+        invoiceSubject: values.invoice.invoiceSubject || undefined,
+        poReference: values.invoice.poReference || undefined,
+        issuerTaxId: values.invoice.issuerTaxId || undefined,
+        customerTaxId: values.invoice.customerTaxId || undefined,
+        subtotal: values.invoice.subtotal,
+        taxAmount: values.invoice.taxAmount,
+        total: values.invoice.total,
+        notes: values.invoice.notes || undefined,
+      },
+      lineItems: values.lineItems.map(item => ({
+        itemId: item.itemId || undefined,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discount: item.discount || "0.00",
+        taxId: item.taxId || undefined,
+        amount: item.amount,
+        accountId: item.accountId || undefined,
+      })),
+    };
+    
+    // Use optimistic mutation for creates, regular mutation for edits
+    if (!invoice) {
+      createInvoiceMutation.mutate(payload, {
+        onSuccess: () => {
+          onOpenChange(false);
+        },
+      });
+    } else {
+      saveMutation.mutate(values);
+    }
   };
 
   const onSaveAndSend = (values: FormValues) => {
@@ -1139,10 +1224,12 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                       <Button 
                         type="submit" 
                         variant="outline"
-                        disabled={!isDataReady || saveMutation.isPending || lineItemsLoading || currenciesLoading || currenciesError} 
+                        disabled={!isDataReady || (invoice ? saveMutation.isPending : createInvoiceMutation.isPending) || lineItemsLoading || currenciesLoading || currenciesError} 
                         data-testid="button-save-draft"
                       >
-                        {saveMutation.isPending ? "Saving..." : "Save as Draft"}
+                        {!invoice && createInvoiceMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                        {invoice && saveMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                        {(invoice ? saveMutation.isPending : createInvoiceMutation.isPending) ? "Saving..." : "Save as Draft"}
                       </Button>
                     </span>
                   </TooltipTrigger>

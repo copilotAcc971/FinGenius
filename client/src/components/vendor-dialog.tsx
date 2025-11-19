@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { useMutation } from "@tanstack/react-query";
-import { insertVendorSchema, type Vendor } from "@shared/schema";
+import { insertVendorSchema, type Vendor, type VendorWithOptimistic } from "@shared/schema";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,10 +25,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { useTenant } from "@/hooks/useTenant";
+import { useOptimisticCreate } from "@/hooks/useOptimisticCreate";
 
 const formSchema = insertVendorSchema;
 
@@ -88,6 +90,21 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
     }
   }, [vendor, currentTenant, form]);
 
+  // Optimistic create mutation for new vendors
+  const createVendorMutation = useOptimisticCreate<VendorWithOptimistic[], VendorWithOptimistic, any>({
+    endpoint: `/api/vendors?tenantId=${currentTenant?.id}`,
+    queryKey: ["/api/vendors", { tenantId: currentTenant?.id }],
+    generateOptimisticItem: (data) => ({
+      ...data,
+      id: `temp-${crypto.randomUUID()}`,
+      tenantId: currentTenant?.id || "",
+      isPending: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    successMessage: 'Vendor created successfully',
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (values: z.infer<typeof formSchema>) => {
       if (vendor) {
@@ -124,7 +141,14 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
   });
 
   const onSubmit = (values: z.infer<typeof formSchema>) => {
-    saveMutation.mutate(values);
+    if (vendor) {
+      // Update existing vendor - use regular mutation
+      saveMutation.mutate(values);
+    } else {
+      // Create new vendor - use optimistic mutation
+      createVendorMutation.mutate(values);
+      onOpenChange(false);
+    }
   };
 
   return (
@@ -283,8 +307,11 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel">
                 Cancel
               </Button>
-              <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save">
-                {saveMutation.isPending ? "Saving..." : (vendor ? "Update" : "Create")}
+              <Button type="submit" disabled={saveMutation.isPending || createVendorMutation.isPending} data-testid="button-save">
+                {(saveMutation.isPending || createVendorMutation.isPending) && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {vendor ? (saveMutation.isPending ? "Updating..." : "Update") : (createVendorMutation.isPending ? "Creating..." : "Create")}
               </Button>
             </DialogFooter>
           </form>

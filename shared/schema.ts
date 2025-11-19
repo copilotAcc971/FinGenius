@@ -404,6 +404,12 @@ export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type CustomerFormValues = z.infer<typeof customerFormSchema>;
 export type Customer = typeof customers.$inferSelect;
 
+// Client-side extension for optimistic UI - adds optional isPending flag
+// This field only exists during optimistic updates and is never persisted to the database
+export type CustomerWithOptimistic = Customer & {
+  isPending?: boolean;
+};
+
 // Vendors
 export const vendors = pgTable("vendors", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -464,6 +470,12 @@ export const vendorFormSchema = insertVendorSchema
 export type InsertVendor = z.infer<typeof insertVendorSchema>;
 export type VendorFormValues = z.infer<typeof vendorFormSchema>;
 export type Vendor = typeof vendors.$inferSelect;
+
+// Client-side extension for optimistic UI - adds optional isPending flag
+// This field only exists during optimistic updates and is never persisted to the database
+export type VendorWithOptimistic = Vendor & {
+  isPending?: boolean;
+};
 
 // Chart of Accounts
 export const accounts = pgTable("accounts", {
@@ -638,6 +650,12 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
 
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 export type Invoice = typeof invoices.$inferSelect;
+
+// Client-side extension for optimistic UI - adds optional isPending flag
+// This field only exists during optimistic updates and is never persisted to the database
+export type InvoiceWithOptimistic = Invoice & {
+  isPending?: boolean;
+};
 
 // Invoice Line Items
 export const invoiceLineItems = pgTable("invoice_line_items", {
@@ -917,6 +935,12 @@ export const insertBillSchema = createInsertSchema(bills, {
 export type InsertBill = z.infer<typeof insertBillSchema>;
 export type Bill = typeof bills.$inferSelect;
 
+// Client-side extension for optimistic UI - adds optional isPending flag
+// This field only exists during optimistic updates and is never persisted to the database
+export type BillWithOptimistic = Bill & {
+  isPending?: boolean;
+};
+
 // Bill Line Items
 export const billLineItems = pgTable("bill_line_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1121,6 +1145,12 @@ export const insertPaymentSchema = createInsertSchema(payments, {
 
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
+
+// Client-side extension for optimistic UI - adds optional isPending flag
+// This field only exists during optimistic updates and is never persisted to the database
+export type PaymentWithOptimistic = Payment & {
+  isPending?: boolean;
+};
 
 // Bill Payment Applications (tracks payment allocations to bills)
 export const billPaymentApplications = pgTable("bill_payment_applications", {
@@ -1524,6 +1554,12 @@ export const insertCustomerPaymentSchema = createInsertSchema(customerPayments, 
 
 export type InsertCustomerPayment = z.infer<typeof insertCustomerPaymentSchema>;
 export type CustomerPayment = typeof customerPayments.$inferSelect;
+
+// Client-side extension for optimistic UI - adds optional isPending flag
+// This field only exists during optimistic updates and is never persisted to the database
+export type CustomerPaymentWithOptimistic = CustomerPayment & {
+  isPending?: boolean;
+};
 
 // Customer Payment Number Sequencing (per tenant)
 export const customerPaymentSequences = pgTable("customer_payment_sequences", {
