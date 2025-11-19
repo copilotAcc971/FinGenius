@@ -41,6 +41,7 @@ export const PERMISSION_MODULES = {
   TIME_ENTRIES: 'time_entries',
   PROJECT_BUDGETS: 'project_budgets',
   PROJECT_REPORTS: 'project_reports',
+  COMPLIANCE: 'compliance',
 } as const;
 
 export const PERMISSION_ACTIONS = {
@@ -327,6 +328,16 @@ export const PERMISSION_DEFINITIONS = [
 
   // Project Reports
   { module: 'project_reports', action: 'read', name: 'project_reports.read', description: 'View project reports and analytics' },
+
+  // AML/KYC Compliance
+  { module: 'compliance', action: 'read', name: 'compliance.kyc.read', description: 'View customer KYC verification status' },
+  { module: 'compliance', action: 'manage', name: 'compliance.kyc.manage', description: 'Create and update KYC verifications' },
+  { module: 'compliance', action: 'read', name: 'compliance.sanctions.read', description: 'View sanctions screening results' },
+  { module: 'compliance', action: 'manage', name: 'compliance.sanctions.manage', description: 'Perform and review sanctions screenings' },
+  { module: 'compliance', action: 'read', name: 'compliance.monitoring.read', description: 'View transaction monitoring alerts' },
+  { module: 'compliance', action: 'manage', name: 'compliance.monitoring.manage', description: 'Review and resolve transaction alerts' },
+  { module: 'compliance', action: 'read', name: 'compliance.sar.read', description: 'View suspicious activity reports' },
+  { module: 'compliance', action: 'manage', name: 'compliance.sar.manage', description: 'Create and file suspicious activity reports' },
 ];
 
 // Permission inheritance rules (higher permissions inherit lower ones)

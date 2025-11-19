@@ -53,6 +53,11 @@ import ConsolidatedReports from "@/features/reports/pages/consolidated-reports-p
 import ConsolidatedProjects from "@/features/projects/pages/consolidated-projects-page";
 import AdvancedTableDemo from "@/shared/pages/advanced-table-demo-page";
 import AuditLogsPage from "@/pages/audit-logs-page";
+import KYCVerificationsPage from "@/features/compliance/pages/kyc-verifications-page";
+import SanctionsScreeningPage from "@/features/compliance/pages/sanctions-screening-page";
+import TransactionAlertsPage from "@/features/compliance/pages/transaction-alerts-page";
+import SARReportsPage from "@/features/compliance/pages/sar-reports-page";
+import AlertRulesPage from "@/features/compliance/pages/alert-rules-page";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -96,6 +101,11 @@ function Router() {
           <Route path="/settings/users" component={UserManagement} />
           <Route path="/settings/currencies" component={CurrenciesPage} />
           <Route path="/audit-logs" component={AuditLogsPage} />
+          <Route path="/compliance/kyc" component={KYCVerificationsPage} />
+          <Route path="/compliance/sanctions" component={SanctionsScreeningPage} />
+          <Route path="/compliance/alerts" component={TransactionAlertsPage} />
+          <Route path="/compliance/sar" component={SARReportsPage} />
+          <Route path="/compliance/rules" component={AlertRulesPage} />
           <Route path="/demo/advanced-table" component={AdvancedTableDemo} />
         </>
       )}

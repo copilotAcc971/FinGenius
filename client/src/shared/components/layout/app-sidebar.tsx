@@ -77,6 +77,14 @@ const inventoryItems = [
   { title: "Reports", url: "/inventory/reports", icon: ChartBar },
 ];
 
+const complianceItems = [
+  { title: "KYC Verifications", url: "/compliance/kyc", icon: Shield },
+  { title: "Sanctions Screening", url: "/compliance/sanctions", icon: Shield },
+  { title: "Transaction Alerts", url: "/compliance/alerts", icon: Shield },
+  { title: "SAR Reports", url: "/compliance/sar", icon: Shield },
+  { title: "Alert Rules", url: "/compliance/rules", icon: Shield },
+];
+
 const purchasesItems = [
   { title: "Purchase Transactions", url: "/purchases", icon: ShoppingCart },
   { title: "Vendors", url: "/vendors", icon: Building },
@@ -154,6 +162,7 @@ function getIconName(IconComponent: any): string {
 const allMenuItems = [
   ...salesItems,
   ...inventoryItems,
+  ...complianceItems,
   ...purchasesItems,
   ...paymentsItems,
   ...projectsItems,
@@ -176,6 +185,7 @@ export function AppSidebar() {
     recent: getGroupCollapsedState("recent"),
     sales: getGroupCollapsedState("sales"),
     inventory: getGroupCollapsedState("inventory"),
+    compliance: getGroupCollapsedState("compliance"),
     purchases: getGroupCollapsedState("purchases"),
     payments: getGroupCollapsedState("payments"),
     projects: getGroupCollapsedState("projects"),
@@ -442,6 +452,49 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {inventoryItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <div className="flex items-center w-full gap-1">
+                        <SidebarMenuButton asChild isActive={location === item.url} className="flex-1" data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
+                          <Link href={item.url}>
+                            <item.icon className="h-5 w-5" />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 shrink-0"
+                          onClick={(e) => handleToggleFavorite(item.url, e)}
+                          data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                        >
+                          {favorites.includes(item.url) ? (
+                            <Star className="h-4 w-4 fill-current" />
+                          ) : (
+                            <StarOff className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+
+        {/* Compliance Section */}
+        <Collapsible open={!collapsed.compliance} onOpenChange={(open) => handleGroupToggle("compliance", open)}>
+          <SidebarGroup>
+            <CollapsibleTrigger asChild>
+              <SidebarGroupLabel className="flex items-center justify-between cursor-pointer hover-elevate" data-testid="button-collapse-compliance">
+                <span>Compliance</span>
+                {collapsed.compliance ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </SidebarGroupLabel>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {complianceItems.map((item) => (
                     <SidebarMenuItem key={item.title}>
                       <div className="flex items-center w-full gap-1">
                         <SidebarMenuButton asChild isActive={location === item.url} className="flex-1" data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>

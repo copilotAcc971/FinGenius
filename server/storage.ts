@@ -186,6 +186,27 @@ import {
   type InsertProjectInvoiceMilestone,
   type ProjectCostAccount,
   type InsertProjectCostAccount,
+  kycVerifications,
+  type KYCVerification,
+  type InsertKYCVerification,
+  beneficialOwners,
+  type BeneficialOwner,
+  type InsertBeneficialOwner,
+  customerRiskProfiles,
+  type CustomerRiskProfile,
+  type InsertCustomerRiskProfile,
+  sanctionsScreenings,
+  type SanctionsScreening,
+  type InsertSanctionsScreening,
+  transactionAlerts,
+  type TransactionAlert,
+  type InsertTransactionAlert,
+  suspiciousActivityReports,
+  type SuspiciousActivityReport,
+  type InsertSuspiciousActivityReport,
+  alertRules,
+  type AlertRule,
+  type InsertAlertRule,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
@@ -695,6 +716,50 @@ export interface IStorage {
     limit?: number;
     offset?: number;
   }): Promise<AuditLog[]>;
+
+  // AML/KYC Compliance Operations
+  // KYC Verifications
+  getKYCVerifications(tenantId: string, filters?: any): Promise<KYCVerification[]>;
+  getKYCVerificationById(id: string, tenantId: string): Promise<KYCVerification | null>;
+  createKYCVerification(data: InsertKYCVerification): Promise<KYCVerification>;
+  updateKYCVerification(id: string, tenantId: string, data: Partial<InsertKYCVerification>): Promise<KYCVerification>;
+
+  // Beneficial Owners
+  getBeneficialOwners(customerId: string, tenantId: string): Promise<BeneficialOwner[]>;
+  getBeneficialOwnerById(id: string, tenantId: string): Promise<BeneficialOwner | null>;
+  createBeneficialOwner(data: InsertBeneficialOwner): Promise<BeneficialOwner>;
+  updateBeneficialOwner(id: string, tenantId: string, data: Partial<InsertBeneficialOwner>): Promise<BeneficialOwner>;
+  deleteBeneficialOwner(id: string, tenantId: string): Promise<void>;
+
+  // Customer Risk Profiles
+  getCustomerRiskProfile(customerId: string, tenantId: string): Promise<CustomerRiskProfile | null>;
+  createCustomerRiskProfile(data: InsertCustomerRiskProfile): Promise<CustomerRiskProfile>;
+  updateCustomerRiskProfile(id: string, tenantId: string, data: Partial<InsertCustomerRiskProfile>): Promise<CustomerRiskProfile>;
+
+  // Sanctions Screenings
+  getSanctionsScreenings(tenantId: string, filters?: any): Promise<SanctionsScreening[]>;
+  getSanctionsScreeningById(id: string, tenantId: string): Promise<SanctionsScreening | null>;
+  createSanctionsScreening(data: InsertSanctionsScreening): Promise<SanctionsScreening>;
+  updateSanctionsScreening(id: string, tenantId: string, data: Partial<InsertSanctionsScreening>): Promise<SanctionsScreening>;
+
+  // Transaction Alerts
+  getTransactionAlerts(tenantId: string, filters?: any): Promise<TransactionAlert[]>;
+  getTransactionAlertById(id: string, tenantId: string): Promise<TransactionAlert | null>;
+  createTransactionAlert(data: InsertTransactionAlert): Promise<TransactionAlert>;
+  updateTransactionAlert(id: string, tenantId: string, data: Partial<InsertTransactionAlert>): Promise<TransactionAlert>;
+
+  // Suspicious Activity Reports
+  getSuspiciousActivityReports(tenantId: string, filters?: any): Promise<SuspiciousActivityReport[]>;
+  getSuspiciousActivityReportById(id: string, tenantId: string): Promise<SuspiciousActivityReport | null>;
+  createSuspiciousActivityReport(data: InsertSuspiciousActivityReport): Promise<SuspiciousActivityReport>;
+  updateSuspiciousActivityReport(id: string, tenantId: string, data: Partial<InsertSuspiciousActivityReport>): Promise<SuspiciousActivityReport>;
+
+  // Alert Rules
+  getAlertRules(tenantId: string): Promise<AlertRule[]>;
+  getAlertRuleById(id: string, tenantId: string): Promise<AlertRule | null>;
+  createAlertRule(data: InsertAlertRule): Promise<AlertRule>;
+  updateAlertRule(id: string, tenantId: string, data: Partial<InsertAlertRule>): Promise<AlertRule>;
+  deleteAlertRule(id: string, tenantId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -8299,6 +8364,341 @@ export class DatabaseStorage implements IStorage {
 
     return await query;
   }
+
+  // ============================================================================
+  // AML/KYC COMPLIANCE OPERATIONS
+  // ============================================================================
+
+  // KYC Verifications
+  async getKYCVerifications(tenantId: string, filters?: any): Promise<KYCVerification[]> {
+    const conditions = [eq(kycVerifications.tenantId, tenantId)];
+
+    if (filters?.customerId) {
+      conditions.push(eq(kycVerifications.customerId, filters.customerId));
+    }
+    if (filters?.status) {
+      conditions.push(eq(kycVerifications.status, filters.status));
+    }
+    if (filters?.riskLevel) {
+      conditions.push(eq(kycVerifications.riskLevel, filters.riskLevel));
+    }
+
+    return await db
+      .select()
+      .from(kycVerifications)
+      .where(and(...conditions))
+      .orderBy(desc(kycVerifications.createdAt));
+  }
+
+  async getKYCVerificationById(id: string, tenantId: string): Promise<KYCVerification | null> {
+    const [verification] = await db
+      .select()
+      .from(kycVerifications)
+      .where(and(eq(kycVerifications.id, id), eq(kycVerifications.tenantId, tenantId)));
+    return verification || null;
+  }
+
+  async createKYCVerification(data: InsertKYCVerification): Promise<KYCVerification> {
+    const [verification] = await db
+      .insert(kycVerifications)
+      .values(data)
+      .returning();
+    return verification;
+  }
+
+  async updateKYCVerification(id: string, tenantId: string, data: Partial<InsertKYCVerification>): Promise<KYCVerification> {
+    const [verification] = await db
+      .update(kycVerifications)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(kycVerifications.id, id), eq(kycVerifications.tenantId, tenantId)))
+      .returning();
+    
+    if (!verification) {
+      throw new Error('KYC Verification not found');
+    }
+    
+    return verification;
+  }
+
+  // Beneficial Owners
+  async getBeneficialOwners(customerId: string, tenantId: string): Promise<BeneficialOwner[]> {
+    return await db
+      .select()
+      .from(beneficialOwners)
+      .where(and(eq(beneficialOwners.customerId, customerId), eq(beneficialOwners.tenantId, tenantId)))
+      .orderBy(desc(beneficialOwners.ownershipPercentage));
+  }
+
+  async getBeneficialOwnerById(id: string, tenantId: string): Promise<BeneficialOwner | null> {
+    const [owner] = await db
+      .select()
+      .from(beneficialOwners)
+      .where(and(eq(beneficialOwners.id, id), eq(beneficialOwners.tenantId, tenantId)));
+    return owner || null;
+  }
+
+  async createBeneficialOwner(data: InsertBeneficialOwner): Promise<BeneficialOwner> {
+    const [owner] = await db
+      .insert(beneficialOwners)
+      .values(data)
+      .returning();
+    return owner;
+  }
+
+  async updateBeneficialOwner(id: string, tenantId: string, data: Partial<InsertBeneficialOwner>): Promise<BeneficialOwner> {
+    const [owner] = await db
+      .update(beneficialOwners)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(beneficialOwners.id, id), eq(beneficialOwners.tenantId, tenantId)))
+      .returning();
+    
+    if (!owner) {
+      throw new Error('Beneficial Owner not found');
+    }
+    
+    return owner;
+  }
+
+  async deleteBeneficialOwner(id: string, tenantId: string): Promise<void> {
+    await db
+      .delete(beneficialOwners)
+      .where(and(eq(beneficialOwners.id, id), eq(beneficialOwners.tenantId, tenantId)));
+  }
+
+  // Customer Risk Profiles
+  async getCustomerRiskProfile(customerId: string, tenantId: string): Promise<CustomerRiskProfile | null> {
+    const [profile] = await db
+      .select()
+      .from(customerRiskProfiles)
+      .where(and(eq(customerRiskProfiles.customerId, customerId), eq(customerRiskProfiles.tenantId, tenantId)));
+    return profile || null;
+  }
+
+  async createCustomerRiskProfile(data: InsertCustomerRiskProfile): Promise<CustomerRiskProfile> {
+    const [profile] = await db
+      .insert(customerRiskProfiles)
+      .values(data)
+      .returning();
+    return profile;
+  }
+
+  async updateCustomerRiskProfile(id: string, tenantId: string, data: Partial<InsertCustomerRiskProfile>): Promise<CustomerRiskProfile> {
+    const [profile] = await db
+      .update(customerRiskProfiles)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(customerRiskProfiles.id, id), eq(customerRiskProfiles.tenantId, tenantId)))
+      .returning();
+    
+    if (!profile) {
+      throw new Error('Customer Risk Profile not found');
+    }
+    
+    return profile;
+  }
+
+  // Sanctions Screenings
+  async getSanctionsScreenings(tenantId: string, filters?: any): Promise<SanctionsScreening[]> {
+    const conditions = [eq(sanctionsScreenings.tenantId, tenantId)];
+
+    if (filters?.entityType) {
+      conditions.push(eq(sanctionsScreenings.entityType, filters.entityType));
+    }
+    if (filters?.entityId) {
+      conditions.push(eq(sanctionsScreenings.entityId, filters.entityId));
+    }
+    if (filters?.overallResult) {
+      conditions.push(eq(sanctionsScreenings.overallResult, filters.overallResult));
+    }
+    if (filters?.requiresReview !== undefined) {
+      conditions.push(eq(sanctionsScreenings.requiresReview, filters.requiresReview));
+    }
+
+    return await db
+      .select()
+      .from(sanctionsScreenings)
+      .where(and(...conditions))
+      .orderBy(desc(sanctionsScreenings.screeningDate));
+  }
+
+  async getSanctionsScreeningById(id: string, tenantId: string): Promise<SanctionsScreening | null> {
+    const [screening] = await db
+      .select()
+      .from(sanctionsScreenings)
+      .where(and(eq(sanctionsScreenings.id, id), eq(sanctionsScreenings.tenantId, tenantId)));
+    return screening || null;
+  }
+
+  async createSanctionsScreening(data: InsertSanctionsScreening): Promise<SanctionsScreening> {
+    const [screening] = await db
+      .insert(sanctionsScreenings)
+      .values(data)
+      .returning();
+    return screening;
+  }
+
+  async updateSanctionsScreening(id: string, tenantId: string, data: Partial<InsertSanctionsScreening>): Promise<SanctionsScreening> {
+    const [screening] = await db
+      .update(sanctionsScreenings)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(sanctionsScreenings.id, id), eq(sanctionsScreenings.tenantId, tenantId)))
+      .returning();
+    
+    if (!screening) {
+      throw new Error('Sanctions Screening not found');
+    }
+    
+    return screening;
+  }
+
+  // Transaction Alerts
+  async getTransactionAlerts(tenantId: string, filters?: any): Promise<TransactionAlert[]> {
+    const conditions = [eq(transactionAlerts.tenantId, tenantId)];
+
+    if (filters?.customerId) {
+      conditions.push(eq(transactionAlerts.customerId, filters.customerId));
+    }
+    if (filters?.status) {
+      conditions.push(eq(transactionAlerts.status, filters.status));
+    }
+    if (filters?.severity) {
+      conditions.push(eq(transactionAlerts.severity, filters.severity));
+    }
+    if (filters?.alertType) {
+      conditions.push(eq(transactionAlerts.alertType, filters.alertType));
+    }
+
+    return await db
+      .select()
+      .from(transactionAlerts)
+      .where(and(...conditions))
+      .orderBy(desc(transactionAlerts.alertDate));
+  }
+
+  async getTransactionAlertById(id: string, tenantId: string): Promise<TransactionAlert | null> {
+    const [alert] = await db
+      .select()
+      .from(transactionAlerts)
+      .where(and(eq(transactionAlerts.id, id), eq(transactionAlerts.tenantId, tenantId)));
+    return alert || null;
+  }
+
+  async createTransactionAlert(data: InsertTransactionAlert): Promise<TransactionAlert> {
+    const [alert] = await db
+      .insert(transactionAlerts)
+      .values(data)
+      .returning();
+    return alert;
+  }
+
+  async updateTransactionAlert(id: string, tenantId: string, data: Partial<InsertTransactionAlert>): Promise<TransactionAlert> {
+    const [alert] = await db
+      .update(transactionAlerts)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(transactionAlerts.id, id), eq(transactionAlerts.tenantId, tenantId)))
+      .returning();
+    
+    if (!alert) {
+      throw new Error('Transaction Alert not found');
+    }
+    
+    return alert;
+  }
+
+  // Suspicious Activity Reports
+  async getSuspiciousActivityReports(tenantId: string, filters?: any): Promise<SuspiciousActivityReport[]> {
+    const conditions = [eq(suspiciousActivityReports.tenantId, tenantId)];
+
+    if (filters?.customerId) {
+      conditions.push(eq(suspiciousActivityReports.customerId, filters.customerId));
+    }
+    if (filters?.status) {
+      conditions.push(eq(suspiciousActivityReports.status, filters.status));
+    }
+    if (filters?.activityType) {
+      conditions.push(eq(suspiciousActivityReports.activityType, filters.activityType));
+    }
+
+    return await db
+      .select()
+      .from(suspiciousActivityReports)
+      .where(and(...conditions))
+      .orderBy(desc(suspiciousActivityReports.createdAt));
+  }
+
+  async getSuspiciousActivityReportById(id: string, tenantId: string): Promise<SuspiciousActivityReport | null> {
+    const [sar] = await db
+      .select()
+      .from(suspiciousActivityReports)
+      .where(and(eq(suspiciousActivityReports.id, id), eq(suspiciousActivityReports.tenantId, tenantId)));
+    return sar || null;
+  }
+
+  async createSuspiciousActivityReport(data: InsertSuspiciousActivityReport): Promise<SuspiciousActivityReport> {
+    const [sar] = await db
+      .insert(suspiciousActivityReports)
+      .values(data)
+      .returning();
+    return sar;
+  }
+
+  async updateSuspiciousActivityReport(id: string, tenantId: string, data: Partial<InsertSuspiciousActivityReport>): Promise<SuspiciousActivityReport> {
+    const [sar] = await db
+      .update(suspiciousActivityReports)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(suspiciousActivityReports.id, id), eq(suspiciousActivityReports.tenantId, tenantId)))
+      .returning();
+    
+    if (!sar) {
+      throw new Error('Suspicious Activity Report not found');
+    }
+    
+    return sar;
+  }
+
+  // Alert Rules
+  async getAlertRules(tenantId: string): Promise<AlertRule[]> {
+    return await db
+      .select()
+      .from(alertRules)
+      .where(eq(alertRules.tenantId, tenantId))
+      .orderBy(desc(alertRules.createdAt));
+  }
+
+  async getAlertRuleById(id: string, tenantId: string): Promise<AlertRule | null> {
+    const [rule] = await db
+      .select()
+      .from(alertRules)
+      .where(and(eq(alertRules.id, id), eq(alertRules.tenantId, tenantId)));
+    return rule || null;
+  }
+
+  async createAlertRule(data: InsertAlertRule): Promise<AlertRule> {
+    const [rule] = await db
+      .insert(alertRules)
+      .values(data)
+      .returning();
+    return rule;
+  }
+
+  async updateAlertRule(id: string, tenantId: string, data: Partial<InsertAlertRule>): Promise<AlertRule> {
+    const [rule] = await db
+      .update(alertRules)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(alertRules.id, id), eq(alertRules.tenantId, tenantId)))
+      .returning();
+    
+    if (!rule) {
+      throw new Error('Alert Rule not found');
+    }
+    
+    return rule;
+  }
+
+  async deleteAlertRule(id: string, tenantId: string): Promise<void> {
+    await db
+      .delete(alertRules)
+      .where(and(eq(alertRules.id, id), eq(alertRules.tenantId, tenantId)));
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -9741,6 +10141,133 @@ export class MemStorage implements IStorage {
     }
 
     return result.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }
+
+  // ============================================================================
+  // AML/KYC COMPLIANCE OPERATIONS - Stubs
+  // ============================================================================
+
+  // KYC Verifications
+  async getKYCVerifications(tenantId: string, filters?: any): Promise<KYCVerification[]> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async getKYCVerificationById(id: string, tenantId: string): Promise<KYCVerification | null> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async createKYCVerification(data: InsertKYCVerification): Promise<KYCVerification> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async updateKYCVerification(id: string, tenantId: string, data: Partial<InsertKYCVerification>): Promise<KYCVerification> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  // Beneficial Owners
+  async getBeneficialOwners(customerId: string, tenantId: string): Promise<BeneficialOwner[]> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async getBeneficialOwnerById(id: string, tenantId: string): Promise<BeneficialOwner | null> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async createBeneficialOwner(data: InsertBeneficialOwner): Promise<BeneficialOwner> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async updateBeneficialOwner(id: string, tenantId: string, data: Partial<InsertBeneficialOwner>): Promise<BeneficialOwner> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async deleteBeneficialOwner(id: string, tenantId: string): Promise<void> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  // Customer Risk Profiles
+  async getCustomerRiskProfile(customerId: string, tenantId: string): Promise<CustomerRiskProfile | null> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async createCustomerRiskProfile(data: InsertCustomerRiskProfile): Promise<CustomerRiskProfile> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async updateCustomerRiskProfile(id: string, tenantId: string, data: Partial<InsertCustomerRiskProfile>): Promise<CustomerRiskProfile> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  // Sanctions Screenings
+  async getSanctionsScreenings(tenantId: string, filters?: any): Promise<SanctionsScreening[]> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async getSanctionsScreeningById(id: string, tenantId: string): Promise<SanctionsScreening | null> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async createSanctionsScreening(data: InsertSanctionsScreening): Promise<SanctionsScreening> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async updateSanctionsScreening(id: string, tenantId: string, data: Partial<InsertSanctionsScreening>): Promise<SanctionsScreening> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  // Transaction Alerts
+  async getTransactionAlerts(tenantId: string, filters?: any): Promise<TransactionAlert[]> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async getTransactionAlertById(id: string, tenantId: string): Promise<TransactionAlert | null> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async createTransactionAlert(data: InsertTransactionAlert): Promise<TransactionAlert> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async updateTransactionAlert(id: string, tenantId: string, data: Partial<InsertTransactionAlert>): Promise<TransactionAlert> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  // Suspicious Activity Reports
+  async getSuspiciousActivityReports(tenantId: string, filters?: any): Promise<SuspiciousActivityReport[]> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async getSuspiciousActivityReportById(id: string, tenantId: string): Promise<SuspiciousActivityReport | null> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async createSuspiciousActivityReport(data: InsertSuspiciousActivityReport): Promise<SuspiciousActivityReport> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async updateSuspiciousActivityReport(id: string, tenantId: string, data: Partial<InsertSuspiciousActivityReport>): Promise<SuspiciousActivityReport> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  // Alert Rules
+  async getAlertRules(tenantId: string): Promise<AlertRule[]> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async getAlertRuleById(id: string, tenantId: string): Promise<AlertRule | null> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async createAlertRule(data: InsertAlertRule): Promise<AlertRule> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async updateAlertRule(id: string, tenantId: string, data: Partial<InsertAlertRule>): Promise<AlertRule> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
+  }
+
+  async deleteAlertRule(id: string, tenantId: string): Promise<void> {
+    throw new Error('AML/KYC compliance not implemented in MemStorage');
   }
 }
 

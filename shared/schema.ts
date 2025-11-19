@@ -40,6 +40,14 @@ export const PROJECT_TASK_STATUS = ['not_started', 'in_progress', 'completed', '
 export const PROJECT_TASK_PRIORITY = ['low', 'medium', 'high', 'urgent'] as const;
 export const PROJECT_MILESTONE_STATUS = ['pending', 'in_progress', 'completed', 'missed'] as const;
 
+// AML/KYC Compliance Status Enums
+export const KYC_VERIFICATION_STATUS = ['pending', 'in_progress', 'verified', 'rejected', 'expired'] as const;
+export const RISK_LEVEL = ['low', 'medium', 'high', 'critical'] as const;
+export const SCREENING_RESULT = ['clear', 'potential_match', 'match'] as const;
+export const ALERT_SEVERITY = ['low', 'medium', 'high', 'critical'] as const;
+export const ALERT_STATUS = ['open', 'under_review', 'closed', 'escalated_to_sar'] as const;
+export const SAR_STATUS = ['draft', 'under_review', 'approved', 'filed', 'rejected'] as const;
+
 // Session storage table for Replit Auth
 export const sessions = pgTable(
   "sessions",
@@ -3805,6 +3813,421 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
 
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
+
+// ============================================================================
+// AML/KYC COMPLIANCE SYSTEM
+// ============================================================================
+
+// KYC Verifications (Customer identity verification and due diligence)
+export const kycVerifications = pgTable("kyc_verifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  
+  // Verification Status
+  status: varchar("status", { length: 50 }).notNull(), // 'pending', 'in_progress', 'verified', 'rejected', 'expired'
+  riskLevel: varchar("risk_level", { length: 20 }).notNull(), // 'low', 'medium', 'high', 'critical'
+  
+  // Verification Details
+  verificationMethod: varchar("verification_method", { length: 100 }), // 'lean_identity', 'manual_review', 'onfido', etc.
+  verifiedAt: timestamp("verified_at"),
+  verifiedBy: varchar("verified_by"), // userId
+  expiresAt: timestamp("expires_at"), // Re-verification date
+  
+  // Document Collection
+  documentsCollected: jsonb("documents_collected").$type<string[]>().default(sql`'[]'::jsonb`), // ['passport', 'trade_license', 'utility_bill']
+  documentsVerified: boolean("documents_verified").default(false),
+  
+  // Identity Verification (Lean Integration)
+  leanEntityId: varchar("lean_entity_id"), // Lean Technologies entity ID
+  leanVerificationStatus: varchar("lean_verification_status", { length: 50 }),
+  leanVerificationDate: timestamp("lean_verification_date"),
+  
+  // Enhanced Due Diligence (EDD)
+  eddRequired: boolean("edd_required").default(false),
+  eddCompleted: boolean("edd_completed").default(false),
+  eddCompletedAt: timestamp("edd_completed_at"),
+  eddNotes: text("edd_notes"),
+  
+  // Review & Notes
+  reviewNotes: text("review_notes"),
+  rejectionReason: text("rejection_reason"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("kyc_verifications_tenant_idx").on(table.tenantId),
+  index("kyc_verifications_customer_idx").on(table.customerId),
+  index("kyc_verifications_status_idx").on(table.status),
+  index("kyc_verifications_risk_level_idx").on(table.riskLevel),
+]);
+
+export const insertKYCVerificationSchema = createInsertSchema(kycVerifications).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertKYCVerification = z.infer<typeof insertKYCVerificationSchema>;
+export type KYCVerification = typeof kycVerifications.$inferSelect;
+
+// Beneficial Owners (Ultimate beneficial ownership tracking for corporate customers)
+export const beneficialOwners = pgTable("beneficial_owners", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  
+  // Owner Details
+  fullName: varchar("full_name", { length: 255 }).notNull(),
+  dateOfBirth: date("date_of_birth"),
+  nationality: varchar("nationality", { length: 100 }),
+  countryOfResidence: varchar("country_of_residence", { length: 100 }),
+  
+  // Ownership
+  ownershipPercentage: decimal("ownership_percentage", { precision: 5, scale: 2 }).notNull(), // e.g., 25.50
+  ownershipType: varchar("ownership_type", { length: 50 }), // 'direct', 'indirect', 'control'
+  
+  // Identification
+  identificationType: varchar("identification_type", { length: 50 }), // 'passport', 'national_id', 'drivers_license'
+  identificationNumber: varchar("identification_number", { length: 100 }),
+  identificationExpiryDate: date("identification_expiry_date"),
+  
+  // PEP Status
+  isPEP: boolean("is_pep").default(false),
+  pepCategory: varchar("pep_category", { length: 100 }), // 'senior_official', 'family_member', 'close_associate'
+  pepDetails: text("pep_details"),
+  
+  // Verification
+  verificationStatus: varchar("verification_status", { length: 50 }).default('pending'), // 'pending', 'verified', 'rejected'
+  verifiedAt: timestamp("verified_at"),
+  verifiedBy: varchar("verified_by"), // userId
+  
+  // Sanctions Screening
+  lastScreenedAt: timestamp("last_screened_at"),
+  screeningStatus: varchar("screening_status", { length: 50 }), // 'clear', 'potential_match', 'match'
+  
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("beneficial_owners_tenant_idx").on(table.tenantId),
+  index("beneficial_owners_customer_idx").on(table.customerId),
+  index("beneficial_owners_is_pep_idx").on(table.isPEP),
+]);
+
+export const insertBeneficialOwnerSchema = createInsertSchema(beneficialOwners, {
+  ownershipPercentage: decimalString,
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertBeneficialOwner = z.infer<typeof insertBeneficialOwnerSchema>;
+export type BeneficialOwner = typeof beneficialOwners.$inferSelect;
+
+// Customer Risk Profiles (Risk assessment and scoring for AML compliance)
+export const customerRiskProfiles = pgTable("customer_risk_profiles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  
+  // Risk Assessment
+  overallRiskLevel: varchar("overall_risk_level", { length: 20 }).notNull(), // 'low', 'medium', 'high', 'critical'
+  riskScore: integer("risk_score").notNull(), // 0-100
+  
+  // Risk Factors (each scored 0-20)
+  geographicRisk: integer("geographic_risk").default(0),
+  industryRisk: integer("industry_risk").default(0),
+  productServiceRisk: integer("product_service_risk").default(0),
+  transactionRisk: integer("transaction_risk").default(0),
+  customerTypeRisk: integer("customer_type_risk").default(0),
+  
+  // Risk Details
+  highRiskCountries: jsonb("high_risk_countries").$type<string[]>().default(sql`'[]'::jsonb`),
+  sanctionedCountryExposure: boolean("sanctioned_country_exposure").default(false),
+  cashIntensiveBusiness: boolean("cash_intensive_business").default(false),
+  politicallyExposed: boolean("politically_exposed").default(false),
+  
+  // Review Cycle
+  nextReviewDate: date("next_review_date").notNull(),
+  reviewFrequency: varchar("review_frequency", { length: 20 }).default('annual'), // 'monthly', 'quarterly', 'semi_annual', 'annual'
+  lastReviewedAt: timestamp("last_reviewed_at"),
+  lastReviewedBy: varchar("last_reviewed_by"), // userId
+  
+  // Approval
+  approvedBy: varchar("approved_by"), // userId
+  approvedAt: timestamp("approved_at"),
+  
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("customer_risk_profiles_tenant_idx").on(table.tenantId),
+  index("customer_risk_profiles_customer_idx").on(table.customerId),
+  index("customer_risk_profiles_risk_level_idx").on(table.overallRiskLevel),
+  index("customer_risk_profiles_next_review_idx").on(table.nextReviewDate),
+]);
+
+export const insertCustomerRiskProfileSchema = createInsertSchema(customerRiskProfiles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCustomerRiskProfile = z.infer<typeof insertCustomerRiskProfileSchema>;
+export type CustomerRiskProfile = typeof customerRiskProfiles.$inferSelect;
+
+// Sanctions Screenings (OFAC, UN, EU sanctions list screening)
+export const sanctionsScreenings = pgTable("sanctions_screenings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  
+  // Entity Being Screened
+  entityType: varchar("entity_type", { length: 50 }).notNull(), // 'customer', 'vendor', 'beneficial_owner'
+  entityId: varchar("entity_id", { length: 255 }).notNull(),
+  entityName: varchar("entity_name", { length: 255 }).notNull(),
+  
+  // Screening Details
+  screeningType: varchar("screening_type", { length: 50 }).notNull(), // 'onboarding', 'daily_batch', 'transaction', 'manual'
+  screeningDate: timestamp("screening_date").notNull().defaultNow(),
+  
+  // Results
+  overallResult: varchar("overall_result", { length: 50 }).notNull(), // 'clear', 'potential_match', 'match'
+  
+  // Sanctions Lists Checked
+  ofacResult: varchar("ofac_result", { length: 50 }), // 'clear', 'match'
+  ofacConfidence: decimal("ofac_confidence", { precision: 5, scale: 2 }),
+  ofacMatchDetails: jsonb("ofac_match_details"),
+  
+  unResult: varchar("un_result", { length: 50 }),
+  unConfidence: decimal("un_confidence", { precision: 5, scale: 2 }),
+  unMatchDetails: jsonb("un_match_details"),
+  
+  euResult: varchar("eu_result", { length: 50 }),
+  euConfidence: decimal("eu_confidence", { precision: 5, scale: 2 }),
+  euMatchDetails: jsonb("eu_match_details"),
+  
+  ukResult: varchar("uk_result", { length: 50 }),
+  ukConfidence: decimal("uk_confidence", { precision: 5, scale: 2 }),
+  ukMatchDetails: jsonb("uk_match_details"),
+  
+  // PEP Screening
+  pepResult: varchar("pep_result", { length: 50 }), // 'clear', 'match'
+  pepConfidence: decimal("pep_confidence", { precision: 5, scale: 2 }),
+  pepMatchDetails: jsonb("pep_match_details"),
+  
+  // Resolution
+  requiresReview: boolean("requires_review").default(false),
+  reviewStatus: varchar("review_status", { length: 50 }).default('pending'), // 'pending', 'false_positive', 'true_positive', 'escalated'
+  reviewedBy: varchar("reviewed_by"), // userId
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+  
+  // Actions Taken
+  actionTaken: varchar("action_taken", { length: 100 }), // 'approved', 'blocked', 'sar_filed', 'escalated'
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("sanctions_screenings_tenant_idx").on(table.tenantId),
+  index("sanctions_screenings_entity_idx").on(table.entityType, table.entityId),
+  index("sanctions_screenings_overall_result_idx").on(table.overallResult),
+  index("sanctions_screenings_requires_review_idx").on(table.requiresReview),
+]);
+
+export const insertSanctionsScreeningSchema = createInsertSchema(sanctionsScreenings, {
+  ofacConfidence: decimalString.optional(),
+  unConfidence: decimalString.optional(),
+  euConfidence: decimalString.optional(),
+  ukConfidence: decimalString.optional(),
+  pepConfidence: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertSanctionsScreening = z.infer<typeof insertSanctionsScreeningSchema>;
+export type SanctionsScreening = typeof sanctionsScreenings.$inferSelect;
+
+// Transaction Alerts (AML transaction monitoring alerts)
+export const transactionAlerts = pgTable("transaction_alerts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  customerId: varchar("customer_id").references(() => customers.id),
+  
+  // Alert Details
+  alertType: varchar("alert_type", { length: 100 }).notNull(), // 'threshold_exceeded', 'structuring', 'velocity', 'geographic_anomaly', 'round_amount'
+  severity: varchar("severity", { length: 20 }).notNull(), // 'low', 'medium', 'high', 'critical'
+  alertDate: timestamp("alert_date").notNull().defaultNow(),
+  
+  // Transaction Reference
+  transactionType: varchar("transaction_type", { length: 50 }), // 'invoice', 'payment', 'bank_transaction'
+  transactionId: varchar("transaction_id", { length: 255 }),
+  transactionAmount: decimal("transaction_amount", { precision: 15, scale: 2 }),
+  transactionCurrency: varchar("transaction_currency", { length: 3 }),
+  transactionDate: timestamp("transaction_date"),
+  
+  // Alert Rule Triggered
+  ruleId: varchar("rule_id"),
+  ruleName: varchar("rule_name", { length: 255 }),
+  ruleThreshold: jsonb("rule_threshold"),
+  
+  // Pattern Detection
+  patternDescription: text("pattern_description"),
+  relatedTransactions: jsonb("related_transactions").$type<string[]>().default(sql`'[]'::jsonb`),
+  
+  // Risk Score
+  riskScore: integer("risk_score"), // 0-100
+  riskFactors: jsonb("risk_factors"),
+  
+  // Review & Resolution
+  status: varchar("status", { length: 50 }).default('open'), // 'open', 'under_review', 'closed', 'escalated_to_sar'
+  assignedTo: varchar("assigned_to"), // userId
+  reviewedBy: varchar("reviewed_by"), // userId
+  reviewedAt: timestamp("reviewed_at"),
+  resolution: varchar("resolution", { length: 100 }), // 'false_positive', 'legitimate', 'suspicious', 'sar_filed'
+  resolutionNotes: text("resolution_notes"),
+  
+  // SAR Link
+  sarId: varchar("sar_id"), // Link to suspiciousActivityReports if SAR was filed
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("transaction_alerts_tenant_idx").on(table.tenantId),
+  index("transaction_alerts_customer_idx").on(table.customerId),
+  index("transaction_alerts_status_idx").on(table.status),
+  index("transaction_alerts_severity_idx").on(table.severity),
+  index("transaction_alerts_alert_date_idx").on(table.alertDate),
+]);
+
+export const insertTransactionAlertSchema = createInsertSchema(transactionAlerts, {
+  transactionAmount: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertTransactionAlert = z.infer<typeof insertTransactionAlertSchema>;
+export type TransactionAlert = typeof transactionAlerts.$inferSelect;
+
+// Suspicious Activity Reports (SAR filings to regulatory authorities)
+export const suspiciousActivityReports = pgTable("suspicious_activity_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  
+  // SAR Identification
+  sarNumber: varchar("sar_number", { length: 100 }).notNull().unique(), // Auto-generated
+  status: varchar("status", { length: 50 }).notNull().default('draft'), // 'draft', 'under_review', 'approved', 'filed', 'rejected'
+  
+  // Subject Information
+  subjectType: varchar("subject_type", { length: 50 }).notNull(), // 'customer', 'vendor', 'beneficial_owner', 'transaction'
+  subjectId: varchar("subject_id", { length: 255 }).notNull(),
+  subjectName: varchar("subject_name", { length: 255 }).notNull(),
+  customerId: varchar("customer_id").references(() => customers.id),
+  
+  // Suspicious Activity Details
+  activityType: varchar("activity_type", { length: 100 }).notNull(), // 'structuring', 'money_laundering', 'terrorism_financing', 'fraud'
+  activityDescription: text("activity_description").notNull(),
+  activityStartDate: date("activity_start_date"),
+  activityEndDate: date("activity_end_date"),
+  totalAmountInvolved: decimal("total_amount_involved", { precision: 15, scale: 2 }),
+  currencyCode: varchar("currency_code", { length: 3 }),
+  
+  // Supporting Evidence
+  relatedAlertIds: jsonb("related_alert_ids").$type<string[]>().default(sql`'[]'::jsonb`),
+  relatedTransactionIds: jsonb("related_transaction_ids").$type<string[]>().default(sql`'[]'::jsonb`),
+  attachments: jsonb("attachments").$type<string[]>().default(sql`'[]'::jsonb`),
+  
+  // Investigation
+  investigationNotes: text("investigation_notes"),
+  investigatorId: varchar("investigator_id"), // userId
+  investigationStartDate: timestamp("investigation_start_date"),
+  investigationCompletedDate: timestamp("investigation_completed_date"),
+  
+  // Approval Workflow
+  submittedBy: varchar("submitted_by"), // userId
+  submittedAt: timestamp("submitted_at"),
+  reviewedBy: varchar("reviewed_by"), // userId
+  reviewedAt: timestamp("reviewed_at"),
+  approvedBy: varchar("approved_by"), // userId (compliance officer)
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
+  
+  // Regulatory Filing
+  filedToAuthority: varchar("filed_to_authority", { length: 100 }), // 'UAE_FIU', 'KSA_SAMA', etc.
+  filedAt: timestamp("filed_at"),
+  filingConfirmation: varchar("filing_confirmation", { length: 255 }), // Confirmation number from authority
+  filingMethod: varchar("filing_method", { length: 50 }), // 'electronic', 'manual'
+  
+  // Follow-up
+  followUpRequired: boolean("follow_up_required").default(false),
+  followUpDate: date("follow_up_date"),
+  followUpNotes: text("follow_up_notes"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("suspicious_activity_reports_tenant_idx").on(table.tenantId),
+  index("suspicious_activity_reports_customer_idx").on(table.customerId),
+  index("suspicious_activity_reports_status_idx").on(table.status),
+  index("suspicious_activity_reports_sar_number_idx").on(table.sarNumber),
+]);
+
+export const insertSuspiciousActivityReportSchema = createInsertSchema(suspiciousActivityReports, {
+  totalAmountInvolved: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertSuspiciousActivityReport = z.infer<typeof insertSuspiciousActivityReportSchema>;
+export type SuspiciousActivityReport = typeof suspiciousActivityReports.$inferSelect;
+
+// Alert Rules (Configurable AML monitoring rules)
+export const alertRules = pgTable("alert_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  
+  ruleName: varchar("rule_name", { length: 255 }).notNull(),
+  ruleType: varchar("rule_type", { length: 100 }).notNull(), // 'threshold', 'velocity', 'pattern', 'geographic'
+  description: text("description"),
+  
+  // Rule Configuration
+  isActive: boolean("is_active").default(true),
+  severity: varchar("severity", { length: 20 }).notNull(), // 'low', 'medium', 'high', 'critical'
+  
+  // Threshold Configuration
+  thresholdAmount: decimal("threshold_amount", { precision: 15, scale: 2 }),
+  thresholdCurrency: varchar("threshold_currency", { length: 3 }),
+  thresholdPeriod: varchar("threshold_period", { length: 50 }), // 'transaction', 'daily', 'weekly', 'monthly'
+  
+  // Advanced Configuration
+  conditions: jsonb("conditions"), // Complex rule conditions
+  
+  createdBy: varchar("created_by"), // userId
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("alert_rules_tenant_idx").on(table.tenantId),
+  index("alert_rules_is_active_idx").on(table.isActive),
+  index("alert_rules_rule_type_idx").on(table.ruleType),
+]);
+
+export const insertAlertRuleSchema = createInsertSchema(alertRules, {
+  thresholdAmount: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAlertRule = z.infer<typeof insertAlertRuleSchema>;
+export type AlertRule = typeof alertRules.$inferSelect;
 
 // ============================================================================
 // PROJECT MANAGEMENT & TIME TRACKING

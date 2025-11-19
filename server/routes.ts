@@ -38,6 +38,9 @@ import { getAccountBalance, updateHistoricalBalances } from './accounting/histor
 import { submitJournalEntryForApproval, approveJournalEntryStep, rejectJournalEntry, autoPostApprovedEntry } from './accounting/workflow-engine';
 import { UAEPeppolService } from './e-invoicing/uae-peppol/peppol-service';
 import { KSAZATCAService } from './e-invoicing/ksa-zatca/zatca-service';
+import { RiskScoringService } from './compliance/risk-scoring';
+import { SanctionsScreeningService } from './compliance/sanctions-screening';
+import { TransactionMonitoringService } from './compliance/transaction-monitoring';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -121,6 +124,11 @@ const openai = process.env.OPENAI_API_KEY
 
 // Initialize SOX-compliant audit logger
 const auditLogger = new AuditLogger(storage);
+
+// Initialize compliance services
+const riskScoringService = new RiskScoringService();
+const sanctionsScreeningService = new SanctionsScreeningService(storage);
+const transactionMonitoringService = new TransactionMonitoringService(storage);
 
 // Schema for send-email endpoint
 const sendEmailSchema = z.object({
@@ -1793,6 +1801,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wasSuccessful: true,
       }).catch(err => console.error('Audit log failed:', err));
       
+      // CRITICAL WIRING: Monitor transaction for AML compliance
+      if (invoice.invoice.total && parseFloat(invoice.invoice.total) > 0) {
+        await transactionMonitoringService.monitorTransaction(req.tenantId!, {
+          id: invoice.invoice.id,
+          type: 'invoice',
+          customerId: invoice.invoice.customerId,
+          amount: parseFloat(invoice.invoice.total),
+          currency: invoice.invoice.currency || 'USD',
+          date: invoice.invoice.date ? new Date(invoice.invoice.date) : new Date(),
+        }).catch(err => console.error('[TransactionMonitoring] Failed:', err));
+      }
+      
       res.json(invoice);
     } catch (error: any) {
       console.error("Error creating invoice:", error);
@@ -3356,6 +3376,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: req.get('user-agent'),
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
+      
+      // CRITICAL WIRING: Monitor transaction for AML compliance
+      if (result.payment.amount) {
+        await transactionMonitoringService.monitorTransaction(req.tenantId!, {
+          id: result.payment.id,
+          type: 'payment',
+          customerId: result.payment.customerId,
+          amount: parseFloat(result.payment.amount),
+          currency: result.payment.currency || 'USD',
+          date: result.payment.paymentDate ? new Date(result.payment.paymentDate) : new Date(),
+        }).catch(err => console.error('[TransactionMonitoring] Failed:', err));
+      }
       
       res.status(201).json(result);
     } catch (error: any) {
@@ -6116,6 +6148,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: req.get('user-agent'),
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
+
+      // CRITICAL WIRING: Monitor transaction for AML compliance
+      if (result.payment.amount) {
+        await transactionMonitoringService.monitorTransaction(req.tenantId!, {
+          id: result.payment.id,
+          type: 'payment',
+          customerId: result.payment.customerId || 'unknown',
+          amount: parseFloat(result.payment.amount),
+          currency: result.payment.currency || 'USD',
+          date: result.payment.date ? new Date(result.payment.date) : new Date(),
+        }).catch(err => console.error('[TransactionMonitoring] Failed:', err));
+      }
 
       res.json(result);
     } catch (error: any) {
@@ -9481,6 +9525,412 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error fetching audit logs:", error);
       res.status(500).json({ message: error.message || "Failed to fetch audit logs" });
+    }
+  });
+
+  // ==========================================
+  // AML/KYC COMPLIANCE ROUTES
+  // ==========================================
+
+  // ----- KYC VERIFICATIONS -----
+  app.get('/api/kyc-verifications', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.read'), async (req: any, res) => {
+    try {
+      const verifications = await storage.getKYCVerifications(req.tenantId);
+      res.json(verifications);
+    } catch (error: any) {
+      console.error('[KYC] Get verifications error:', error);
+      res.status(500).json({ message: 'Failed to fetch KYC verifications' });
+    }
+  });
+
+  app.post('/api/kyc-verifications', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.manage'), async (req: any, res) => {
+    try {
+      const data = { ...req.body, tenantId: req.tenantId };
+      const verification = await storage.createKYCVerification(data);
+      res.status(201).json(verification);
+    } catch (error: any) {
+      console.error('[KYC] Create verification error:', error);
+      res.status(400).json({ message: error.message || 'Failed to create KYC verification' });
+    }
+  });
+
+  app.patch('/api/kyc-verifications/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const verification = await storage.updateKYCVerification(id, req.tenantId, req.body);
+      res.json(verification);
+    } catch (error: any) {
+      console.error('[KYC] Update verification error:', error);
+      res.status(400).json({ message: error.message || 'Failed to update KYC verification' });
+    }
+  });
+
+  // ----- BENEFICIAL OWNERS -----
+  app.get('/api/customers/:customerId/beneficial-owners', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.read'), async (req: any, res) => {
+    try {
+      const { customerId } = req.params;
+      const owners = await storage.getBeneficialOwners(customerId, req.tenantId);
+      res.json(owners);
+    } catch (error: any) {
+      console.error('[BeneficialOwners] Get owners error:', error);
+      res.status(500).json({ message: 'Failed to fetch beneficial owners' });
+    }
+  });
+
+  app.post('/api/beneficial-owners', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.manage'), async (req: any, res) => {
+    try {
+      const data = { ...req.body, tenantId: req.tenantId };
+      const owner = await storage.createBeneficialOwner(data);
+      
+      // Automatically screen new beneficial owner
+      await sanctionsScreeningService.screenEntity(req.tenantId, {
+        entityType: 'beneficial_owner',
+        entityId: owner.id,
+        entityName: owner.fullName,
+        dateOfBirth: owner.dateOfBirth?.toISOString(),
+        nationality: owner.nationality || undefined,
+        countryOfResidence: owner.countryOfResidence || undefined,
+      }, 'onboarding');
+      
+      // CRITICAL: Check 25% ownership threshold compliance
+      const allOwners = await storage.getBeneficialOwners(owner.customerId, req.tenantId);
+      const totalOwnership = allOwners.reduce((sum, o) => sum + parseFloat(o.ownershipPercentage || '0'), 0);
+      const ownersAbove25 = allOwners.filter(o => parseFloat(o.ownershipPercentage) >= 25);
+      
+      // Log compliance status
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'beneficial_owner',
+        entityId: owner.id,
+        changes: {
+          before: null,
+          after: {
+            ...owner,
+            _complianceCheck: {
+              totalOwnership,
+              ownersAbove25Percent: ownersAbove25.length,
+              meetsThreshold: ownersAbove25.length > 0,
+            },
+          },
+        },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
+      // Return owner with compliance metadata
+      res.status(201).json({
+        ...owner,
+        _complianceMetadata: {
+          totalOwnership,
+          ownersAbove25Percent: ownersAbove25.length,
+          requiresAdditionalOwners: ownersAbove25.length === 0 && totalOwnership < 75,
+        },
+      });
+    } catch (error: any) {
+      console.error('[BeneficialOwners] Create owner error:', error);
+      res.status(400).json({ message: error.message || 'Failed to create beneficial owner' });
+    }
+  });
+
+  app.patch('/api/beneficial-owners/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const owner = await storage.updateBeneficialOwner(id, req.tenantId, req.body);
+      res.json(owner);
+    } catch (error: any) {
+      console.error('[BeneficialOwners] Update owner error:', error);
+      res.status(400).json({ message: error.message || 'Failed to update beneficial owner' });
+    }
+  });
+
+  app.delete('/api/beneficial-owners/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteBeneficialOwner(id, req.tenantId);
+      res.json({ message: 'Beneficial owner deleted successfully' });
+    } catch (error: any) {
+      console.error('[BeneficialOwners] Delete owner error:', error);
+      res.status(400).json({ message: error.message || 'Failed to delete beneficial owner' });
+    }
+  });
+
+  // ----- CUSTOMER RISK PROFILES -----
+  app.get('/api/customers/:customerId/risk-profile', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.read'), async (req: any, res) => {
+    try {
+      const { customerId } = req.params;
+      const profile = await storage.getCustomerRiskProfile(customerId, req.tenantId);
+      res.json(profile);
+    } catch (error: any) {
+      console.error('[RiskProfile] Get profile error:', error);
+      res.status(500).json({ message: 'Failed to fetch risk profile' });
+    }
+  });
+
+  app.post('/api/customers/:customerId/risk-profile', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.manage'), async (req: any, res) => {
+    try {
+      const { customerId } = req.params;
+      
+      // Get customer for risk assessment
+      const customer = await storage.getCustomerById(customerId, req.tenantId);
+      if (!customer) {
+        return res.status(404).json({ message: 'Customer not found' });
+      }
+      
+      // Calculate risk score
+      const assessment = riskScoringService.calculateCustomerRiskScore(customer);
+      const nextReviewDate = riskScoringService.getNextReviewDate(assessment.riskLevel);
+      const reviewFrequency = riskScoringService.getReviewFrequency(assessment.riskLevel);
+      
+      const data = {
+        tenantId: req.tenantId,
+        customerId,
+        overallRiskLevel: assessment.riskLevel,
+        riskScore: assessment.riskScore,
+        geographicRisk: assessment.factors.geographicRisk,
+        industryRisk: assessment.factors.industryRisk,
+        productServiceRisk: assessment.factors.productServiceRisk,
+        transactionRisk: assessment.factors.transactionRisk,
+        customerTypeRisk: assessment.factors.customerTypeRisk,
+        nextReviewDate: nextReviewDate.toISOString().split('T')[0],
+        reviewFrequency,
+        ...req.body,
+      };
+      
+      const profile = await storage.createCustomerRiskProfile(data);
+      
+      // CRITICAL WIRING: Determine if EDD is required
+      const beneficialOwners = await storage.getBeneficialOwners(customerId, req.tenantId);
+      const eddRequired = riskScoringService.isEDDRequired(customer, profile, beneficialOwners);
+      
+      // CRITICAL WIRING: Create or update KYC verification with EDD flag
+      let kycVerification = (await storage.getKYCVerifications(req.tenantId, { customerId }))[0];
+      
+      if (kycVerification) {
+        // Update existing KYC verification
+        await storage.updateKYCVerification(kycVerification.id, req.tenantId, {
+          eddRequired,
+          riskLevel: assessment.riskLevel,
+        });
+      } else {
+        // Create new KYC verification
+        await storage.createKYCVerification({
+          tenantId: req.tenantId,
+          customerId,
+          status: 'pending',
+          riskLevel: assessment.riskLevel,
+          eddRequired,
+          documentsCollected: [],
+          documentsVerified: false,
+          eddCompleted: false,
+        });
+      }
+      
+      res.status(201).json({
+        ...profile,
+        _eddRequired: eddRequired,
+      });
+    } catch (error: any) {
+      console.error('[RiskProfile] Create profile error:', error);
+      res.status(400).json({ message: error.message || 'Failed to create risk profile' });
+    }
+  });
+
+  app.patch('/api/customer-risk-profiles/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.kyc.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const profile = await storage.updateCustomerRiskProfile(id, req.tenantId, req.body);
+      res.json(profile);
+    } catch (error: any) {
+      console.error('[RiskProfile] Update profile error:', error);
+      res.status(400).json({ message: error.message || 'Failed to update risk profile' });
+    }
+  });
+
+  // ----- SANCTIONS SCREENINGS -----
+  app.get('/api/sanctions-screenings', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.sanctions.read'), async (req: any, res) => {
+    try {
+      const screenings = await storage.getSanctionsScreenings(req.tenantId, req.query);
+      res.json(screenings);
+    } catch (error: any) {
+      console.error('[Sanctions] Get screenings error:', error);
+      res.status(500).json({ message: 'Failed to fetch sanctions screenings' });
+    }
+  });
+
+  app.post('/api/sanctions-screenings/screen-customer/:customerId', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.sanctions.manage'), async (req: any, res) => {
+    try {
+      const { customerId } = req.params;
+      const customer = await storage.getCustomerById(customerId, req.tenantId);
+      
+      if (!customer) {
+        return res.status(404).json({ message: 'Customer not found' });
+      }
+      
+      const result = await sanctionsScreeningService.screenEntity(req.tenantId, {
+        entityType: 'customer',
+        entityId: customer.id,
+        entityName: customer.name,
+      }, 'manual');
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error('[Sanctions] Screen customer error:', error);
+      res.status(500).json({ message: 'Failed to screen customer' });
+    }
+  });
+
+  app.patch('/api/sanctions-screenings/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.sanctions.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const screening = await storage.updateSanctionsScreening(id, req.tenantId, req.body);
+      res.json(screening);
+    } catch (error: any) {
+      console.error('[Sanctions] Update screening error:', error);
+      res.status(400).json({ message: error.message || 'Failed to update sanctions screening' });
+    }
+  });
+
+  // ----- TRANSACTION ALERTS -----
+  app.get('/api/transaction-alerts', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.monitoring.read'), async (req: any, res) => {
+    try {
+      const allRecords = await storage.getTransactionAlerts(req.tenantId, req.query);
+      
+      // Filter out 'monitored' records - only show real alerts
+      const alerts = allRecords.filter(record => record.status !== 'closed' || record.alertType !== 'transaction_recorded');
+      
+      res.json(alerts);
+    } catch (error: any) {
+      console.error('[Alerts] Get alerts error:', error);
+      res.status(500).json({ message: 'Failed to fetch transaction alerts' });
+    }
+  });
+
+  app.patch('/api/transaction-alerts/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.monitoring.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const alert = await storage.updateTransactionAlert(id, req.tenantId, req.body);
+      res.json(alert);
+    } catch (error: any) {
+      console.error('[Alerts] Update alert error:', error);
+      res.status(400).json({ message: error.message || 'Failed to update transaction alert' });
+    }
+  });
+
+  // Escalate alert to SAR
+  app.post('/api/transaction-alerts/:id/escalate', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.sar.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { activityDescription } = req.body;
+      
+      if (!activityDescription) {
+        return res.status(400).json({ message: 'Activity description is required' });
+      }
+      
+      const sar = await transactionMonitoringService.escalateToSAR(
+        req.tenantId,
+        id,
+        req.user!.claims.sub,
+        activityDescription
+      );
+      
+      res.status(201).json(sar);
+    } catch (error: any) {
+      console.error('[Alerts] Escalate to SAR error:', error);
+      res.status(400).json({ message: error.message || 'Failed to escalate alert to SAR' });
+    }
+  });
+
+  // ----- SUSPICIOUS ACTIVITY REPORTS (SARs) -----
+  app.get('/api/suspicious-activity-reports', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.sar.read'), async (req: any, res) => {
+    try {
+      const reports = await storage.getSuspiciousActivityReports(req.tenantId, req.query);
+      res.json(reports);
+    } catch (error: any) {
+      console.error('[SAR] Get reports error:', error);
+      res.status(500).json({ message: 'Failed to fetch SARs' });
+    }
+  });
+
+  app.post('/api/suspicious-activity-reports', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.sar.manage'), async (req: any, res) => {
+    try {
+      // Generate SAR number
+      const sarNumber = `SAR-${req.tenantId.slice(0, 8)}-${Date.now()}`;
+      
+      const data = {
+        ...req.body,
+        tenantId: req.tenantId,
+        sarNumber,
+        submittedBy: req.user!.claims.sub,
+        submittedAt: new Date(),
+      };
+      
+      const sar = await storage.createSuspiciousActivityReport(data);
+      res.status(201).json(sar);
+    } catch (error: any) {
+      console.error('[SAR] Create report error:', error);
+      res.status(400).json({ message: error.message || 'Failed to create SAR' });
+    }
+  });
+
+  app.patch('/api/suspicious-activity-reports/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.sar.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const sar = await storage.updateSuspiciousActivityReport(id, req.tenantId, req.body);
+      res.json(sar);
+    } catch (error: any) {
+      console.error('[SAR] Update report error:', error);
+      res.status(400).json({ message: error.message || 'Failed to update SAR' });
+    }
+  });
+
+  // ----- ALERT RULES -----
+  app.get('/api/alert-rules', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.monitoring.manage'), async (req: any, res) => {
+    try {
+      const rules = await storage.getAlertRules(req.tenantId);
+      res.json(rules);
+    } catch (error: any) {
+      console.error('[AlertRules] Get rules error:', error);
+      res.status(500).json({ message: 'Failed to fetch alert rules' });
+    }
+  });
+
+  app.post('/api/alert-rules', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.monitoring.manage'), async (req: any, res) => {
+    try {
+      const data = {
+        ...req.body,
+        tenantId: req.tenantId,
+        createdBy: req.user!.claims.sub,
+      };
+      const rule = await storage.createAlertRule(data);
+      res.status(201).json(rule);
+    } catch (error: any) {
+      console.error('[AlertRules] Create rule error:', error);
+      res.status(400).json({ message: error.message || 'Failed to create alert rule' });
+    }
+  });
+
+  app.patch('/api/alert-rules/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.monitoring.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const rule = await storage.updateAlertRule(id, req.tenantId, req.body);
+      res.json(rule);
+    } catch (error: any) {
+      console.error('[AlertRules] Update rule error:', error);
+      res.status(400).json({ message: error.message || 'Failed to update alert rule' });
+    }
+  });
+
+  app.delete('/api/alert-rules/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('compliance.monitoring.manage'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteAlertRule(id, req.tenantId);
+      res.json({ message: 'Alert rule deleted successfully' });
+    } catch (error: any) {
+      console.error('[AlertRules] Delete rule error:', error);
+      res.status(400).json({ message: error.message || 'Failed to delete alert rule' });
     }
   });
 
