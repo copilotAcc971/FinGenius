@@ -436,14 +436,14 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
                   <div className="col-span-12 md:col-span-2">
                     <FormLabel>Item</FormLabel>
                     <Select
-                      value={lineItem.itemId}
-                      onValueChange={(value) => updateLineItem(index, 'itemId', value)}
+                      value={lineItem.itemId || "none"}
+                      onValueChange={(value) => updateLineItem(index, 'itemId', value === "none" ? "" : value)}
                     >
                       <SelectTrigger data-testid={`select-item-${index}`}>
                         <SelectValue placeholder="Select" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         {items?.map((item) => (
                           <SelectItem key={item.id} value={item.id}>
                             {item.name}
@@ -499,14 +499,14 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
                   <div className="col-span-5 md:col-span-1">
                     <FormLabel>Tax</FormLabel>
                     <Select
-                      value={lineItem.taxId}
-                      onValueChange={(value) => updateLineItem(index, 'taxId', value)}
+                      value={lineItem.taxId || "none"}
+                      onValueChange={(value) => updateLineItem(index, 'taxId', value === "none" ? "" : value)}
                     >
                       <SelectTrigger data-testid={`select-tax-${index}`}>
                         <SelectValue placeholder="Tax" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         {taxes?.map((tax) => (
                           <SelectItem key={tax.id} value={tax.id}>
                             {tax.name}
