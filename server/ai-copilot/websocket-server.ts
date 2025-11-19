@@ -36,9 +36,15 @@ async function getUserFromSession(sessionId: string): Promise<{ userId: string }
   }
 }
 
-async function getTenantFromHeaders(req: IncomingMessage): Promise<string | null> {
-  const tenantId = req.headers['x-tenant-id'] as string;
-  return tenantId || null;
+async function getTenantFromQuery(req: IncomingMessage): Promise<string | null> {
+  try {
+    if (!req.url) return null;
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    return url.searchParams.get('tenantId');
+  } catch (error) {
+    console.error('[WebSocket] Error parsing tenant from query:', error);
+    return null;
+  }
 }
 
 export function createAICopilotWebSocketServer(server: HTTPServer): WebSocketServer {
@@ -50,65 +56,68 @@ export function createAICopilotWebSocketServer(server: HTTPServer): WebSocketSer
   console.log('[AI Copilot] WebSocket server initialized on /ws/ai-copilot');
 
   wss.on('connection', async (ws: ExtendedWebSocket, req: IncomingMessage) => {
-    console.log('[AI Copilot] New connection attempt');
-
-    const cookies = parseCookie(req.headers.cookie || '');
-    const sessionId = cookies['connect.sid']?.split('s:')[1]?.split('.')[0];
-
-    if (!sessionId) {
-      console.error('[AI Copilot] No session cookie found');
-      ws.close(1008, 'Authentication required');
-      return;
-    }
-
-    const user = await getUserFromSession(sessionId);
-    if (!user) {
-      console.error('[AI Copilot] Invalid session');
-      ws.close(1008, 'Invalid session');
-      return;
-    }
-
-    const tenantId = await getTenantFromHeaders(req);
-    if (!tenantId) {
-      console.error('[AI Copilot] No tenant ID provided');
-      ws.close(1008, 'Tenant context required');
-      return;
-    }
-
-    const isMember = await storage.isTenantMember(tenantId, user.userId);
-    if (!isMember) {
-      console.error('[AI Copilot] User not member of tenant');
-      ws.close(1008, 'Access denied');
-      return;
-    }
-
-    ws.userId = user.userId;
-    ws.tenantId = tenantId;
-    ws.isAlive = true;
-
-    console.log(`[AI Copilot] Authenticated connection for user ${user.userId} in tenant ${tenantId}`);
-
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      console.error('[AI Copilot] OPENAI_API_KEY not configured');
-      ws.send(JSON.stringify({
-        type: 'error',
-        error: 'AI service not configured'
-      }));
-      ws.close(1011, 'Service unavailable');
-      return;
-    }
-
-    const realtimeClient = new RealtimeClient({
-      apiKey,
-      instructions: systemInstructions,
-      tools: accountingFunctions,
-      temperature: 0.8
-    });
-
-    ws.realtimeClient = realtimeClient;
-
     try {
+      console.log('[AI Copilot] New connection attempt');
+
+      // Authenticate user from session cookie
+      const cookies = parseCookie(req.headers.cookie || '');
+      const sessionId = cookies['connect.sid']?.split('s:')[1]?.split('.')[0];
+
+      if (!sessionId) {
+        console.error('[AI Copilot] No session cookie found');
+        ws.close(1008, 'Authentication required');
+        return;
+      }
+
+      const user = await getUserFromSession(sessionId);
+      if (!user) {
+        console.error('[AI Copilot] Invalid session');
+        ws.close(1008, 'Invalid session');
+        return;
+      }
+
+      // Get tenant ID from query parameter
+      const tenantId = await getTenantFromQuery(req);
+      if (!tenantId) {
+        console.error('[AI Copilot] No tenant ID provided in query string');
+        ws.close(1008, 'Tenant context required');
+        return;
+      }
+
+      // Verify user has access to this tenant
+      const isMember = await storage.isTenantMember(tenantId, user.userId);
+      if (!isMember) {
+        console.error('[AI Copilot] User not member of tenant');
+        ws.close(1003, 'Not authorized for this tenant');
+        return;
+      }
+
+      ws.userId = user.userId;
+      ws.tenantId = tenantId;
+      ws.isAlive = true;
+
+      console.log(`[AI Copilot] WebSocket connected: userId=${user.userId}, tenantId=${tenantId}`);
+
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        console.error('[AI Copilot] OPENAI_API_KEY not configured');
+        ws.send(JSON.stringify({
+          type: 'error',
+          error: 'AI service not configured'
+        }));
+        ws.close(1011, 'Service unavailable');
+        return;
+      }
+
+      const realtimeClient = new RealtimeClient({
+        apiKey,
+        instructions: systemInstructions,
+        tools: accountingFunctions,
+        temperature: 0.8
+      });
+
+      ws.realtimeClient = realtimeClient;
+
       await realtimeClient.connect();
       
       ws.send(JSON.stringify({
@@ -194,17 +203,7 @@ export function createAICopilotWebSocketServer(server: HTTPServer): WebSocketSer
         ws.close(1000, 'AI service disconnected');
       });
 
-    } catch (error) {
-      console.error('[AI Copilot] Failed to connect to OpenAI:', error);
-      ws.send(JSON.stringify({
-        type: 'error',
-        error: 'Failed to connect to AI service'
-      }));
-      ws.close(1011, 'Service unavailable');
-      return;
-    }
-
-    ws.on('message', async (data: Buffer) => {
+      ws.on('message', async (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString());
 
@@ -273,12 +272,17 @@ export function createAICopilotWebSocketServer(server: HTTPServer): WebSocketSer
       }
     });
 
-    ws.on('error', (error) => {
-      console.error('[AI Copilot] WebSocket error:', error);
-      if (ws.realtimeClient) {
-        ws.realtimeClient.disconnect();
-      }
-    });
+      ws.on('error', (error) => {
+        console.error('[AI Copilot] WebSocket error:', error);
+        if (ws.realtimeClient) {
+          ws.realtimeClient.disconnect();
+        }
+      });
+
+    } catch (error) {
+      console.error('[AI Copilot] Connection error:', error);
+      ws.close(1011, 'Internal server error');
+    }
   });
 
   const heartbeatInterval = setInterval(() => {

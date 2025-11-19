@@ -16,6 +16,7 @@ import { RBACProvider } from "@/shared/contexts/rbac-context";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { TenantGate } from "@/shared/components/common/TenantGate";
 import { GlobalTenantEvents } from "@/shared/components/common/GlobalTenantEvents";
+import { AICopilotWidget } from "@/shared/components/ai-copilot/ai-copilot-widget";
 
 import NotFound from "@/shared/pages/not-found-page";
 import Landing from "@/features/auth/pages/landing-page";
@@ -141,6 +142,8 @@ function AppContent() {
               </div>
             </div>
           </SidebarProvider>
+          {/* AI Copilot Widget - Always available for authenticated users */}
+          <AICopilotWidget />
         </RBACProvider>
       </TenantGate>
       <Toaster />

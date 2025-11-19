@@ -35,6 +35,7 @@ import { ValidationError as AccountingValidationError, NotFoundError, Authorizat
 import { withTransaction } from './accounting/service';
 import { getAccountBalance, updateHistoricalBalances } from './accounting/historical-balance-service';
 import { submitJournalEntryForApproval, approveJournalEntryStep, rejectJournalEntry, autoPostApprovedEntry } from './accounting/workflow-engine';
+import { UAEPeppolService } from './e-invoicing/uae-peppol/peppol-service';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -2194,6 +2195,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error generating PDF:', error);
       res.status(500).json({ error: error.message || 'Failed to generate PDF' });
+    }
+  });
+
+  // ===== UAE PEPPOL E-INVOICING =====
+
+  // Prepare invoice for Peppol transmission (generate UBL XML & QR code)
+  app.post('/api/invoices/:id/peppol/prepare', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.update'), async (req: any, res) => {
+    const tenantId = req.tenantId!;
+    const { id } = req.params;
+    
+    try {
+      const peppolService = new UAEPeppolService(storage);
+      const result = await peppolService.prepareInvoice(tenantId, id);
+      
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json({ message: result.error });
+      }
+    } catch (error: any) {
+      console.error('[Peppol API] Prepare error:', error);
+      res.status(500).json({ message: error.message || 'Failed to prepare invoice for Peppol' });
+    }
+  });
+
+  // Transmit invoice to Peppol network via ASP
+  app.post('/api/invoices/:id/peppol/transmit', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.update'), async (req: any, res) => {
+    const tenantId = req.tenantId!;
+    const { id } = req.params;
+    
+    try {
+      const peppolService = new UAEPeppolService(storage);
+      const result = await peppolService.transmitInvoice(tenantId, id);
+      
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json({ message: result.error });
+      }
+    } catch (error: any) {
+      console.error('[Peppol API] Transmit error:', error);
+      res.status(500).json({ message: error.message || 'Failed to transmit invoice to Peppol network' });
+    }
+  });
+
+  // Get Peppol status for invoice
+  app.get('/api/invoices/:id/peppol/status', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.read'), async (req: any, res) => {
+    const tenantId = req.tenantId!;
+    const { id } = req.params;
+    
+    try {
+      const peppolService = new UAEPeppolService(storage);
+      const status = await peppolService.getStatus(tenantId, id);
+      
+      if (!status) {
+        return res.status(404).json({ message: 'Invoice not found' });
+      }
+      
+      res.json(status);
+    } catch (error: any) {
+      console.error('[Peppol API] Status check error:', error);
+      res.status(500).json({ message: error.message || 'Failed to get Peppol status' });
     }
   });
 

@@ -29,11 +29,15 @@ export class CopilotWebSocketClient {
   }
 
   async connect(tenantId: string): Promise<void> {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required');
+    }
+
     this.tenantId = tenantId;
 
     return new Promise((resolve, reject) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/ai-copilot`;
+      const wsUrl = `${protocol}//${window.location.host}/ws/ai-copilot?tenantId=${encodeURIComponent(tenantId)}`;
 
       console.log('[CopilotWebSocket] Connecting to:', wsUrl);
 
@@ -78,15 +82,31 @@ export class CopilotWebSocketClient {
         reject(error);
       };
 
-      this.ws.onclose = () => {
-        console.log('[CopilotWebSocket] Disconnected');
+      this.ws.onclose = (event) => {
+        console.log('[CopilotWebSocket] Disconnected:', event.code, event.reason);
         this.audioManager.stopRecording();
 
         if (this.onDisconnected) {
           this.onDisconnected();
         }
 
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        // Show user-friendly error messages for specific close codes
+        if (event.code === 1008) {
+          if (this.onError) {
+            this.onError(event.reason || 'Authentication failed');
+          }
+        } else if (event.code === 1003) {
+          if (this.onError) {
+            this.onError('Not authorized for this organization');
+          }
+        } else if (event.code === 1011) {
+          if (this.onError) {
+            this.onError('Internal server error');
+          }
+        }
+
+        // Attempt reconnection for non-auth errors
+        if (event.code !== 1008 && event.code !== 1003 && this.reconnectAttempts < this.maxReconnectAttempts) {
           this.reconnectAttempts++;
           console.log(`[CopilotWebSocket] Reconnecting... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
           
