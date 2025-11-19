@@ -265,14 +265,17 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Parent Account</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select 
+                        onValueChange={(value) => field.onChange(value === "none" ? "" : value)} 
+                        value={field.value || "none"}
+                      >
                         <FormControl>
                           <SelectTrigger data-testid="select-parent-account">
                             <SelectValue placeholder="Select parent account (optional)" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="" data-testid="select-option-no-parent">No Parent</SelectItem>
+                          <SelectItem value="none" data-testid="select-option-no-parent">No Parent</SelectItem>
                           {availableParentAccounts.map((parentAccount) => (
                             <SelectItem
                               key={parentAccount.id}
