@@ -1,102 +1,257 @@
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Search, MoreHorizontal, Edit, Trash2 } from "lucide-react";
+import { Plus, Edit, Trash2, AlertTriangle, Package2 } from "lucide-react";
+import { Link } from "wouter";
 import { Button } from "@/shared/components/ui/button";
-import { Input } from "@/shared/components/ui/input";
 import { Badge } from "@/shared/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/shared/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/shared/components/ui/dropdown-menu";
-import { TableSkeleton } from "@/shared/components/ui/skeleton";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { useToast } from "@/shared/hooks/use-toast";
-import { useAuth } from "@/shared/hooks/useAuth";
+import { useRBAC } from "@/shared/contexts/rbac-context";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
-import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
-import { itemColumns, renderColgroup, getColumnClassName } from "@/shared/lib/utils/table-columns";
+import { AdvancedDataTable } from "@/shared/components/tables/advanced-data-table";
+import type { AdvancedColumnDef, BulkAction } from "@/shared/lib/utils/advanced-table-types";
 import type { Item } from "@shared/schema";
-import { ItemDialog } from "@/features/items/components/item-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/shared/components/ui/alert-dialog";
 
-export default function Items() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [showDialog, setShowDialog] = useState(false);
-  const [editingItem, setEditingItem] = useState<Item | null>(null);
+export default function ItemsPage() {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
   const { currentTenant } = useTenant();
   const { toast } = useToast();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
-
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
-        variant: "destructive",
-      });
-      setTimeout(() => {
-        window.location.href = "/api/login";
-      }, 500);
-    }
-  }, [isAuthenticated, authLoading, toast]);
+  const { hasPermission } = useRBAC();
 
   const { data: items = [], isLoading } = useQuery<Item[]>({
     queryKey: ["/api/items", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
 
+  const canCreate = hasPermission("items.create");
+  const canUpdate = hasPermission("items.update");
+  const canDelete = hasPermission("items.delete");
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      if (!canDelete) {
+        throw new Error("You don't have permission to delete items");
+      }
       if (!currentTenant?.id) throw new Error("No tenant selected");
       await apiRequest(`/api/items/${id}?tenantId=${currentTenant.id}`, "DELETE", {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/items", { tenantId: currentTenant?.id }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/items"] });
       toast({
         title: "Item deleted",
         description: "Item has been removed successfully.",
       });
+      setDeleteDialogOpen(false);
+      setItemToDelete(null);
     },
     onError: (error: Error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
-        return;
-      }
       toast({
         title: "Error",
-        description: "Failed to delete item.",
+        description: error.message || "Failed to delete item.",
         variant: "destructive",
       });
     },
   });
 
-  const filteredItems = items.filter((item) =>
-    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.sku?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.type.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const formatCurrency = (amount: string) => {
+  const formatCurrency = (amount: string | null) => {
+    if (!amount) return "-";
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
     }).format(parseFloat(amount));
+  };
+
+  const formatQuantity = (quantity: string | null) => {
+    if (!quantity) return "0";
+    return parseFloat(quantity).toFixed(2);
+  };
+
+  const columns: AdvancedColumnDef<Item>[] = useMemo(() => [
+    {
+      key: "sku",
+      header: "SKU",
+      accessorKey: "sku",
+      cell: ({ row }) => (
+        <span className="font-mono text-sm">{row.original.sku || "-"}</span>
+      ),
+      enableSorting: true,
+      width: "120px",
+    },
+    {
+      key: "name",
+      header: "Name",
+      accessorKey: "name",
+      cell: ({ row }) => (
+        <div>
+          <div className="font-medium">{row.original.name}</div>
+          {row.original.description && (
+            <div className="text-sm text-muted-foreground truncate max-w-xs">
+              {row.original.description}
+            </div>
+          )}
+        </div>
+      ),
+      enableSorting: true,
+      width: "250px",
+    },
+    {
+      key: "type",
+      header: "Type",
+      accessorKey: "type",
+      cell: ({ row }) => (
+        <Badge variant="outline" className="capitalize">
+          {row.original.type}
+        </Badge>
+      ),
+      enableSorting: true,
+      width: "100px",
+    },
+    {
+      key: "quantityOnHand",
+      header: "Qty on Hand",
+      accessorKey: "quantityOnHand",
+      cell: ({ row }) => {
+        const qty = parseFloat(row.original.quantityOnHand || "0");
+        const reorder = parseFloat(row.original.reorderLevel || "0");
+        const isLowStock = reorder > 0 && qty <= reorder;
+        const isOutOfStock = qty === 0;
+
+        return (
+          <div className="flex items-center gap-2">
+            <span className={`font-mono text-right ${isLowStock || isOutOfStock ? 'text-red-600 dark:text-red-400 font-semibold' : ''}`}>
+              {formatQuantity(row.original.quantityOnHand)}
+            </span>
+            {isLowStock && !isOutOfStock && (
+              <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" data-testid={`icon-low-stock-${row.original.id}`} />
+            )}
+            {row.original.unit && (
+              <span className="text-sm text-muted-foreground">{row.original.unit}</span>
+            )}
+          </div>
+        );
+      },
+      enableSorting: true,
+      align: "right",
+      width: "130px",
+    },
+    {
+      key: "reorderLevel",
+      header: "Reorder Level",
+      accessorKey: "reorderLevel",
+      cell: ({ row }) => (
+        <span className="font-mono text-right">
+          {formatQuantity(row.original.reorderLevel)}
+        </span>
+      ),
+      enableSorting: true,
+      align: "right",
+      width: "120px",
+    },
+    {
+      key: "purchasePrice",
+      header: "Purchase Price",
+      accessorKey: "purchasePrice",
+      cell: ({ row }) => (
+        <span className="font-mono text-right">
+          {formatCurrency(row.original.purchasePrice)}
+        </span>
+      ),
+      enableSorting: true,
+      align: "right",
+      width: "130px",
+    },
+    {
+      key: "rate",
+      header: "Sale Price",
+      accessorKey: "rate",
+      cell: ({ row }) => (
+        <span className="font-mono text-right font-medium">
+          {formatCurrency(row.original.rate)}
+        </span>
+      ),
+      enableSorting: true,
+      align: "right",
+      width: "120px",
+    },
+    {
+      key: "isActive",
+      header: "Status",
+      accessorKey: "isActive",
+      cell: ({ row }) => (
+        <Badge variant={row.original.isActive ? "default" : "secondary"}>
+          {row.original.isActive ? "Active" : "Inactive"}
+        </Badge>
+      ),
+      enableSorting: true,
+      width: "100px",
+    },
+    {
+      key: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2 justify-end">
+          {canUpdate && (
+            <Link href={`/inventory/items/${row.original.id}/edit`}>
+              <Button
+                variant="ghost"
+                size="icon"
+                data-testid={`button-edit-${row.original.id}`}
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+            </Link>
+          )}
+          {canDelete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setItemToDelete(row.original);
+                setDeleteDialogOpen(true);
+              }}
+              data-testid={`button-delete-${row.original.id}`}
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          )}
+        </div>
+      ),
+      enableSorting: false,
+      enableHiding: false,
+      width: "100px",
+    },
+  ], [canUpdate, canDelete]);
+
+  const bulkActions: BulkAction[] = [
+    {
+      label: "Delete Selected",
+      action: "delete",
+      variant: "destructive",
+      permission: "items.delete",
+    },
+  ];
+
+  const handleBulkAction = async (action: string, selectedRows: Item[]) => {
+    if (action === "delete" && canDelete) {
+      for (const item of selectedRows) {
+        await deleteMutation.mutateAsync(item.id);
+      }
+      toast({
+        title: "Items deleted",
+        description: `${selectedRows.length} items have been deleted.`,
+      });
+    }
   };
 
   if (!currentTenant) {
@@ -114,127 +269,81 @@ export default function Items() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">Items</h1>
-          <p className="text-muted-foreground">Manage your products and services</p>
-        </div>
-        <Button
-          onClick={() => {
-            setEditingItem(null);
-            setShowDialog(true);
-          }}
-          data-testid="button-add-item"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Add Item
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search items..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9"
-            data-testid="input-search-items"
-          />
-        </div>
-      </div>
-
-      {isLoading ? (
-        <TableSkeleton rows={8} columns={itemColumns} minHeight="500px" />
-      ) : filteredItems.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No items found</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            {searchTerm ? "Try adjusting your search" : "Get started by adding your first item"}
+          <h1 className="text-3xl font-semibold">Inventory Items</h1>
+          <p className="text-muted-foreground">
+            Manage products, services, and stock levels
           </p>
-          {!searchTerm && (
-            <Button
-              onClick={() => {
-                setEditingItem(null);
-                setShowDialog(true);
-              }}
-              data-testid="button-add-first-item"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Item
+        </div>
+        <div className="flex items-center gap-3">
+          <Link href="/inventory/reports">
+            <Button variant="outline" data-testid="button-view-reports">
+              <Package2 className="mr-2 h-4 w-4" />
+              View Reports
             </Button>
+          </Link>
+          {canCreate && (
+            <Link href="/inventory/items/new">
+              <Button data-testid="button-create-item">
+                <Plus className="mr-2 h-4 w-4" />
+                New Item
+              </Button>
+            </Link>
           )}
         </div>
-      ) : (
-        <div className="border rounded-lg">
-          <Table>
-            {renderColgroup(itemColumns)}
-            <TableHeader>
-              <TableRow>
-                <TableHead className={getColumnClassName(itemColumns[0])}>Name</TableHead>
-                <TableHead className={getColumnClassName(itemColumns[1])}>SKU</TableHead>
-                <TableHead className={getColumnClassName(itemColumns[2])}>Type</TableHead>
-                <TableHead className={getColumnClassName(itemColumns[3])}>Rate</TableHead>
-                <TableHead className={getColumnClassName(itemColumns[4])}>Unit</TableHead>
-                <TableHead className={getColumnClassName(itemColumns[5])}>Status</TableHead>
-                <TableHead className={getColumnClassName(itemColumns[6])}></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredItems.map((item) => (
-                <TableRow key={item.id} data-testid={`row-item-${item.id}`}>
-                  <TableCell className={`${getColumnClassName(itemColumns[0])} font-medium`}>{item.name}</TableCell>
-                  <TableCell className={getColumnClassName(itemColumns[1])}>{item.sku || "-"}</TableCell>
-                  <TableCell className={`${getColumnClassName(itemColumns[2])} capitalize`}>{item.type}</TableCell>
-                  <TableCell className={`${getColumnClassName(itemColumns[3])} font-mono`}>{formatCurrency(item.rate)}</TableCell>
-                  <TableCell className={getColumnClassName(itemColumns[4])}>{item.unit || "-"}</TableCell>
-                  <TableCell className={getColumnClassName(itemColumns[5])}>
-                    <Badge variant={item.isActive ? "default" : "secondary"}>
-                      {item.isActive ? "Active" : "Inactive"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className={getColumnClassName(itemColumns[6])}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${item.id}`}>
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setEditingItem(item);
-                            setShowDialog(true);
-                          }}
-                          data-testid={`button-edit-${item.id}`}
-                        >
-                          <Edit className="mr-2 h-4 w-4" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => deleteMutation.mutate(item.id)}
-                          className="text-destructive"
-                          data-testid={`button-delete-${item.id}`}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      </div>
 
-      <ItemDialog
-        open={showDialog}
-        onOpenChange={(open) => {
-          setShowDialog(open);
-          if (!open) setEditingItem(null);
-        }}
-        item={editingItem}
+      <AdvancedDataTable
+        columns={columns}
+        data={items}
+        tableId="inventory-items"
+        loading={isLoading}
+        enableRowSelection={canDelete}
+        bulkActions={bulkActions}
+        onBulkAction={handleBulkAction}
+        enableExport={true}
+        enableFiltering={true}
+        enableSorting={true}
+        enablePagination={true}
+        defaultPageSize={25}
+        emptyState={
+          <div className="flex flex-col items-center justify-center py-12">
+            <Package2 className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No items found</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Get started by adding your first inventory item
+            </p>
+            {canCreate && (
+              <Link href="/inventory/items/new">
+                <Button data-testid="button-add-first-item">
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Item
+                </Button>
+              </Link>
+            )}
+          </div>
+        }
       />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Item</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{itemToDelete?.name}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => itemToDelete && deleteMutation.mutate(itemToDelete.id)}
+              data-testid="button-confirm-delete"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

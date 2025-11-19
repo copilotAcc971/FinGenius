@@ -68,8 +68,13 @@ import {
 const salesItems = [
   { title: "Sales Transactions", url: "/sales", icon: FileText },
   { title: "Customers", url: "/customers", icon: Users },
-  { title: "Items", url: "/items", icon: Package },
   { title: "Taxes", url: "/taxes", icon: Percent },
+];
+
+const inventoryItems = [
+  { title: "Items", url: "/inventory/items", icon: Package },
+  { title: "Stock Adjustments", url: "/inventory/adjustments", icon: RefreshCw },
+  { title: "Reports", url: "/inventory/reports", icon: ChartBar },
 ];
 
 const purchasesItems = [
@@ -106,6 +111,7 @@ const adminItems = [
   { title: "Role Management", url: "/settings/roles", icon: Shield },
   { title: "User Management", url: "/settings/users", icon: UserCog },
   { title: "Currencies", url: "/settings/currencies", icon: Coins },
+  { title: "Audit Logs", url: "/audit-logs", icon: FileBarChart },
 ];
 
 // Helper to get icon name from component for storage
@@ -147,6 +153,7 @@ function getIconName(IconComponent: any): string {
 // Combine all navigation items for favorites/recent lookup
 const allMenuItems = [
   ...salesItems,
+  ...inventoryItems,
   ...purchasesItems,
   ...paymentsItems,
   ...projectsItems,
@@ -168,6 +175,7 @@ export function AppSidebar() {
     favorites: getGroupCollapsedState("favorites"),
     recent: getGroupCollapsedState("recent"),
     sales: getGroupCollapsedState("sales"),
+    inventory: getGroupCollapsedState("inventory"),
     purchases: getGroupCollapsedState("purchases"),
     payments: getGroupCollapsedState("payments"),
     projects: getGroupCollapsedState("projects"),
@@ -391,6 +399,49 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {salesItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <div className="flex items-center w-full gap-1">
+                        <SidebarMenuButton asChild isActive={location === item.url} className="flex-1" data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
+                          <Link href={item.url}>
+                            <item.icon className="h-5 w-5" />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 shrink-0"
+                          onClick={(e) => handleToggleFavorite(item.url, e)}
+                          data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                        >
+                          {favorites.includes(item.url) ? (
+                            <Star className="h-4 w-4 fill-current" />
+                          ) : (
+                            <StarOff className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+
+        {/* Inventory Section */}
+        <Collapsible open={!collapsed.inventory} onOpenChange={(open) => handleGroupToggle("inventory", open)}>
+          <SidebarGroup>
+            <CollapsibleTrigger asChild>
+              <SidebarGroupLabel className="flex items-center justify-between cursor-pointer hover-elevate" data-testid="button-collapse-inventory">
+                <span>Inventory</span>
+                {collapsed.inventory ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </SidebarGroupLabel>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {inventoryItems.map((item) => (
                     <SidebarMenuItem key={item.title}>
                       <div className="flex items-center w-full gap-1">
                         <SidebarMenuButton asChild isActive={location === item.url} className="flex-1" data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>

@@ -58,10 +58,13 @@ import {
   projectInvoiceTimeEntries,
   projectInvoiceMilestones,
   projectCostAccounts,
+  auditLogs,
   type User,
   type UpsertUser,
   type Tenant,
   type InsertTenant,
+  type AuditLog,
+  type InsertAuditLog,
   type TenantCompanyProfile,
   type InsertTenantCompanyProfile,
   type Customer,
@@ -679,6 +682,19 @@ export interface IStorage {
     profit: string;
     profitMargin: string;
   }>;
+
+  // Audit Log operations (SOX compliance) - IMMUTABLE (append-only, no update/delete)
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+  getAuditLogs(tenantId: string, filters?: {
+    entityType?: string;
+    entityId?: string;
+    userId?: string;
+    action?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<AuditLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -8226,6 +8242,63 @@ export class DatabaseStorage implements IStorage {
       profitMargin: profitability.profitMargin,
     };
   }
+
+  // Audit Log operations (SOX compliance)
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const [auditLog] = await db
+      .insert(auditLogs)
+      .values(log)
+      .returning();
+    return auditLog;
+  }
+
+  async getAuditLogs(tenantId: string, filters?: {
+    entityType?: string;
+    entityId?: string;
+    userId?: string;
+    action?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<AuditLog[]> {
+    const conditions = [eq(auditLogs.tenantId, tenantId)];
+
+    if (filters?.entityType) {
+      conditions.push(eq(auditLogs.entityType, filters.entityType));
+    }
+    if (filters?.entityId) {
+      conditions.push(eq(auditLogs.entityId, filters.entityId));
+    }
+    if (filters?.userId) {
+      conditions.push(eq(auditLogs.userId, filters.userId));
+    }
+    if (filters?.action) {
+      conditions.push(eq(auditLogs.action, filters.action));
+    }
+    if (filters?.startDate) {
+      conditions.push(gte(auditLogs.timestamp, filters.startDate));
+    }
+    if (filters?.endDate) {
+      conditions.push(lte(auditLogs.timestamp, filters.endDate));
+    }
+
+    let query = db
+      .select()
+      .from(auditLogs)
+      .where(and(...conditions))
+      .orderBy(desc(auditLogs.timestamp));
+
+    // Apply pagination
+    if (filters?.limit) {
+      query = query.limit(filters.limit) as any;
+    }
+    if (filters?.offset) {
+      query = query.offset(filters.offset) as any;
+    }
+
+    return await query;
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -8247,6 +8320,7 @@ export class MemStorage implements IStorage {
   private invoiceSequenceCounters: Map<string, number> = new Map();
   private customerPayments: CustomerPayment[] = [];
   private customerPaymentSequenceCounters: Map<string, number> = new Map();
+  private auditLogs: AuditLog[] = [];
 
   // User operations
   async getUser(id: string): Promise<User | undefined> {
@@ -9624,6 +9698,49 @@ export class MemStorage implements IStorage {
 
   async getProjectFinancialSnapshot(projectId: string, tenantId: string): Promise<any> {
     throw new Error('Project financial snapshot not implemented in MemStorage');
+  }
+
+  // Audit Log operations (SOX compliance)
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const newLog: AuditLog = {
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      ...log,
+      timestamp: new Date(),
+    };
+    this.auditLogs.push(newLog);
+    return newLog;
+  }
+
+  async getAuditLogs(tenantId: string, filters?: {
+    entityType?: string;
+    entityId?: string;
+    userId?: string;
+    action?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<AuditLog[]> {
+    let result = this.auditLogs.filter(log => log.tenantId === tenantId);
+
+    if (filters?.entityType) {
+      result = result.filter(log => log.entityType === filters.entityType);
+    }
+    if (filters?.entityId) {
+      result = result.filter(log => log.entityId === filters.entityId);
+    }
+    if (filters?.userId) {
+      result = result.filter(log => log.userId === filters.userId);
+    }
+    if (filters?.action) {
+      result = result.filter(log => log.action === filters.action);
+    }
+    if (filters?.startDate) {
+      result = result.filter(log => log.timestamp >= filters.startDate!);
+    }
+    if (filters?.endDate) {
+      result = result.filter(log => log.timestamp <= filters.endDate!);
+    }
+
+    return result.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   }
 }
 

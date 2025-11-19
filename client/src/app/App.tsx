@@ -24,6 +24,9 @@ import Dashboard from "@/features/dashboard/pages/dashboard-page";
 import Customers from "@/features/customers/pages/customers-page";
 import Vendors from "@/features/vendors/pages/vendors-page";
 import Items from "@/features/items/pages/items-page";
+import ItemFormPage from "@/features/items/pages/item-form-page";
+import StockAdjustmentsPage from "@/features/items/pages/stock-adjustments-page";
+import InventoryReportsPage from "@/features/items/pages/inventory-reports-page";
 import Taxes from "@/features/taxes/pages/taxes-page";
 import Accounts from "@/features/accounts/pages/accounts-page";
 import AccountBalances from "@/features/accounts/pages/account-balances-page";
@@ -49,6 +52,7 @@ import ProjectProfitabilityReport from "@/features/reports/pages/project-profita
 import ConsolidatedReports from "@/features/reports/pages/consolidated-reports-page";
 import ConsolidatedProjects from "@/features/projects/pages/consolidated-projects-page";
 import AdvancedTableDemo from "@/shared/pages/advanced-table-demo-page";
+import AuditLogsPage from "@/pages/audit-logs-page";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -63,6 +67,11 @@ function Router() {
           <Route path="/customers" component={Customers} />
           <Route path="/vendors" component={Vendors} />
           <Route path="/items" component={Items} />
+          <Route path="/inventory/items" component={Items} />
+          <Route path="/inventory/items/new" component={ItemFormPage} />
+          <Route path="/inventory/items/:id/edit" component={ItemFormPage} />
+          <Route path="/inventory/adjustments" component={StockAdjustmentsPage} />
+          <Route path="/inventory/reports" component={InventoryReportsPage} />
           <Route path="/taxes" component={Taxes} />
           <Route path="/accounts" component={Accounts} />
           <Route path="/account-balances" component={AccountBalances} />
@@ -86,6 +95,7 @@ function Router() {
           <Route path="/settings/roles" component={RoleManagement} />
           <Route path="/settings/users" component={UserManagement} />
           <Route path="/settings/currencies" component={CurrenciesPage} />
+          <Route path="/audit-logs" component={AuditLogsPage} />
           <Route path="/demo/advanced-table" component={AdvancedTableDemo} />
         </>
       )}

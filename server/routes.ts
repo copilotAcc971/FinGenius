@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { AuditLogger } from "./audit/audit-logger";
 import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
 import { registerCronJob, unregisterCronJob, validateCronExpression } from "./cron";
@@ -117,6 +118,9 @@ const stripe = process.env.STRIPE_SECRET_KEY
 const openai = process.env.OPENAI_API_KEY 
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
+
+// Initialize SOX-compliant audit logger
+const auditLogger = new AuditLogger(storage);
 
 // Schema for send-email endpoint
 const sendEmailSchema = z.object({
@@ -526,8 +530,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use verified tenantId from middleware
       const parsed = insertCustomerSchema.parse({ ...req.body, tenantId: req.tenantId });
       const customer = await storage.createCustomer(parsed);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'customer',
+        entityId: customer.id,
+        changes: { before: null, after: customer },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json(customer);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'customer',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error creating customer:", error);
       res.status(400).json({ message: error.message || "Failed to create customer" });
     }
@@ -537,13 +568,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       
+      // Get before state for audit trail
+      const before = await storage.getCustomerById(id, req.tenantId);
+      
       // Validate the update payload
       const parsed = updateCustomerSchema.parse(req.body);
       
       // Now perform the update (tenantId already verified by middleware)
       const updated = await storage.updateCustomer(id, req.tenantId, parsed);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'customer',
+        entityId: id,
+        changes: { before, after: updated },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json(updated);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'customer',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error updating customer:", error);
       res.status(400).json({ message: error.message || "Failed to update customer" });
     }
@@ -553,10 +614,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       
+      // Get before state for audit trail
+      const before = await storage.getCustomerById(id, req.tenantId);
+      
       // Now perform the delete (tenantId already verified by middleware)
       await storage.deleteCustomer(id, req.tenantId);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'customer',
+        entityId: id,
+        changes: { before, after: null },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json({ message: "Customer deleted successfully" });
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'customer',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error deleting customer:", error);
       res.status(400).json({ message: error.message || "Failed to delete customer" });
     }
@@ -577,8 +668,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const parsed = insertVendorSchema.parse({ ...req.body, tenantId: req.tenantId });
       const vendor = await storage.createVendor(parsed);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'vendor',
+        entityId: vendor.id,
+        changes: { before: null, after: vendor },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json(vendor);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'vendor',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error creating vendor:", error);
       res.status(400).json({ message: error.message || "Failed to create vendor" });
     }
@@ -589,7 +707,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const userId = req.user.claims.sub;
       
-      // Fetch the vendor to get its tenantId
+      // Fetch the vendor to get its tenantId (also serves as before state)
       const vendor = await storage.getVendor(id);
       if (!vendor) {
         return res.status(404).json({ message: "Vendor not found" });
@@ -603,8 +721,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Now perform the update
       const updated = await storage.updateVendor(id, vendor.tenantId, req.body);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'vendor',
+        entityId: id,
+        changes: { before: vendor, after: updated },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json(updated);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'vendor',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error updating vendor:", error);
       res.status(400).json({ message: error.message || "Failed to update vendor" });
     }
@@ -615,7 +760,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const userId = req.user.claims.sub;
       
-      // Fetch the vendor to get its tenantId
+      // Fetch the vendor to get its tenantId (also serves as before state)
       const vendor = await storage.getVendor(id);
       if (!vendor) {
         return res.status(404).json({ message: "Vendor not found" });
@@ -629,8 +774,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Now perform the delete
       await storage.deleteVendor(id, vendor.tenantId);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'vendor',
+        entityId: id,
+        changes: { before: vendor, after: null },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json({ message: "Vendor deleted successfully" });
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'vendor',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error deleting vendor:", error);
       res.status(400).json({ message: error.message || "Failed to delete vendor" });
     }
@@ -1082,8 +1254,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Add verified tenantId back AFTER parsing
       const item = await storage.createItem({ ...parsed, tenantId });
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'item',
+        entityId: item.id,
+        changes: { before: null, after: item },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.status(201).json(item);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'item',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error creating item:", error);
       res.status(400).json({ message: error.message || "Failed to create item" });
     }
@@ -1094,7 +1293,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const tenantId = req.tenantId!;
       
-      // Verify item exists and belongs to this tenant
+      // Verify item exists and belongs to this tenant (also serves as before state)
       const existingItem = await storage.getItem(id);
       if (!existingItem) {
         return res.status(404).json({ message: "Item not found" });
@@ -1113,8 +1312,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Update with VERIFIED tenantId
       const updated = await storage.updateItem(id, tenantId, parsed);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'item',
+        entityId: id,
+        changes: { before: existingItem, after: updated },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json(updated);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'item',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error updating item:", error);
       res.status(400).json({ message: error.message || "Failed to update item" });
     }
@@ -1125,7 +1351,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const tenantId = req.tenantId!;
       
-      // Verify item exists and belongs to this tenant
+      // Verify item exists and belongs to this tenant (also serves as before state)
       const existingItem = await storage.getItem(id);
       if (!existingItem) {
         return res.status(404).json({ message: "Item not found" });
@@ -1138,8 +1364,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Delete using VERIFIED tenantId from middleware
       await storage.deleteItem(id, tenantId);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'item',
+        entityId: id,
+        changes: { before: existingItem, after: null },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.status(204).send();
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'item',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error deleting item:", error);
       res.status(400).json({ message: error.message || "Failed to delete item" });
     }
@@ -1526,9 +1779,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const invoice = await storage.createInvoiceWithItems(parsed);
+      
+      // SOX-compliant audit logging
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId,
+        userId: req.user.claims.sub,
+        action: 'create',
+        entityType: 'invoice',
+        entityId: invoice.invoice.id,
+        changes: { before: null, after: invoice },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('Audit log failed:', err));
+      
       res.json(invoice);
     } catch (error: any) {
       console.error("Error creating invoice:", error);
+      
+      // Log the failure
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId,
+        userId: req.user.claims.sub,
+        action: 'create',
+        entityType: 'invoice',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message || "Failed to create invoice",
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('Audit log failed:', err));
+      
       res.status(400).json({ message: error.message || "Failed to create invoice" });
     }
   });
@@ -1556,9 +1837,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const updated = await storage.updateInvoiceWithItems(id, req.tenantId, parsed);
+      
+      // SOX-compliant audit logging - capture before/after state
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId,
+        userId: req.user.claims.sub,
+        action: 'update',
+        entityType: 'invoice',
+        entityId: id,
+        changes: { before: existing, after: updated },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('Audit log failed:', err));
+      
       res.json(updated);
     } catch (error: any) {
       console.error("Error updating invoice:", error);
+      
+      // Log the failure
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId,
+        userId: req.user.claims.sub,
+        action: 'update',
+        entityType: 'invoice',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message || "Failed to update invoice",
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('Audit log failed:', err));
+      
       if (error.message === "Invoice not found or has been deleted") {
         return res.status(404).json({ message: error.message });
       }
@@ -1583,12 +1892,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const success = await storage.deleteInvoice(id, invoice.tenantId);
       if (success) {
+        // SOX-compliant audit logging - capture deleted state
+        await auditLogger.logFinancialTransaction({
+          tenantId: invoice.tenantId,
+          userId,
+          action: 'delete',
+          entityType: 'invoice',
+          entityId: id,
+          changes: { before: invoice, after: null },
+          ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+          userAgent: req.get('user-agent'),
+          wasSuccessful: true,
+        }).catch(err => console.error('Audit log failed:', err));
+        
         res.json({ message: "Invoice deleted successfully" });
       } else {
         res.status(404).json({ message: "Invoice not found or already deleted" });
       }
     } catch (error: any) {
       console.error("Error deleting invoice:", error);
+      
+      // Log the failure
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId,
+        userId: req.user.claims.sub,
+        action: 'delete',
+        entityType: 'invoice',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message || "Failed to delete invoice",
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('Audit log failed:', err));
+      
       res.status(400).json({ message: error.message || "Failed to delete invoice" });
     }
   });
@@ -3008,8 +3344,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return { payment, journalEntry };
       });
       
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'customer_payment',
+        entityId: result.payment.id,
+        changes: { before: null, after: result.payment },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.status(201).json(result);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'customer_payment',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       if (error.name === 'ZodError') {
         return res.status(400).json({ message: 'Validation error', errors: error.errors });
       }
@@ -3025,11 +3387,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
+      
+      // Get before state for audit trail
+      const before = await storage.getCustomerPaymentById(id, tenantId);
+      
       const partialSchema = insertCustomerPaymentSchema.partial();
       const validated = partialSchema.parse({ ...req.body, tenantId });
       const payment = await storage.updateCustomerPayment(id, tenantId, validated);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'customer_payment',
+        entityId: id,
+        changes: { before, after: payment },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json(payment);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'customer_payment',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       if (error.name === 'ZodError') {
         return res.status(400).json({ message: 'Validation error', errors: error.errors });
       }
@@ -3042,9 +3435,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
+      
+      // Get before state for audit trail
+      const before = await storage.getCustomerPaymentById(id, tenantId);
+      
       await storage.deleteCustomerPayment(id, tenantId);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'customer_payment',
+        entityId: id,
+        changes: { before, after: null },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json({ message: "Payment deleted" });
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'customer_payment',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error('Error deleting customer payment:', error);
       res.status(500).json({ message: error.message });
     }
@@ -4382,8 +4806,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       const journalEntry = await storage.createJournalEntryWithLegs(payloadWithTenant);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'journal_entry',
+        entityId: journalEntry.id,
+        changes: { before: null, after: journalEntry },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.status(201).json(journalEntry);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'journal_entry',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error('Error creating journal entry:', error);
       if (error.name === 'ZodError') {
         return res.status(400).json({ message: 'Invalid journal entry data', errors: error.errors });
@@ -4396,6 +4847,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
+      
+      // Get before state for audit trail
+      const before = await storage.getJournalEntry(id, tenantId);
       
       // Validate payload structure
       const validated = journalEntryPayloadSchema.parse(req.body);
@@ -4410,8 +4864,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       const journalEntry = await storage.updateJournalEntryWithLegs(id, tenantId, payloadWithTenant);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'journal_entry',
+        entityId: id,
+        changes: { before, after: journalEntry },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json(journalEntry);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'journal_entry',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error('Error updating journal entry:', error);
       if (error.name === 'ZodError') {
         return res.status(400).json({ message: 'Invalid journal entry data', errors: error.errors });
@@ -4424,9 +4905,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
+      
+      // Get before state for audit trail
+      const before = await storage.getJournalEntry(id, tenantId);
+      
       await storage.deleteJournalEntry(id, tenantId);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'journal_entry',
+        entityId: id,
+        changes: { before, after: null },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.status(204).send();
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'journal_entry',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error('Error deleting journal entry:', error);
       res.status(500).json({ message: error.message });
     }
@@ -4826,8 +5338,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       const bill = await storage.createBillWithItems(payload, tenantId);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'bill',
+        entityId: bill.id,
+        changes: { before: null, after: bill },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.status(201).json(bill);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'bill',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error creating bill:", error);
       if (error.name === 'ZodError') {
         return res.status(400).json({ message: 'Invalid bill data', errors: error.errors });
@@ -4840,6 +5379,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
+      
+      // Get before state for audit trail
+      const before = await storage.getBillById(id, tenantId);
       
       // Parse body WITHOUT trusting tenantId
       const validated = billPayloadSchema.parse(req.body);
@@ -4864,8 +5406,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       const bill = await storage.updateBillWithItems(id, tenantId, payload);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'bill',
+        entityId: id,
+        changes: { before, after: bill },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json(bill);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'update',
+        entityType: 'bill',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error updating bill:", error);
       if (error.name === 'ZodError') {
         return res.status(400).json({ message: 'Invalid bill data', errors: error.errors });
@@ -4878,9 +5447,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
+      
+      // Get before state for audit trail
+      const before = await storage.getBillById(id, tenantId);
+      
       await storage.deleteBill(id, tenantId);
+      
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'bill',
+        entityId: id,
+        changes: { before, after: null },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       res.json({ message: "Bill deleted" });
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'delete',
+        entityType: 'bill',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error deleting bill:", error);
       res.status(500).json({ message: error.message || "Failed to delete bill" });
     }
@@ -5334,9 +5934,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const expense = await storage.submitEmployeeExpense(validatedData);
       
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'expense',
+        entityId: expense.id,
+        changes: { before: null, after: expense },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       // Serialize dates
       res.status(201).json(serializeExpense(expense));
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'expense',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
       console.error("Error submitting employee expense:", error);
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: "Validation error", errors: error.errors });
@@ -5478,8 +6104,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return { payment, journalEntry };
       });
 
+      // LOG SUCCESS
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'payment',
+        entityId: result.payment.id,
+        changes: { before: null, after: result.payment },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+
       res.json(result);
     } catch (error: any) {
+      // LOG FAILURE
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'create',
+        entityType: 'payment',
+        entityId: 'unknown',
+        wasSuccessful: false,
+        errorMessage: error.message,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+
       console.error('Error creating vendor payment:', error);
       if (error instanceof AccountingValidationError) {
         res.status(400).json({ message: error.message });
@@ -8794,6 +9446,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
+
+  // SOX Compliance: Audit Logs API (Admin Only)
+  app.get('/api/audit-logs', 
+    isAuthenticated, 
+    verifyTenantAccess, 
+    loadAuthContext, 
+    requirePermission('audit.read'), 
+    async (req: any, res) => {
+    try {
+      const { 
+        entityType, 
+        entityId, 
+        userId, 
+        action, 
+        startDate, 
+        endDate,
+        limit = "100",  // Default limit
+        offset = "0"
+      } = req.query;
+      
+      const logs = await storage.getAuditLogs(req.tenantId!, {
+        entityType: entityType as string,
+        entityId: entityId as string,
+        userId: userId as string,
+        action: action as string,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+      });
+      
+      res.json(logs);
+    } catch (error: any) {
+      console.error("Error fetching audit logs:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch audit logs" });
+    }
+  });
 
   const httpServer = createServer(app);
   return httpServer;
