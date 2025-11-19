@@ -11,9 +11,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { expenseColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 import type { Expense } from "@shared/schema";
 
 export default function Expenses() {
@@ -74,9 +76,7 @@ export default function Expenses() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={expenseColumns} minHeight="500px" />
       ) : expenses.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-lg font-medium mb-2">No expenses yet</p>
@@ -89,25 +89,26 @@ export default function Expenses() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(expenseColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className={getColumnClassName(expenseColumns[0])}>Date</TableHead>
+                <TableHead className={getColumnClassName(expenseColumns[1])}>Category</TableHead>
+                <TableHead className={getColumnClassName(expenseColumns[2])}>Description</TableHead>
+                <TableHead className={getColumnClassName(expenseColumns[3])}>Vendor</TableHead>
+                <TableHead className={getColumnClassName(expenseColumns[4])}>Amount</TableHead>
+                <TableHead className={getColumnClassName(expenseColumns[5])}>Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {expenses.map((expense) => (
                 <TableRow key={expense.id} className="cursor-pointer hover-elevate" data-testid={`row-expense-${expense.id}`}>
-                  <TableCell>{new Date(expense.date).toLocaleDateString()}</TableCell>
-                  <TableCell className="font-medium">{expense.category}</TableCell>
-                  <TableCell className="max-w-xs truncate">{expense.description || "-"}</TableCell>
-                  <TableCell>{expense.vendorId || "-"}</TableCell>
-                  <TableCell className="text-right font-mono">${parseFloat(expense.amount).toFixed(2)}</TableCell>
-                  <TableCell>{getStatusBadge(expense.status)}</TableCell>
+                  <TableCell className={getColumnClassName(expenseColumns[0])}>{new Date(expense.date).toLocaleDateString()}</TableCell>
+                  <TableCell className={`${getColumnClassName(expenseColumns[1])} font-medium`}>{expense.category}</TableCell>
+                  <TableCell className={`${getColumnClassName(expenseColumns[2])} max-w-xs truncate`}>{expense.description || "-"}</TableCell>
+                  <TableCell className={getColumnClassName(expenseColumns[3])}>{expense.vendorId || "-"}</TableCell>
+                  <TableCell className={`${getColumnClassName(expenseColumns[4])} font-mono`}>${parseFloat(expense.amount).toFixed(2)}</TableCell>
+                  <TableCell className={getColumnClassName(expenseColumns[5])}>{getStatusBadge(expense.status)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

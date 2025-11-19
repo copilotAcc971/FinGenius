@@ -12,9 +12,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TableSkeleton, CardSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { paymentColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 import type { Payment } from "@shared/schema";
 
 export default function Payments() {
@@ -92,9 +94,7 @@ export default function Payments() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={paymentColumns} minHeight="500px" />
       ) : payments.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-lg font-medium mb-2">No payments yet</p>
@@ -103,27 +103,28 @@ export default function Payments() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(paymentColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Scheduled For</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
+                <TableHead className={getColumnClassName(paymentColumns[0])}>Date</TableHead>
+                <TableHead className={getColumnClassName(paymentColumns[1])}>Vendor</TableHead>
+                <TableHead className={getColumnClassName(paymentColumns[2])}>Type</TableHead>
+                <TableHead className={getColumnClassName(paymentColumns[3])}>Amount</TableHead>
+                <TableHead className={getColumnClassName(paymentColumns[4])}>Scheduled For</TableHead>
+                <TableHead className={getColumnClassName(paymentColumns[5])}>Status</TableHead>
+                <TableHead className={getColumnClassName(paymentColumns[6])}>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {payments.map((payment) => (
                 <TableRow key={payment.id} data-testid={`row-payment-${payment.id}`}>
-                  <TableCell>{new Date(payment.createdAt!).toLocaleDateString()}</TableCell>
-                  <TableCell>{payment.vendorId}</TableCell>
-                  <TableCell>{payment.billId ? "Bill" : payment.expenseId ? "Expense" : "-"}</TableCell>
-                  <TableCell className="text-right font-mono">${parseFloat(payment.amount).toFixed(2)}</TableCell>
-                  <TableCell>{payment.scheduledDate ? new Date(payment.scheduledDate).toLocaleDateString() : "-"}</TableCell>
-                  <TableCell>{getStatusBadge(payment.status)}</TableCell>
-                  <TableCell>
+                  <TableCell className={getColumnClassName(paymentColumns[0])}>{new Date(payment.createdAt!).toLocaleDateString()}</TableCell>
+                  <TableCell className={getColumnClassName(paymentColumns[1])}>{payment.vendorId}</TableCell>
+                  <TableCell className={getColumnClassName(paymentColumns[2])}>{payment.billId ? "Bill" : payment.expenseId ? "Expense" : "-"}</TableCell>
+                  <TableCell className={`${getColumnClassName(paymentColumns[3])} font-mono`}>${parseFloat(payment.amount).toFixed(2)}</TableCell>
+                  <TableCell className={getColumnClassName(paymentColumns[4])}>{payment.scheduledDate ? new Date(payment.scheduledDate).toLocaleDateString() : "-"}</TableCell>
+                  <TableCell className={getColumnClassName(paymentColumns[5])}>{getStatusBadge(payment.status)}</TableCell>
+                  <TableCell className={getColumnClassName(paymentColumns[6])}>
                     {payment.status === "pending" && (
                       <Button size="sm" variant="outline" data-testid={`button-pay-${payment.id}`}>
                         Pay Now

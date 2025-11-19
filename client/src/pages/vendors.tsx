@@ -18,11 +18,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
+import { vendorColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 import type { Vendor } from "@shared/schema";
 import { VendorDialog } from "@/components/vendor-dialog";
 
@@ -133,9 +135,7 @@ export default function Vendors() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={vendorColumns} minHeight="600px" />
       ) : filteredVendors.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-lg font-medium mb-2">No vendors found</p>
@@ -158,31 +158,32 @@ export default function Vendors() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(vendorColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Company</TableHead>
-                <TableHead>Payment Status</TableHead>
-                <TableHead className="w-[70px]"></TableHead>
+                <TableHead className={getColumnClassName(vendorColumns[0])}>Name</TableHead>
+                <TableHead className={getColumnClassName(vendorColumns[1])}>Email</TableHead>
+                <TableHead className={getColumnClassName(vendorColumns[2])}>Phone</TableHead>
+                <TableHead className={getColumnClassName(vendorColumns[3])}>Company</TableHead>
+                <TableHead className={getColumnClassName(vendorColumns[4])}>Payment Status</TableHead>
+                <TableHead className={getColumnClassName(vendorColumns[5])}></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredVendors.map((vendor) => (
                 <TableRow key={vendor.id} data-testid={`row-vendor-${vendor.id}`}>
-                  <TableCell className="font-medium">{vendor.name}</TableCell>
-                  <TableCell>{vendor.email || "-"}</TableCell>
-                  <TableCell>{vendor.phone || "-"}</TableCell>
-                  <TableCell>{vendor.company || "-"}</TableCell>
-                  <TableCell>
+                  <TableCell className={`${getColumnClassName(vendorColumns[0])} font-medium`}>{vendor.name}</TableCell>
+                  <TableCell className={getColumnClassName(vendorColumns[1])}>{vendor.email || "-"}</TableCell>
+                  <TableCell className={getColumnClassName(vendorColumns[2])}>{vendor.phone || "-"}</TableCell>
+                  <TableCell className={getColumnClassName(vendorColumns[3])}>{vendor.company || "-"}</TableCell>
+                  <TableCell className={getColumnClassName(vendorColumns[4])}>
                     {vendor.stripeAccountId ? (
                       <Badge variant="default" data-testid={`badge-connected-${vendor.id}`}>Connected</Badge>
                     ) : (
                       <Badge variant="secondary" data-testid={`badge-not-connected-${vendor.id}`}>Not Connected</Badge>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={getColumnClassName(vendorColumns[5])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" data-testid={`button-actions-${vendor.id}`}>

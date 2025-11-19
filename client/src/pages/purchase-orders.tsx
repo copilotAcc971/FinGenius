@@ -17,11 +17,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
+import { purchaseOrderColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 import type { PurchaseOrder, Vendor, Currency } from "@shared/schema";
 import { PurchaseOrderDialog } from "@/components/purchase-order-dialog";
 import { formatCurrency } from "@/lib/currency-utils";
@@ -155,9 +157,7 @@ export default function PurchaseOrders() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={purchaseOrderColumns} minHeight="400px" />
       ) : purchaseOrders.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-muted-foreground mb-4">No purchase orders yet</p>
@@ -175,40 +175,41 @@ export default function PurchaseOrders() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(purchaseOrderColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>PO Number</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Order Date</TableHead>
-                <TableHead>Expected Delivery</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
+                <TableHead className={getColumnClassName(purchaseOrderColumns[0])}>PO Number</TableHead>
+                <TableHead className={getColumnClassName(purchaseOrderColumns[1])}>Vendor</TableHead>
+                <TableHead className={getColumnClassName(purchaseOrderColumns[2])}>Order Date</TableHead>
+                <TableHead className={getColumnClassName(purchaseOrderColumns[3])}>Expected Delivery</TableHead>
+                <TableHead className={getColumnClassName(purchaseOrderColumns[4])}>Total</TableHead>
+                <TableHead className={getColumnClassName(purchaseOrderColumns[5])}>Status</TableHead>
+                <TableHead className={getColumnClassName(purchaseOrderColumns[6])}></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {purchaseOrders.map((po) => (
                 <TableRow key={po.id} data-testid={`row-purchase-order-${po.id}`}>
-                  <TableCell className="font-medium" data-testid={`text-po-number-${po.id}`}>
+                  <TableCell className={`${getColumnClassName(purchaseOrderColumns[0])} font-medium`} data-testid={`text-po-number-${po.id}`}>
                     {po.poNumber}
                   </TableCell>
-                  <TableCell data-testid={`text-vendor-${po.id}`}>
+                  <TableCell className={getColumnClassName(purchaseOrderColumns[1])} data-testid={`text-vendor-${po.id}`}>
                     {getVendorName(po.vendorId)}
                   </TableCell>
-                  <TableCell data-testid={`text-order-date-${po.id}`}>
+                  <TableCell className={getColumnClassName(purchaseOrderColumns[2])} data-testid={`text-order-date-${po.id}`}>
                     {new Date(po.orderDate).toLocaleDateString()}
                   </TableCell>
-                  <TableCell data-testid={`text-expected-date-${po.id}`}>
+                  <TableCell className={getColumnClassName(purchaseOrderColumns[3])} data-testid={`text-expected-date-${po.id}`}>
                     {po.expectedDate ? new Date(po.expectedDate).toLocaleDateString() : '-'}
                   </TableCell>
-                  <TableCell className="text-right font-mono" data-testid={`text-total-${po.id}`}>
+                  <TableCell className={`${getColumnClassName(purchaseOrderColumns[4])} font-mono`} data-testid={`text-total-${po.id}`}>
                     {currenciesLoading 
                       ? '...' 
                       : formatCurrency(parseFloat(po.total), po.currencyCode, currencies)
                     }
                   </TableCell>
-                  <TableCell>{getStatusBadge(po.status)}</TableCell>
-                  <TableCell>
+                  <TableCell className={getColumnClassName(purchaseOrderColumns[5])}>{getStatusBadge(po.status)}</TableCell>
+                  <TableCell className={getColumnClassName(purchaseOrderColumns[6])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" data-testid={`button-actions-${po.id}`}>

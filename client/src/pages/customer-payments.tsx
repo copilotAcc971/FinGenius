@@ -22,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { TableSkeleton, CardSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -29,6 +30,7 @@ import { CustomerPaymentDialog } from "@/components/customer-payment-dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { formatCurrency } from "@/lib/currency-utils";
+import { customerPaymentColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 import type { CustomerPayment, Customer, Invoice, Currency } from "@shared/schema";
 
 export default function CustomerPayments() {
@@ -201,9 +203,7 @@ export default function CustomerPayments() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={customerPaymentColumns} minHeight="400px" />
       ) : payments.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-lg font-medium mb-2">No payments yet</p>
@@ -216,44 +216,45 @@ export default function CustomerPayments() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(customerPaymentColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>Payment Number</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Invoice</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Payment Method</TableHead>
-                <TableHead>Reference</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
+                <TableHead className={getColumnClassName(customerPaymentColumns[0])}>Payment Number</TableHead>
+                <TableHead className={getColumnClassName(customerPaymentColumns[1])}>Customer</TableHead>
+                <TableHead className={getColumnClassName(customerPaymentColumns[2])}>Invoice</TableHead>
+                <TableHead className={getColumnClassName(customerPaymentColumns[3])}>Date</TableHead>
+                <TableHead className={getColumnClassName(customerPaymentColumns[4])}>Amount</TableHead>
+                <TableHead className={getColumnClassName(customerPaymentColumns[5])}>Payment Method</TableHead>
+                <TableHead className={getColumnClassName(customerPaymentColumns[6])}>Reference</TableHead>
+                <TableHead className={getColumnClassName(customerPaymentColumns[7])}>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {payments.map((payment) => (
                 <TableRow key={payment.id} data-testid={`row-payment-${payment.id}`}>
-                  <TableCell className="font-medium" data-testid={`text-payment-number-${payment.id}`}>
+                  <TableCell className={`${getColumnClassName(customerPaymentColumns[0])} font-medium`} data-testid={`text-payment-number-${payment.id}`}>
                     {payment.paymentNumber || "-"}
                   </TableCell>
-                  <TableCell data-testid={`text-customer-${payment.id}`}>
+                  <TableCell className={getColumnClassName(customerPaymentColumns[1])} data-testid={`text-customer-${payment.id}`}>
                     {getCustomerName(payment.customerId)}
                   </TableCell>
-                  <TableCell data-testid={`text-invoice-${payment.id}`}>
+                  <TableCell className={getColumnClassName(customerPaymentColumns[2])} data-testid={`text-invoice-${payment.id}`}>
                     {getInvoiceNumber(payment.invoiceId)}
                   </TableCell>
-                  <TableCell data-testid={`text-date-${payment.id}`}>
+                  <TableCell className={getColumnClassName(customerPaymentColumns[3])} data-testid={`text-date-${payment.id}`}>
                     {new Date(payment.paymentDate).toLocaleDateString()}
                   </TableCell>
-                  <TableCell className="text-right font-mono" data-testid={`amount-${payment.id}`}>
+                  <TableCell className={`${getColumnClassName(customerPaymentColumns[4])} font-mono`} data-testid={`amount-${payment.id}`}>
                     {currenciesLoading 
                       ? '...' 
                       : formatCurrency(parseFloat(payment.amount), payment.currencyCode, currencies)
                     }
                   </TableCell>
-                  <TableCell>{getPaymentMethodBadge(payment.paymentMethod)}</TableCell>
-                  <TableCell data-testid={`text-reference-${payment.id}`}>
+                  <TableCell className={getColumnClassName(customerPaymentColumns[5])}>{getPaymentMethodBadge(payment.paymentMethod)}</TableCell>
+                  <TableCell className={getColumnClassName(customerPaymentColumns[6])} data-testid={`text-reference-${payment.id}`}>
                     {payment.referenceNumber || "-"}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={getColumnClassName(customerPaymentColumns[7])}>
                     <div className="flex items-center gap-2">
                       <Button
                         size="icon"

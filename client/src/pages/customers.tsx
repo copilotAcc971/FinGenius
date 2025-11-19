@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -24,6 +25,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import type { Customer } from "@shared/schema";
 import { CustomerDialog } from "@/components/customer-dialog";
+import { customerColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 
 export default function Customers() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -132,9 +134,7 @@ export default function Customers() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={customerColumns} minHeight="600px" />
       ) : filteredCustomers.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-lg font-medium mb-2">No customers found</p>
@@ -157,23 +157,24 @@ export default function Customers() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(customerColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Company</TableHead>
-                <TableHead className="w-[70px]"></TableHead>
+                <TableHead className={getColumnClassName(customerColumns[0])}>Name</TableHead>
+                <TableHead className={getColumnClassName(customerColumns[1])}>Email</TableHead>
+                <TableHead className={getColumnClassName(customerColumns[2])}>Phone</TableHead>
+                <TableHead className={getColumnClassName(customerColumns[3])}>Company</TableHead>
+                <TableHead className={getColumnClassName(customerColumns[4])}></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredCustomers.map((customer) => (
                 <TableRow key={customer.id} data-testid={`row-customer-${customer.id}`}>
-                  <TableCell className="font-medium">{customer.name}</TableCell>
-                  <TableCell>{customer.email || "-"}</TableCell>
-                  <TableCell>{customer.phone || "-"}</TableCell>
-                  <TableCell>{customer.company || "-"}</TableCell>
-                  <TableCell>
+                  <TableCell className={`${getColumnClassName(customerColumns[0])} font-medium`}>{customer.name}</TableCell>
+                  <TableCell className={getColumnClassName(customerColumns[1])}>{customer.email || "-"}</TableCell>
+                  <TableCell className={getColumnClassName(customerColumns[2])}>{customer.phone || "-"}</TableCell>
+                  <TableCell className={getColumnClassName(customerColumns[3])}>{customer.company || "-"}</TableCell>
+                  <TableCell className={getColumnClassName(customerColumns[4])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" data-testid={`button-actions-${customer.id}`}>

@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,6 +26,7 @@ import { isUnauthorizedError } from "@/lib/authUtils";
 import type { Invoice, Customer, Currency } from "@shared/schema";
 import { InvoiceDialog } from "@/components/invoice-dialog";
 import { formatCurrency } from "@/lib/currency-utils";
+import { invoiceColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 
 export default function Invoices() {
   const [showDialog, setShowDialog] = useState(false);
@@ -190,9 +192,7 @@ export default function Invoices() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={invoiceColumns} minHeight="600px" />
       ) : invoices.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-lg font-medium mb-2">No invoices yet</p>
@@ -211,30 +211,31 @@ export default function Invoices() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(invoiceColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>Invoice #</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Due Date</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Email Status</TableHead>
-                <TableHead className="w-[70px]"></TableHead>
+                <TableHead className={getColumnClassName(invoiceColumns[0])}>Invoice #</TableHead>
+                <TableHead className={getColumnClassName(invoiceColumns[1])}>Customer</TableHead>
+                <TableHead className={getColumnClassName(invoiceColumns[2])}>Date</TableHead>
+                <TableHead className={getColumnClassName(invoiceColumns[3])}>Due Date</TableHead>
+                <TableHead className={getColumnClassName(invoiceColumns[4])}>Amount</TableHead>
+                <TableHead className={getColumnClassName(invoiceColumns[5])}>Status</TableHead>
+                <TableHead className={getColumnClassName(invoiceColumns[6])}>Email Status</TableHead>
+                <TableHead className={getColumnClassName(invoiceColumns[7])}></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {invoices.map((invoice) => (
                 <TableRow key={invoice.id} data-testid={`row-invoice-${invoice.id}`}>
-                  <TableCell className="font-medium font-mono">{invoice.invoiceNumber}</TableCell>
-                  <TableCell>{getCustomerName(invoice.customerId)}</TableCell>
-                  <TableCell>{new Date(invoice.invoiceDate).toLocaleDateString()}</TableCell>
-                  <TableCell>{new Date(invoice.dueDate).toLocaleDateString()}</TableCell>
-                  <TableCell className="text-right font-mono" data-testid={`text-amount-${invoice.id}`}>
+                  <TableCell className={`${getColumnClassName(invoiceColumns[0])} font-medium font-mono`}>{invoice.invoiceNumber}</TableCell>
+                  <TableCell className={getColumnClassName(invoiceColumns[1])}>{getCustomerName(invoice.customerId)}</TableCell>
+                  <TableCell className={getColumnClassName(invoiceColumns[2])}>{new Date(invoice.invoiceDate).toLocaleDateString()}</TableCell>
+                  <TableCell className={getColumnClassName(invoiceColumns[3])}>{new Date(invoice.dueDate).toLocaleDateString()}</TableCell>
+                  <TableCell className={`${getColumnClassName(invoiceColumns[4])} font-mono`} data-testid={`text-amount-${invoice.id}`}>
                     {currenciesLoading ? '...' : formatCurrency(parseFloat(invoice.total), invoice.currencyCode, currencies)}
                   </TableCell>
-                  <TableCell>{getStatusBadge(invoice.status)}</TableCell>
-                  <TableCell>
+                  <TableCell className={getColumnClassName(invoiceColumns[5])}>{getStatusBadge(invoice.status)}</TableCell>
+                  <TableCell className={getColumnClassName(invoiceColumns[6])}>
                     {!invoice.emailStatus || invoice.emailStatus === 'pending' ? (
                       <Badge variant="outline" data-testid={`badge-email-status-not-sent-${invoice.id}`}>Not Sent</Badge>
                     ) : invoice.emailStatus === 'sent' ? (
@@ -250,7 +251,7 @@ export default function Invoices() {
                       <Badge variant="destructive" data-testid={`badge-email-status-failed-${invoice.id}`}>Failed</Badge>
                     ) : null}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={getColumnClassName(invoiceColumns[7])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" data-testid={`button-actions-${invoice.id}`}>

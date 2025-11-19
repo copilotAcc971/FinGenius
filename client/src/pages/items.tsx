@@ -18,11 +18,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
+import { itemColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 import type { Item } from "@shared/schema";
 import { ItemDialog } from "@/components/item-dialog";
 
@@ -141,9 +143,7 @@ export default function Items() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={itemColumns} minHeight="500px" />
       ) : filteredItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-lg font-medium mb-2">No items found</p>
@@ -166,31 +166,32 @@ export default function Items() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(itemColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead className="text-right">Rate</TableHead>
-                <TableHead>Unit</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[70px]"></TableHead>
+                <TableHead className={getColumnClassName(itemColumns[0])}>Name</TableHead>
+                <TableHead className={getColumnClassName(itemColumns[1])}>SKU</TableHead>
+                <TableHead className={getColumnClassName(itemColumns[2])}>Type</TableHead>
+                <TableHead className={getColumnClassName(itemColumns[3])}>Rate</TableHead>
+                <TableHead className={getColumnClassName(itemColumns[4])}>Unit</TableHead>
+                <TableHead className={getColumnClassName(itemColumns[5])}>Status</TableHead>
+                <TableHead className={getColumnClassName(itemColumns[6])}></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredItems.map((item) => (
                 <TableRow key={item.id} data-testid={`row-item-${item.id}`}>
-                  <TableCell className="font-medium">{item.name}</TableCell>
-                  <TableCell>{item.sku || "-"}</TableCell>
-                  <TableCell className="capitalize">{item.type}</TableCell>
-                  <TableCell className="text-right font-mono">{formatCurrency(item.rate)}</TableCell>
-                  <TableCell>{item.unit || "-"}</TableCell>
-                  <TableCell>
+                  <TableCell className={`${getColumnClassName(itemColumns[0])} font-medium`}>{item.name}</TableCell>
+                  <TableCell className={getColumnClassName(itemColumns[1])}>{item.sku || "-"}</TableCell>
+                  <TableCell className={`${getColumnClassName(itemColumns[2])} capitalize`}>{item.type}</TableCell>
+                  <TableCell className={`${getColumnClassName(itemColumns[3])} font-mono`}>{formatCurrency(item.rate)}</TableCell>
+                  <TableCell className={getColumnClassName(itemColumns[4])}>{item.unit || "-"}</TableCell>
+                  <TableCell className={getColumnClassName(itemColumns[5])}>
                     <Badge variant={item.isActive ? "default" : "secondary"}>
                       {item.isActive ? "Active" : "Inactive"}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={getColumnClassName(itemColumns[6])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" data-testid={`button-actions-${item.id}`}>

@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TableSkeleton, CardSkeleton } from "@/components/ui/skeleton";
 import { useTenant } from "@/hooks/useTenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,6 +29,7 @@ import { BulkBillUpload } from "@/components/bulk-bill-upload";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Bill, Vendor, Currency } from "@shared/schema";
 import { formatCurrency } from "@/lib/currency-utils";
+import { billColumns, renderColgroup, getColumnClassName } from "@/lib/table-columns";
 
 export default function Bills() {
   const { currentTenant } = useTenant();
@@ -193,9 +195,7 @@ export default function Bills() {
       )}
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={billColumns} minHeight="600px" />
       ) : bills.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
           <p className="text-lg font-medium mb-2">No bills yet</p>
@@ -208,29 +208,30 @@ export default function Bills() {
       ) : (
         <div className="border rounded-lg">
           <Table>
+            {renderColgroup(billColumns)}
             <TableHeader>
               <TableRow>
-                <TableHead>Bill #</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Due Date</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
+                <TableHead className={getColumnClassName(billColumns[0])}>Bill #</TableHead>
+                <TableHead className={getColumnClassName(billColumns[1])}>Vendor</TableHead>
+                <TableHead className={getColumnClassName(billColumns[2])}>Date</TableHead>
+                <TableHead className={getColumnClassName(billColumns[3])}>Due Date</TableHead>
+                <TableHead className={getColumnClassName(billColumns[4])}>Amount</TableHead>
+                <TableHead className={getColumnClassName(billColumns[5])}>Status</TableHead>
+                <TableHead className={getColumnClassName(billColumns[6])}></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {bills.map((bill) => (
                 <TableRow key={bill.id} data-testid={`row-bill-${bill.id}`}>
-                  <TableCell className="font-medium font-mono">{bill.billNumber}</TableCell>
-                  <TableCell>{getVendorName(bill.vendorId)}</TableCell>
-                  <TableCell>{new Date(bill.billDate).toLocaleDateString()}</TableCell>
-                  <TableCell>{new Date(bill.dueDate).toLocaleDateString()}</TableCell>
-                  <TableCell className="text-right font-mono" data-testid={`amount-${bill.id}`}>
+                  <TableCell className={`${getColumnClassName(billColumns[0])} font-medium font-mono`}>{bill.billNumber}</TableCell>
+                  <TableCell className={getColumnClassName(billColumns[1])}>{getVendorName(bill.vendorId)}</TableCell>
+                  <TableCell className={getColumnClassName(billColumns[2])}>{new Date(bill.billDate).toLocaleDateString()}</TableCell>
+                  <TableCell className={getColumnClassName(billColumns[3])}>{new Date(bill.dueDate).toLocaleDateString()}</TableCell>
+                  <TableCell className={`${getColumnClassName(billColumns[4])} font-mono`} data-testid={`amount-${bill.id}`}>
                     {currenciesLoading ? '...' : formatCurrency(parseFloat(bill.total), bill.currencyCode, currencies)}
                   </TableCell>
-                  <TableCell>{getStatusBadge(bill.status)}</TableCell>
-                  <TableCell>
+                  <TableCell className={getColumnClassName(billColumns[5])}>{getStatusBadge(bill.status)}</TableCell>
+                  <TableCell className={getColumnClassName(billColumns[6])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" data-testid={`button-bill-actions-${bill.id}`}>
