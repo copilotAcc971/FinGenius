@@ -43,6 +43,23 @@ The application features a multi-tenant architecture employing a "verified-tenan
     - **Frontend:** AudioManager, AudioWorklet processor, CopilotWebSocketClient with auto-reconnection, real-time audio streaming/playback.
     - **UI:** Floating widget, push-to-talk/always-listening modes, audio visualizer, conversation transcript, function call confirmation dialog, status indicators, keyboard shortcuts.
     - **Security:** Session authentication, tenant isolation, RBAC integration, critical action confirmation.
+- **SOX Audit Logging:** Immutable audit trail system for SOX §802 compliance.
+    - **Implementation:** Centralized audit service with immutable storage, sensitive data redaction (PII/PCI), before/after state capture.
+    - **Coverage:** 20+ financial routes instrumented (invoices, bills, payments, journal entries, bank transactions, inventory).
+    - **Features:** Success/failure logging, RBAC enforcement tracking, pagination, export limits (10,000 records), search by entity/user/action.
+    - **Security:** Tenant-scoped access, role-based viewing permissions, tamper-proof storage.
+- **AML/KYC Compliance:** Comprehensive anti-money laundering and know-your-customer system.
+    - **Database:** 7 core tables (kycVerifications, transactionAlerts, sarReports, sanctionsScreening, customerRiskAssessment, kycDocuments, eddReviews) plus dedicated transaction_history table.
+    - **Risk Scoring:** Data-driven engine using actual customer payment data (transaction volume, frequency, velocity, cross-border patterns).
+    - **Sanctions Screening:** Structured multi-list system (OFAC SDN, UN, EU, UK HMT, DFAT) - mocked for development with clear production integration path.
+    - **Transaction Monitoring:** Real-time detection with dedicated history table (no commingling with alerts), velocity/structuring/round-amount detection.
+    - **Workflows:** CDD/EDD with 25% beneficial ownership validation, 3-tier PEP classification, SAR automatic creation and escalation.
+    - **UI:** 5 comprehensive pages (KYC Verifications, Transaction Alerts, SAR Reports, Sanctions Screening, Risk Assessment) with proper loading/empty/error states.
+- **Compliance Reporting Dashboard:** Centralized compliance monitoring and management.
+    - **Real-Time Status:** SOX, AML/KYC, PSD2, GDPR (placeholder), PCI-DSS (placeholder) with live data integration.
+    - **Charts:** Alerts by severity (bar chart), KYC status distribution (pie chart with defensive defaults ensuring zero-value visibility).
+    - **Dynamic Features:** 8-item audit checklist with real completion calculation (0-100%), deadlines table with CRUD operations, training requirements tracking.
+    - **Data Sources:** All metrics from real API responses, defensive defaults prevent empty states, zero-value segments always visible.
 
 ## External Dependencies
 -   **OpenAI GPT-5:** Used for AI-powered document data extraction, categorization, and AI-powered bank reconciliation.
