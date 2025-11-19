@@ -42,6 +42,7 @@ export const PERMISSION_MODULES = {
   PROJECT_BUDGETS: 'project_budgets',
   PROJECT_REPORTS: 'project_reports',
   COMPLIANCE: 'compliance',
+  FX: 'fx',
 } as const;
 
 export const PERMISSION_ACTIONS = {
@@ -74,6 +75,7 @@ export const PERMISSION_ACTIONS = {
   CREATE_BATCH: 'create_batch',
   VIEW_AUDIT: 'view_audit',
   VIEW_SENSITIVE: 'view_sensitive',
+  TRANSLATE: 'translate',
 } as const;
 
 // Permission definitions (~70 permissions covering all modules)
@@ -304,6 +306,13 @@ export const PERMISSION_DEFINITIONS = [
   // Inventory
   { module: 'inventory', action: 'read', name: 'inventory.read', description: 'View inventory' },
   { module: 'inventory', action: 'adjust', name: 'inventory.adjust', description: 'Create inventory adjustments' },
+  
+  // IAS 2 NRV Assessments
+  { module: 'nrv', action: 'read', name: 'nrv.read', description: 'View NRV assessments' },
+  { module: 'nrv', action: 'write', name: 'nrv.write', description: 'Create and approve NRV assessments' },
+
+  // IAS 21 FX Translation
+  { module: 'fx', action: 'translate', name: 'fx.translate', description: 'Execute foreign currency translation' },
 
   // Fixed Assets (extending assets)
   { module: 'assets', action: 'depreciate', name: 'assets.depreciate', description: 'Run depreciation for fixed assets' },

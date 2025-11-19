@@ -29,13 +29,22 @@ import {
   updateExchangeRatesForTenant
 } from './services/fx-rates';
 import { triggerManualFXRatesUpdate } from './jobs/fx-rates-update';
-import { getClosingRate, getAverageRate, getHistoricalRate, translateAmount } from './fx-translation';
+import { 
+  getClosingRate, 
+  getAverageRate, 
+  getHistoricalRate, 
+  translateAmount,
+  executeFxTranslation,
+  getFxTranslationHistory,
+  getFxTranslationRunDetails
+} from './fx-translation';
 import { assessRateVolatility } from './fx-volatility';
-import { fetchInvoiceEntryData, createInvoiceJournalEntry, fetchBillEntryData, createBillJournalEntry, fetchCustomerPaymentEntryData, createCustomerPaymentJournalEntry, fetchVendorPaymentEntryData, createVendorPaymentJournalEntry } from './accounting/entry-creators';
+import { fetchInvoiceEntryData, createInvoiceJournalEntry, fetchBillEntryData, createBillJournalEntry, fetchCustomerPaymentEntryData, createCustomerPaymentJournalEntry, fetchVendorPaymentEntryData, createVendorPaymentJournalEntry, createNrvWriteDownEntry, type NrvWriteDownEntryInput } from './accounting/entry-creators';
 import { ValidationError as AccountingValidationError, NotFoundError, AuthorizationError } from './accounting/errors';
 import { withTransaction } from './accounting/service';
 import { getAccountBalance, updateHistoricalBalances } from './accounting/historical-balance-service';
 import { submitJournalEntryForApproval, approveJournalEntryStep, rejectJournalEntry, autoPostApprovedEntry } from './accounting/workflow-engine';
+import { validateIfrs18Tags, getRequiredSubtotals, generateIfrs18Metadata } from './accounting/ifrs18-service';
 import { UAEPeppolService } from './e-invoicing/uae-peppol/peppol-service';
 import { KSAZATCAService } from './e-invoicing/ksa-zatca/zatca-service';
 import { RiskScoringService } from './compliance/risk-scoring';
@@ -64,6 +73,7 @@ import {
   insertDocumentSchema,
   insertQuoteSchema,
   insertQuoteLineItemSchema,
+  insertNrvAssessmentSchema,
   insertSalesOrderSchema,
   insertSalesOrderLineItemSchema,
   insertCreditNoteSchema,
@@ -835,6 +845,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Parse req.body - insertAccountSchema omits tenantId, code, and currentBalance
       const parsed = insertAccountSchema.parse(req.body);
       
+      // Validate IFRS 18 tags
+      const tempAccount = { ...parsed, tenantId, code: '', currentBalance: '0', id: '', createdAt: new Date(), updatedAt: new Date() } as any;
+      const ifrs18Validation = validateIfrs18Tags(tempAccount);
+      if (!ifrs18Validation.valid) {
+        return res.status(400).json({ 
+          message: "IFRS 18 validation failed", 
+          errors: ifrs18Validation.errors 
+        });
+      }
+      
       // createAccount will handle code generation and currentBalance default
       const account = await storage.createAccount({ ...parsed, tenantId });
       res.status(201).json(account);
@@ -865,6 +885,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate sanitized payload
       const parsed = insertAccountSchema.partial().parse(sanitizedPayload);
+      
+      // Validate IFRS 18 tags on update
+      const updatedAccount = { ...existingAccount, ...parsed };
+      const ifrs18Validation = validateIfrs18Tags(updatedAccount);
+      if (!ifrs18Validation.valid) {
+        return res.status(400).json({ 
+          message: "IFRS 18 validation failed", 
+          errors: ifrs18Validation.errors 
+        });
+      }
       
       // Update with VERIFIED tenantId
       const updated = await storage.updateAccount(id, tenantId, parsed);
@@ -972,6 +1002,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error updating account cash flow classification:", error);
       res.status(400).json({ message: error.message || "Failed to update cash flow classification" });
+    }
+  });
+
+  // IFRS 18 (2027 Effective) - Presentation Metadata Routes
+  app.get('/api/accounts/ifrs18/validation', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const result = await storage.validateIfrs18Completeness(tenantId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error validating IFRS 18 completeness:", error);
+      res.status(500).json({ message: error.message || "Failed to validate IFRS 18 completeness" });
+    }
+  });
+
+  app.get('/api/accounts/ifrs18/subtotals', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const accounts = await storage.getAccounts(tenantId);
+      const subtotals = getRequiredSubtotals(accounts);
+      res.json(subtotals);
+    } catch (error: any) {
+      console.error("Error fetching IFRS 18 subtotals:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch IFRS 18 subtotals" });
     }
   });
 
@@ -1479,6 +1533,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.error("Error deleting item:", error);
       res.status(400).json({ message: error.message || "Failed to delete item" });
+    }
+  });
+
+  // IAS 2 NRV Assessment routes
+  // POST /api/nrv-assessments - Create NRV assessment
+  app.post('/api/nrv-assessments', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('nrv.write'), async (req: any, res) => {
+    try {
+      const validation = insertNrvAssessmentSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: 'Validation error', errors: validation.error.errors });
+      }
+      
+      const assessment = await storage.createNrvAssessment({
+        ...validation.data,
+        tenantId: req.tenantId!,
+        createdBy: req.user!.claims.sub,
+      });
+      
+      return res.json(assessment);
+    } catch (error: any) {
+      console.error("Error creating NRV assessment:", error);
+      res.status(500).json({ message: error.message || "Failed to create NRV assessment" });
+    }
+  });
+
+  // GET /api/nrv-assessments - List assessments
+  app.get('/api/nrv-assessments', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('nrv.read'), async (req: any, res) => {
+    try {
+      const itemId = req.query.itemId as string | undefined;
+      const assessments = await storage.getNrvAssessments(req.tenantId!, itemId);
+      return res.json(assessments);
+    } catch (error: any) {
+      console.error("Error fetching NRV assessments:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch NRV assessments" });
+    }
+  });
+
+  // PUT /api/nrv-assessments/:id/approve - Approve and trigger journal entry
+  app.put('/api/nrv-assessments/:id/approve', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('nrv.write'), async (req: any, res) => {
+    try {
+      const assessment = await storage.getNrvAssessmentById(req.params.id, req.tenantId!);
+      if (!assessment || assessment.tenantId !== req.tenantId!) {
+        return res.status(404).json({ message: 'Assessment not found' });
+      }
+      
+      // Get item details
+      const item = await storage.getItem(assessment.itemId);
+      if (!item) {
+        return res.status(404).json({ message: 'Item not found' });
+      }
+      
+      // Create NRV write-down journal entry using withTransaction
+      await withTransaction(db, async (tx) => {
+        const entryInput: NrvWriteDownEntryInput = {
+          assessmentId: assessment.id,
+          assessmentDate: new Date(assessment.assessmentDate),
+          itemId: assessment.itemId,
+          itemName: item.name,
+          costValue: assessment.costValue,
+          nrvValue: assessment.nrvValue,
+          writeDownAmount: assessment.writeDownAmount,
+          description: `IAS 2 NRV write-down for ${item.name}`,
+        };
+        
+        await createNrvWriteDownEntry(
+          entryInput,
+          req.tenantId!,
+          req.user!.claims.sub,
+          storage,
+          tx
+        );
+      });
+      
+      // Update assessment status to approved
+      await storage.updateNrvAssessmentStatus(req.params.id, req.tenantId!, 'approved');
+      
+      return res.json({ message: 'Assessment approved and journal entry created' });
+    } catch (error: any) {
+      console.error("Error approving NRV assessment:", error);
+      res.status(500).json({ message: error.message || "Failed to approve NRV assessment" });
+    }
+  });
+
+  // GET /api/items/nrv-required - Items needing assessment
+  app.get('/api/items/nrv-required', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('nrv.read'), async (req: any, res) => {
+    try {
+      const items = await storage.getItemsRequiringNrvAssessment(req.tenantId!);
+      return res.json(items);
+    } catch (error: any) {
+      console.error("Error fetching items requiring NRV assessment:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch items requiring NRV assessment" });
     }
   });
 
@@ -8857,6 +9002,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error assessing exchange rate volatility:", error);
       res.status(500).json({ 
         message: "Failed to assess volatility",
+        error: error.message 
+      });
+    }
+  });
+
+  // ====================================
+  // IAS 21 FX TRANSLATION ROUTES
+  // ====================================
+
+  // POST /api/fx-translation/execute - Execute FX translation for a period
+  app.post('/api/fx-translation/execute', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('fx.translate'), async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { periodStart, periodEnd } = req.body;
+      
+      if (!periodStart || !periodEnd) {
+        return res.status(400).json({ 
+          message: "Missing required parameters: periodStart, periodEnd" 
+        });
+      }
+      
+      const start = new Date(periodStart);
+      const end = new Date(periodEnd);
+      
+      const result = await executeFxTranslation(
+        req.tenantId,
+        start,
+        end,
+        userId,
+        storage
+      );
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error executing FX translation:", error);
+      res.status(500).json({ 
+        message: "Failed to execute FX translation",
+        error: error.message 
+      });
+    }
+  });
+
+  // GET /api/fx-translation/runs - List all FX translation runs
+  app.get('/api/fx-translation/runs', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('fx.translate'), async (req: any, res) => {
+    try {
+      const runs = await getFxTranslationHistory(req.tenantId, storage);
+      res.json(runs);
+    } catch (error: any) {
+      console.error("Error fetching FX translation runs:", error);
+      res.status(500).json({ 
+        message: "Failed to fetch FX translation runs",
+        error: error.message 
+      });
+    }
+  });
+
+  // GET /api/fx-translation/runs/:id - Get FX translation run details with journal entries
+  app.get('/api/fx-translation/runs/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('fx.translate'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const details = await getFxTranslationRunDetails(id, req.tenantId, storage);
+      res.json(details);
+    } catch (error: any) {
+      console.error("Error fetching FX translation run details:", error);
+      res.status(500).json({ 
+        message: "Failed to fetch FX translation run details",
+        error: error.message 
+      });
+    }
+  });
+
+  // GET /api/fx-translation/status - Check if FX translation has been applied
+  app.get('/api/fx-translation/status', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('fx.translate'), async (req: any, res) => {
+    try {
+      const fxConfig = await storage.getFXConfig(req.tenantId);
+      res.json({
+        translationApplied: fxConfig?.fxTranslationApplied || false,
+        baseCurrency: fxConfig?.baseCurrency,
+      });
+    } catch (error: any) {
+      console.error("Error fetching FX translation status:", error);
+      res.status(500).json({ 
+        message: "Failed to fetch FX translation status",
+        error: error.message 
+      });
+    }
+  });
+
+  // POST /api/fx-translation/runs/:id/revert - Revert a completed FX translation run
+  app.post('/api/fx-translation/runs/:id/revert', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('fx.translate'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      
+      res.status(501).json({ 
+        message: "FX translation revert functionality not yet implemented" 
+      });
+    } catch (error: any) {
+      console.error("Error reverting FX translation run:", error);
+      res.status(500).json({ 
+        message: "Failed to revert FX translation run",
         error: error.message 
       });
     }

@@ -27,6 +27,7 @@ import Items from "@/features/items/pages/items-page";
 import ItemFormPage from "@/features/items/pages/item-form-page";
 import StockAdjustmentsPage from "@/features/items/pages/stock-adjustments-page";
 import InventoryReportsPage from "@/features/items/pages/inventory-reports-page";
+import NrvAssessmentPage from "@/features/inventory/pages/nrv-assessment-page";
 import Taxes from "@/features/taxes/pages/taxes-page";
 import Accounts from "@/features/accounts/pages/accounts-page";
 import AccountBalances from "@/features/accounts/pages/account-balances-page";
@@ -79,6 +80,7 @@ function Router() {
           <Route path="/inventory/items/:id/edit" component={ItemFormPage} />
           <Route path="/inventory/adjustments" component={StockAdjustmentsPage} />
           <Route path="/inventory/reports" component={InventoryReportsPage} />
+          <Route path="/inventory/nrv-assessments" component={NrvAssessmentPage} />
           <Route path="/taxes" component={Taxes} />
           <Route path="/accounts" component={Accounts} />
           <Route path="/account-balances" component={AccountBalances} />

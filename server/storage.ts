@@ -223,9 +223,15 @@ import {
   financialStatementNotes,
   type FinancialStatementNote,
   type InsertFinancialStatementNote,
+  nrvAssessments,
+  type NrvAssessment,
+  type InsertNrvAssessment,
+  fxTranslationRuns,
+  type FxTranslationRun,
+  type InsertFxTranslationRun,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
+import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc, or, lt } from "drizzle-orm";
 import { seedPermissions, seedRolesForTenant } from "./scripts/seed-rbac";
 
 export interface IStorage {
@@ -271,6 +277,8 @@ export interface IStorage {
   getNextAccountNumber(tenantId: string): Promise<string>;
   getAccountsByCashFlowClassification(tenantId: string, classification: 'operating' | 'investing' | 'financing'): Promise<Account[]>;
   getCashEquivalentAccounts(tenantId: string): Promise<Account[]>;
+  getAccountsByIfrs18Category(tenantId: string, category: string): Promise<Account[]>;
+  validateIfrs18Completeness(tenantId: string): Promise<{ complete: boolean; missingAccounts: Account[] }>;
 
   // Item operations
   getItems(tenantId: string): Promise<Item[]>;
@@ -502,6 +510,13 @@ export interface IStorage {
   // FX Configuration
   getFXConfig(tenantId: string): Promise<FXConfig | null>;
   updateFXConfig(tenantId: string, data: Partial<InsertFXConfig>): Promise<FXConfig>;
+
+  // IAS 21 FX Translation Runs
+  createFxTranslationRun(run: InsertFxTranslationRun & { tenantId: string }): Promise<FxTranslationRun>;
+  getFxTranslationRuns(tenantId: string): Promise<FxTranslationRun[]>;
+  getFxTranslationRunById(id: string, tenantId: string): Promise<FxTranslationRun | null>;
+  updateFxTranslationRunStatus(id: string, tenantId: string, status: string, ociAmount?: string, retainedEarningsAmount?: string): Promise<FxTranslationRun>;
+  updateFxConfigTranslationApplied(tenantId: string, applied: boolean): Promise<FXConfig>;
 
   // Custom Reports
   getCustomReports(tenantId: string): Promise<CustomReportConfig[]>;
@@ -744,6 +759,13 @@ export interface IStorage {
     limit?: number;
     offset?: number;
   }): Promise<AuditLog[]>;
+
+  // IAS 2 NRV Assessment Operations
+  createNrvAssessment(assessment: InsertNrvAssessment & { tenantId: string }): Promise<NrvAssessment>;
+  getNrvAssessments(tenantId: string, itemId?: string): Promise<NrvAssessment[]>;
+  getNrvAssessmentById(id: string, tenantId: string): Promise<NrvAssessment | null>;
+  updateNrvAssessmentStatus(id: string, tenantId: string, status: string): Promise<NrvAssessment>;
+  getItemsRequiringNrvAssessment(tenantId: string): Promise<Item[]>;
 
   // AML/KYC Compliance Operations
   // KYC Verifications
@@ -1239,6 +1261,32 @@ export class DatabaseStorage implements IStorage {
         eq(accounts.isCashEquivalent, true)
       ))
       .orderBy(asc(accounts.code));
+  }
+
+  async getAccountsByIfrs18Category(tenantId: string, category: string): Promise<Account[]> {
+    return await db
+      .select()
+      .from(accounts)
+      .where(and(
+        eq(accounts.tenantId, tenantId),
+        eq(accounts.ifrs18Category, category)
+      ))
+      .orderBy(asc(accounts.code));
+  }
+
+  async validateIfrs18Completeness(tenantId: string): Promise<{ complete: boolean; missingAccounts: Account[] }> {
+    const allAccounts = await this.getAccounts(tenantId);
+    const incomeExpenseAccounts = allAccounts.filter(a => 
+      a.type === 'income' || a.type === 'expense'
+    );
+    const missingAccounts = incomeExpenseAccounts.filter(a => 
+      a.ifrs18Category === 'none' || !a.ifrs18Category
+    );
+    
+    return {
+      complete: missingAccounts.length === 0,
+      missingAccounts,
+    };
   }
 
   // Item operations
@@ -7046,6 +7094,74 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  // ====================================
+  // IAS 21 FX TRANSLATION RUNS
+  // ====================================
+
+  async createFxTranslationRun(run: InsertFxTranslationRun & { tenantId: string }): Promise<FxTranslationRun> {
+    const [created] = await db.insert(fxTranslationRuns)
+      .values(run)
+      .returning();
+    return created;
+  }
+
+  async getFxTranslationRuns(tenantId: string): Promise<FxTranslationRun[]> {
+    return await db.select()
+      .from(fxTranslationRuns)
+      .where(eq(fxTranslationRuns.tenantId, tenantId))
+      .orderBy(desc(fxTranslationRuns.runDate));
+  }
+
+  async getFxTranslationRunById(id: string, tenantId: string): Promise<FxTranslationRun | null> {
+    const [run] = await db.select()
+      .from(fxTranslationRuns)
+      .where(and(
+        eq(fxTranslationRuns.id, id),
+        eq(fxTranslationRuns.tenantId, tenantId)
+      ));
+    return run || null;
+  }
+
+  async updateFxTranslationRunStatus(
+    id: string,
+    tenantId: string,
+    status: string,
+    ociAmount?: string,
+    retainedEarningsAmount?: string
+  ): Promise<FxTranslationRun> {
+    const updateData: any = { status, updatedAt: new Date() };
+    if (ociAmount !== undefined) updateData.ociAmount = ociAmount;
+    if (retainedEarningsAmount !== undefined) updateData.retainedEarningsAmount = retainedEarningsAmount;
+
+    const [updated] = await db.update(fxTranslationRuns)
+      .set(updateData)
+      .where(and(
+        eq(fxTranslationRuns.id, id),
+        eq(fxTranslationRuns.tenantId, tenantId)
+      ))
+      .returning();
+    return updated;
+  }
+
+  async updateFxConfigTranslationApplied(tenantId: string, applied: boolean): Promise<FXConfig> {
+    const existing = await db.query.fxConfigs.findFirst({
+      where: eq(fxConfigs.tenantId, tenantId),
+    });
+    
+    if (existing) {
+      const [updated] = await db.update(fxConfigs)
+        .set({ fxTranslationApplied: applied, updatedAt: new Date() })
+        .where(eq(fxConfigs.tenantId, tenantId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(fxConfigs)
+        .values({ tenantId, fxTranslationApplied: applied })
+        .returning();
+      return created;
+    }
+  }
+
   // Custom Reports
   async getCustomReports(tenantId: string): Promise<CustomReportConfig[]> {
     return await db.select()
@@ -7456,6 +7572,77 @@ export class DatabaseStorage implements IStorage {
     }
     
     return versions;
+  }
+
+  // ====================================
+  // IAS 2 NRV ASSESSMENTS
+  // ====================================
+
+  async createNrvAssessment(assessment: InsertNrvAssessment & { tenantId: string }): Promise<NrvAssessment> {
+    const [created] = await db.insert(nrvAssessments)
+      .values(assessment)
+      .returning();
+    return created;
+  }
+
+  async getNrvAssessments(tenantId: string, itemId?: string): Promise<NrvAssessment[]> {
+    const conditions = [eq(nrvAssessments.tenantId, tenantId)];
+    if (itemId) {
+      conditions.push(eq(nrvAssessments.itemId, itemId));
+    }
+    return await db.select()
+      .from(nrvAssessments)
+      .where(and(...conditions))
+      .orderBy(desc(nrvAssessments.assessmentDate));
+  }
+
+  async getNrvAssessmentById(id: string, tenantId: string): Promise<NrvAssessment | null> {
+    const [assessment] = await db.select()
+      .from(nrvAssessments)
+      .where(and(
+        eq(nrvAssessments.id, id),
+        eq(nrvAssessments.tenantId, tenantId)
+      ))
+      .limit(1);
+    return assessment || null;
+  }
+
+  async updateNrvAssessmentStatus(id: string, tenantId: string, status: string): Promise<NrvAssessment> {
+    const [updated] = await db.update(nrvAssessments)
+      .set({ status, updatedAt: new Date() })
+      .where(and(
+        eq(nrvAssessments.id, id),
+        eq(nrvAssessments.tenantId, tenantId)
+      ))
+      .returning();
+    
+    if (!updated) {
+      throw new Error('NRV assessment not found');
+    }
+    
+    return updated;
+  }
+
+  async getItemsRequiringNrvAssessment(tenantId: string): Promise<Item[]> {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    return await db.select()
+      .from(items)
+      .where(and(
+        eq(items.tenantId, tenantId),
+        eq(items.type, 'inventory'),
+        eq(items.isActive, true),
+        or(
+          isNull(items.nrvLastAssessed),
+          lt(items.nrvLastAssessed, thirtyDaysAgo),
+          and(
+            isNull(items.nrvValue).not(),
+            sql`CAST(${items.purchasePrice} AS DECIMAL) > CAST(${items.nrvValue} AS DECIMAL)`
+          )
+        )
+      ))
+      .orderBy(asc(items.name));
   }
 
   // ====================================
@@ -10559,6 +10746,32 @@ export class MemStorage implements IStorage {
     throw new Error('FX Config not implemented in MemStorage');
   }
 
+  async createFxTranslationRun(run: InsertFxTranslationRun & { tenantId: string }): Promise<FxTranslationRun> {
+    throw new Error('FX Translation Runs not implemented in MemStorage');
+  }
+
+  async getFxTranslationRuns(tenantId: string): Promise<FxTranslationRun[]> {
+    throw new Error('FX Translation Runs not implemented in MemStorage');
+  }
+
+  async getFxTranslationRunById(id: string, tenantId: string): Promise<FxTranslationRun | null> {
+    throw new Error('FX Translation Runs not implemented in MemStorage');
+  }
+
+  async updateFxTranslationRunStatus(
+    id: string,
+    tenantId: string,
+    status: string,
+    ociAmount?: string,
+    retainedEarningsAmount?: string
+  ): Promise<FxTranslationRun> {
+    throw new Error('FX Translation Runs not implemented in MemStorage');
+  }
+
+  async updateFxConfigTranslationApplied(tenantId: string, applied: boolean): Promise<FXConfig> {
+    throw new Error('FX Config translation applied not implemented in MemStorage');
+  }
+
   async getCustomReports(tenantId: string): Promise<CustomReportConfig[]> {
     throw new Error('Custom reports not implemented in MemStorage');
   }
@@ -10710,6 +10923,113 @@ export class MemStorage implements IStorage {
       isActive: false,
       updatedAt: new Date(),
     };
+  }
+
+  async getGoingConcernStatus(tenantId: string): Promise<{status: string; assessmentDate: Date; reviewedBy: string} | null> {
+    const note = this.financialStatementNotes.find(n => 
+      n.tenantId === tenantId &&
+      n.noteType === 'going_concern' &&
+      n.isActive &&
+      n.goingConcernStatus !== 'positive' &&
+      n.goingConcernStatus !== null
+    );
+    
+    if (!note || !note.goingConcernStatus || !note.goingConcernAssessmentDate || !note.goingConcernReviewedBy) {
+      return null;
+    }
+    
+    return {
+      status: note.goingConcernStatus,
+      assessmentDate: note.goingConcernAssessmentDate,
+      reviewedBy: note.goingConcernReviewedBy,
+    };
+  }
+
+  async getNoteVersionHistory(tenantId: string, noteId: string): Promise<FinancialStatementNote[]> {
+    const versions: FinancialStatementNote[] = [];
+    let currentId: string | null = noteId;
+    
+    while (currentId) {
+      const note = this.financialStatementNotes.find(n => n.id === currentId && n.tenantId === tenantId);
+      if (!note) break;
+      
+      versions.push(note);
+      currentId = note.previousVersionId;
+    }
+    
+    return versions;
+  }
+
+  // IAS 2 NRV Assessments
+  private nrvAssessments: NrvAssessment[] = [];
+
+  async createNrvAssessment(assessment: InsertNrvAssessment & { tenantId: string }): Promise<NrvAssessment> {
+    const now = new Date();
+    const id = `nrv-${Date.now()}-${Math.random()}`;
+    
+    const newAssessment: NrvAssessment = {
+      ...assessment,
+      id,
+      status: assessment.status || 'pending',
+      createdAt: now,
+      updatedAt: now,
+    };
+    
+    this.nrvAssessments.push(newAssessment);
+    return newAssessment;
+  }
+
+  async getNrvAssessments(tenantId: string, itemId?: string): Promise<NrvAssessment[]> {
+    let filtered = this.nrvAssessments.filter(a => a.tenantId === tenantId);
+    if (itemId) {
+      filtered = filtered.filter(a => a.itemId === itemId);
+    }
+    return filtered.sort((a, b) => new Date(b.assessmentDate).getTime() - new Date(a.assessmentDate).getTime());
+  }
+
+  async getNrvAssessmentById(id: string, tenantId: string): Promise<NrvAssessment | null> {
+    return this.nrvAssessments.find(a => a.id === id && a.tenantId === tenantId) || null;
+  }
+
+  async updateNrvAssessmentStatus(id: string, tenantId: string, status: string): Promise<NrvAssessment> {
+    const assessment = this.nrvAssessments.find(a => a.id === id && a.tenantId === tenantId);
+    if (!assessment) {
+      throw new Error('NRV assessment not found');
+    }
+    
+    const updated: NrvAssessment = {
+      ...assessment,
+      status,
+      updatedAt: new Date(),
+    };
+    
+    const index = this.nrvAssessments.findIndex(a => a.id === id);
+    this.nrvAssessments[index] = updated;
+    return updated;
+  }
+
+  async getItemsRequiringNrvAssessment(tenantId: string): Promise<Item[]> {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    return this.items.filter(item => {
+      if (item.tenantId !== tenantId) return false;
+      if (item.type !== 'inventory') return false;
+      if (!item.isActive) return false;
+      
+      if (!item.nrvLastAssessed) return true;
+      
+      const lastAssessed = new Date(item.nrvLastAssessed);
+      if (lastAssessed < thirtyDaysAgo) return true;
+      
+      if (item.nrvValue && item.purchasePrice) {
+        const cost = parseFloat(item.purchasePrice);
+        const nrv = parseFloat(item.nrvValue);
+        if (cost > nrv) return true;
+      }
+      
+      return false;
+    }).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getGoingConcernStatus(tenantId: string): Promise<{status: string; assessmentDate: Date; reviewedBy: string} | null> {

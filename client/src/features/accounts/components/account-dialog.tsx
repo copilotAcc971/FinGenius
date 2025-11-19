@@ -70,6 +70,9 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
       cashFlowClassification: "none",
       isCashEquivalent: false,
       cashEquivalentMaturityDays: null,
+      ifrs18Category: "none",
+      requiredSubtotal: "",
+      presentationOrder: null,
     },
   });
 
@@ -87,6 +90,9 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
         cashFlowClassification: account.cashFlowClassification || "none",
         isCashEquivalent: account.isCashEquivalent || false,
         cashEquivalentMaturityDays: account.cashEquivalentMaturityDays || null,
+        ifrs18Category: account.ifrs18Category || "none",
+        requiredSubtotal: account.requiredSubtotal || "",
+        presentationOrder: account.presentationOrder || null,
       });
     } else {
       form.reset({
@@ -101,6 +107,9 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
         cashFlowClassification: "none",
         isCashEquivalent: false,
         cashEquivalentMaturityDays: null,
+        ifrs18Category: "none",
+        requiredSubtotal: "",
+        presentationOrder: null,
       });
     }
   }, [account, form]);
@@ -428,6 +437,101 @@ export function AccountDialog({ open, onOpenChange, account }: AccountDialogProp
                       </FormItem>
                     )}
                   />
+                )}
+
+                {(form.watch("type") === "income" || form.watch("type") === "expense") && (
+                  <>
+                    <div className="border-t pt-4 mt-4">
+                      <h4 className="text-sm font-medium mb-2">IFRS 18 Presentation (Effective 2027)</h4>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Categorize for structured P&L presentation and required subtotals
+                      </p>
+                    </div>
+
+                    <FormField
+                      control={form.control}
+                      name="ifrs18Category"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>IFRS 18 Category</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-ifrs18-category">
+                                <SelectValue placeholder="Select IFRS 18 category" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="none" data-testid="select-option-ifrs18-none">None</SelectItem>
+                              {form.watch("type") === "income" && (
+                                <>
+                                  <SelectItem value="operating_income" data-testid="select-option-operating-income">Operating Income</SelectItem>
+                                  <SelectItem value="investing_income" data-testid="select-option-investing-income">Investing Income</SelectItem>
+                                  <SelectItem value="financing_income" data-testid="select-option-financing-income">Financing Income</SelectItem>
+                                </>
+                              )}
+                              {form.watch("type") === "expense" && (
+                                <>
+                                  <SelectItem value="operating_expense" data-testid="select-option-operating-expense">Operating Expense</SelectItem>
+                                  <SelectItem value="investing_expense" data-testid="select-option-investing-expense">Investing Expense</SelectItem>
+                                  <SelectItem value="financing_expense" data-testid="select-option-financing-expense">Financing Expense</SelectItem>
+                                </>
+                              )}
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Operating: Principal business activities | Investing: Investment returns | Financing: Cost of financing
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="requiredSubtotal"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Required Subtotal (Optional)</FormLabel>
+                          <FormControl>
+                            <Input 
+                              placeholder="e.g., Operating Profit, Profit Before Financing" 
+                              {...field} 
+                              value={field.value ?? ""}
+                              data-testid="input-required-subtotal"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Specify if this account contributes to a mandated IFRS 18 subtotal
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="presentationOrder"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Presentation Order (Optional)</FormLabel>
+                          <FormControl>
+                            <Input 
+                              type="number"
+                              placeholder="e.g., 10" 
+                              {...field} 
+                              value={field.value ?? ""}
+                              onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : null)}
+                              data-testid="input-presentation-order"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Display order within P&L statement (lower numbers appear first)
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </>
                 )}
               </TabsContent>
             </Tabs>
