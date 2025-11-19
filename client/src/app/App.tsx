@@ -59,6 +59,7 @@ import SanctionsScreeningPage from "@/features/compliance/pages/sanctions-screen
 import TransactionAlertsPage from "@/features/compliance/pages/transaction-alerts-page";
 import SARReportsPage from "@/features/compliance/pages/sar-reports-page";
 import AlertRulesPage from "@/features/compliance/pages/alert-rules-page";
+import FinancialStatementNotesPage from "@/features/reports/pages/financial-statement-notes-page";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -95,6 +96,7 @@ function Router() {
           <Route path="/projects/:id" component={ProjectDetail} />
           <Route path="/projects" component={ConsolidatedProjects} />
           <Route path="/documents" component={Documents} />
+          <Route path="/reports/financial-statement-notes" component={FinancialStatementNotesPage} />
           <Route path="/reports" component={ConsolidatedReports} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/settings" component={Settings} />

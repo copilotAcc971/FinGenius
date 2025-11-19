@@ -4,6 +4,8 @@ import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Skeleton } from "@/shared/components/ui/skeleton";
 import { StatusBadge } from "@/shared/components/common/status-badge";
+import { Alert, AlertDescription, AlertTitle } from "@/shared/components/ui/alert";
+import { Button } from "@/shared/components/ui/button";
 import { 
   DollarSign, 
   TrendingDown, 
@@ -14,6 +16,7 @@ import {
   UserPlus,
   BarChart3,
   AlertCircle,
+  AlertTriangle,
   CalendarClock
 } from "lucide-react";
 import { useTenant } from "@/shared/hooks/useTenant";
@@ -130,6 +133,11 @@ export default function Dashboard() {
     enabled: !!currentTenant?.id,
   });
 
+  const { data: goingConcernStatus } = useQuery<{status: string; assessmentDate: Date | null; reviewedBy: string | null}>({
+    queryKey: ['/api/going-concern-status', currentTenant?.id],
+    enabled: !!currentTenant?.id,
+  });
+
   if (!currentTenant) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] gap-4">
@@ -158,12 +166,34 @@ export default function Dashboard() {
     return vendor?.name || "Unknown Vendor";
   };
 
+  const showGoingConcernAlert = goingConcernStatus && 
+    goingConcernStatus.status !== 'positive' && 
+    goingConcernStatus.status !== null;
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold">Dashboard</h1>
         <p className="text-muted-foreground">Overview of your business finances</p>
       </div>
+
+      {showGoingConcernAlert && (
+        <Alert variant="destructive" data-testid={`badge-going-concern-${goingConcernStatus.status}`}>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Going Concern {goingConcernStatus.status === 'uncertainty' ? 'Uncertainty' : 'Doubt'} Detected</AlertTitle>
+          <AlertDescription className="flex items-center justify-between" data-testid="text-going-concern-status">
+            <span>
+              A going concern assessment with {goingConcernStatus.status} status has been recorded
+              {goingConcernStatus.assessmentDate && ` on ${format(new Date(goingConcernStatus.assessmentDate), 'PPP')}`}.
+            </span>
+            <Link href="/reports/financial-statement-notes">
+              <Button variant="outline" size="sm">
+                Review Notes
+              </Button>
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Quick Actions Section */}
       <div>

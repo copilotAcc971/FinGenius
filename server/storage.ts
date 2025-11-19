@@ -220,6 +220,9 @@ import {
   type ComplianceTraining,
   type InsertComplianceTraining,
   openBankingConnections,
+  financialStatementNotes,
+  type FinancialStatementNote,
+  type InsertFinancialStatementNote,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc } from "drizzle-orm";
@@ -515,6 +518,15 @@ export interface IStorage {
   toggleScheduledReport(tenantId: string, id: string, isActive: boolean): Promise<ScheduledReport>;
   getScheduledReportRuns(tenantId: string, reportId: string, limit?: number): Promise<ScheduledReportRun[]>;
   createScheduledReportRun(run: InsertScheduledReportRun): Promise<ScheduledReportRun>;
+
+  // Financial Statement Notes
+  getFinancialStatementNotes(tenantId: string, periodStart: Date, periodEnd: Date): Promise<FinancialStatementNote[]>;
+  getFinancialStatementNoteById(tenantId: string, noteId: string): Promise<FinancialStatementNote | null>;
+  createFinancialStatementNote(noteData: InsertFinancialStatementNote & { tenantId: string }): Promise<FinancialStatementNote>;
+  updateFinancialStatementNote(tenantId: string, noteId: string, updates: Partial<InsertFinancialStatementNote>): Promise<FinancialStatementNote>;
+  deleteFinancialStatementNote(tenantId: string, noteId: string): Promise<void>;
+  getGoingConcernStatus(tenantId: string): Promise<{status: string; assessmentDate: Date; reviewedBy: string} | null>;
+  getNoteVersionHistory(tenantId: string, noteId: string): Promise<FinancialStatementNote[]>;
 
   // Project operations
   getProjectsByTenant(tenantId: string): Promise<Project[]>;
@@ -7236,6 +7248,135 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ====================================
+  // FINANCIAL STATEMENT NOTES (IAS 1)
+  // ====================================
+
+  async getFinancialStatementNotes(tenantId: string, periodStart: Date, periodEnd: Date): Promise<FinancialStatementNote[]> {
+    return await db.select()
+      .from(financialStatementNotes)
+      .where(and(
+        eq(financialStatementNotes.tenantId, tenantId),
+        eq(financialStatementNotes.reportingPeriodStart, periodStart),
+        eq(financialStatementNotes.reportingPeriodEnd, periodEnd),
+        eq(financialStatementNotes.isActive, true)
+      ))
+      .orderBy(asc(financialStatementNotes.displayOrder), desc(financialStatementNotes.createdAt));
+  }
+
+  async getFinancialStatementNoteById(tenantId: string, noteId: string): Promise<FinancialStatementNote | null> {
+    const [note] = await db.select()
+      .from(financialStatementNotes)
+      .where(and(
+        eq(financialStatementNotes.id, noteId),
+        eq(financialStatementNotes.tenantId, tenantId)
+      ))
+      .limit(1);
+    
+    return note || null;
+  }
+
+  async createFinancialStatementNote(noteData: InsertFinancialStatementNote & { tenantId: string }): Promise<FinancialStatementNote> {
+    const [created] = await db.insert(financialStatementNotes)
+      .values({
+        ...noteData,
+        versionNumber: 1,
+        isActive: true,
+      })
+      .returning();
+    
+    return created;
+  }
+
+  async updateFinancialStatementNote(tenantId: string, noteId: string, updates: Partial<InsertFinancialStatementNote>): Promise<FinancialStatementNote> {
+    return await db.transaction(async (tx) => {
+      const [existingNote] = await tx.select()
+        .from(financialStatementNotes)
+        .where(and(
+          eq(financialStatementNotes.id, noteId),
+          eq(financialStatementNotes.tenantId, tenantId)
+        ))
+        .limit(1);
+      
+      if (!existingNote) {
+        throw new Error('Financial statement note not found');
+      }
+      
+      const newVersion = {
+        ...existingNote,
+        ...updates,
+        id: undefined,
+        versionNumber: existingNote.versionNumber + 1,
+        previousVersionId: existingNote.id,
+        updatedAt: new Date(),
+      };
+      
+      const [newNote] = await tx.insert(financialStatementNotes)
+        .values(newVersion)
+        .returning();
+      
+      await tx.update(financialStatementNotes)
+        .set({ isActive: false })
+        .where(eq(financialStatementNotes.id, noteId));
+      
+      return newNote;
+    });
+  }
+
+  async deleteFinancialStatementNote(tenantId: string, noteId: string): Promise<void> {
+    await db.update(financialStatementNotes)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(
+        eq(financialStatementNotes.id, noteId),
+        eq(financialStatementNotes.tenantId, tenantId)
+      ));
+  }
+
+  async getGoingConcernStatus(tenantId: string): Promise<{status: string; assessmentDate: Date; reviewedBy: string} | null> {
+    const [note] = await db.select()
+      .from(financialStatementNotes)
+      .where(and(
+        eq(financialStatementNotes.tenantId, tenantId),
+        eq(financialStatementNotes.noteType, 'going_concern'),
+        eq(financialStatementNotes.isActive, true),
+        ne(financialStatementNotes.goingConcernStatus, 'positive')
+      ))
+      .orderBy(desc(financialStatementNotes.goingConcernAssessmentDate))
+      .limit(1);
+    
+    if (!note || !note.goingConcernStatus || !note.goingConcernAssessmentDate || !note.goingConcernReviewedBy) {
+      return null;
+    }
+    
+    return {
+      status: note.goingConcernStatus,
+      assessmentDate: note.goingConcernAssessmentDate,
+      reviewedBy: note.goingConcernReviewedBy,
+    };
+  }
+
+  async getNoteVersionHistory(tenantId: string, noteId: string): Promise<FinancialStatementNote[]> {
+    const versions: FinancialStatementNote[] = [];
+    let currentId: string | null = noteId;
+    
+    while (currentId) {
+      const [note] = await db.select()
+        .from(financialStatementNotes)
+        .where(and(
+          eq(financialStatementNotes.id, currentId),
+          eq(financialStatementNotes.tenantId, tenantId)
+        ))
+        .limit(1);
+      
+      if (!note) break;
+      
+      versions.push(note);
+      currentId = note.previousVersionId;
+    }
+    
+    return versions;
+  }
+
+  // ====================================
   // PROJECT MANAGEMENT & TIME TRACKING
   // ====================================
 
@@ -9253,6 +9394,7 @@ export class MemStorage implements IStorage {
   private transactionHistory: TransactionHistory[] = [];
   private complianceDeadlines: ComplianceDeadline[] = [];
   private complianceTraining: ComplianceTraining[] = [];
+  private financialStatementNotes: FinancialStatementNote[] = [];
 
   // User operations
   async getUser(id: string): Promise<User | undefined> {
@@ -10347,6 +10489,169 @@ export class MemStorage implements IStorage {
 
   async createScheduledReportRun(run: InsertScheduledReportRun): Promise<ScheduledReportRun> {
     throw new Error('Scheduled reports not implemented in MemStorage');
+  }
+
+  // Financial Statement Notes
+  async getFinancialStatementNotes(tenantId: string, periodStart: Date, periodEnd: Date): Promise<FinancialStatementNote[]> {
+    return this.financialStatementNotes.filter(note => {
+      // Filter by tenant and active status
+      if (note.tenantId !== tenantId || !note.isActive) {
+        return false;
+      }
+      
+      // Check if note period overlaps with query period
+      // Two periods overlap if: note.start < query.end AND note.end > query.start
+      const noteStart = new Date(note.reportingPeriodStart).getTime();
+      const noteEnd = new Date(note.reportingPeriodEnd).getTime();
+      const queryStart = periodStart.getTime();
+      const queryEnd = periodEnd.getTime();
+      
+      return noteStart < queryEnd && noteEnd > queryStart;
+    });
+  }
+
+  async getFinancialStatementNoteById(tenantId: string, noteId: string): Promise<FinancialStatementNote | null> {
+    return this.financialStatementNotes.find(n => n.id === noteId && n.tenantId === tenantId) || null;
+  }
+
+  async createFinancialStatementNote(noteData: InsertFinancialStatementNote & { tenantId: string }): Promise<FinancialStatementNote> {
+    const now = new Date();
+    const id = `note-${Date.now()}-${Math.random()}`;
+    
+    const newNote: FinancialStatementNote = {
+      ...noteData,
+      id,
+      versionNumber: 1,
+      isActive: noteData.isActive ?? true,
+      displayOrder: noteData.displayOrder ?? 0,
+      previousVersionId: noteData.previousVersionId ?? null,
+      goingConcernStatus: noteData.goingConcernStatus ?? null,
+      goingConcernAssessmentDate: noteData.goingConcernAssessmentDate ?? null,
+      goingConcernReviewedBy: noteData.goingConcernReviewedBy ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    
+    this.financialStatementNotes.push(newNote);
+    return newNote;
+  }
+
+  async updateFinancialStatementNote(tenantId: string, noteId: string, updates: Partial<InsertFinancialStatementNote>): Promise<FinancialStatementNote> {
+    // Find existing note
+    const existing = this.financialStatementNotes.find(n => n.id === noteId && n.tenantId === tenantId);
+    if (!existing) {
+      throw new Error("Financial statement note not found");
+    }
+    
+    const now = new Date();
+    const newId = `note-${Date.now()}-${Math.random()}`;
+    
+    // Create new version
+    const newNote: FinancialStatementNote = {
+      ...existing,
+      ...updates,
+      id: newId,
+      tenantId: existing.tenantId,
+      versionNumber: existing.versionNumber + 1,
+      previousVersionId: existing.id,
+      updatedAt: now,
+      createdBy: existing.createdBy,
+      createdAt: existing.createdAt,
+    };
+    
+    // Mark old note as inactive (version history)
+    const existingIndex = this.financialStatementNotes.findIndex(n => n.id === noteId);
+    this.financialStatementNotes[existingIndex] = {
+      ...existing,
+      isActive: false,
+      updatedAt: now,
+    };
+    
+    // Add new version to array
+    this.financialStatementNotes.push(newNote);
+    
+    return newNote;
+  }
+
+  async deleteFinancialStatementNote(tenantId: string, noteId: string): Promise<void> {
+    const note = this.financialStatementNotes.find(n => n.id === noteId && n.tenantId === tenantId);
+    if (!note) {
+      throw new Error("Financial statement note not found");
+    }
+    
+    // Soft delete - set isActive to false
+    const index = this.financialStatementNotes.findIndex(n => n.id === noteId);
+    this.financialStatementNotes[index] = {
+      ...note,
+      isActive: false,
+      updatedAt: new Date(),
+    };
+  }
+
+  async getGoingConcernStatus(tenantId: string): Promise<{status: string; assessmentDate: Date; reviewedBy: string} | null> {
+    // Find most recent active note with noteType = 'going_concern'
+    const goingConcernNotes = this.financialStatementNotes
+      .filter(n => 
+        n.tenantId === tenantId && 
+        n.isActive && 
+        n.noteType === 'going_concern' &&
+        n.goingConcernStatus &&
+        n.goingConcernAssessmentDate &&
+        n.goingConcernReviewedBy
+      )
+      .sort((a, b) => {
+        const dateA = new Date(a.goingConcernAssessmentDate!).getTime();
+        const dateB = new Date(b.goingConcernAssessmentDate!).getTime();
+        return dateB - dateA; // Most recent first
+      });
+    
+    if (goingConcernNotes.length === 0) {
+      return null;
+    }
+    
+    const latest = goingConcernNotes[0];
+    return {
+      status: latest.goingConcernStatus!,
+      assessmentDate: new Date(latest.goingConcernAssessmentDate!),
+      reviewedBy: latest.goingConcernReviewedBy!,
+    };
+  }
+
+  async getNoteVersionHistory(tenantId: string, noteId: string): Promise<FinancialStatementNote[]> {
+    const startNote = this.financialStatementNotes.find(n => n.id === noteId && n.tenantId === tenantId);
+    if (!startNote) {
+      return [];
+    }
+    
+    const versions: FinancialStatementNote[] = [];
+    const visitedIds = new Set<string>();
+    
+    // Follow backward to oldest version
+    let current: FinancialStatementNote | undefined = startNote;
+    while (current && !visitedIds.has(current.id)) {
+      visitedIds.add(current.id);
+      versions.push(current);
+      
+      if (current.previousVersionId) {
+        current = this.financialStatementNotes.find(n => n.id === current!.previousVersionId && n.tenantId === tenantId);
+      } else {
+        current = undefined;
+      }
+    }
+    
+    // Find all notes that reference any note in our chain (forward versions)
+    const chainIds = new Set(versions.map(v => v.id));
+    const forwardVersions = this.financialStatementNotes.filter(n => 
+      n.tenantId === tenantId && 
+      n.previousVersionId && 
+      chainIds.has(n.previousVersionId) &&
+      !visitedIds.has(n.id)
+    );
+    
+    versions.push(...forwardVersions);
+    
+    // Sort by version number descending (newest first)
+    return versions.sort((a, b) => b.versionNumber - a.versionNumber);
   }
 
   // Project operations - Stubs

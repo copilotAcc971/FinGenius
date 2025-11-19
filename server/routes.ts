@@ -80,6 +80,7 @@ import {
   bankReconciliationPayloadSchema,
   insertCustomReportConfigSchema,
   insertScheduledReportSchema,
+  insertFinancialStatementNoteSchema,
   insertProjectSchema,
   insertProjectMemberSchema,
   insertTimeEntrySchema,
@@ -7538,6 +7539,160 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error fetching scheduled report runs:", error);
       res.status(500).json({ message: "Failed to fetch execution history" });
+    }
+  });
+
+  // ============================================================================
+  // FINANCIAL STATEMENT NOTES (IAS 1) ROUTES
+  // ============================================================================
+
+  // GET /api/financial-statement-notes - List notes for period
+  app.get('/api/financial-statement-notes', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { periodStart, periodEnd } = req.query;
+      
+      if (!periodStart || !periodEnd) {
+        return res.status(400).json({ message: "periodStart and periodEnd are required" });
+      }
+      
+      const notes = await storage.getFinancialStatementNotes(
+        tenantId,
+        new Date(periodStart as string),
+        new Date(periodEnd as string)
+      );
+      
+      res.json(notes);
+    } catch (error: any) {
+      console.error("Error fetching financial statement notes:", error);
+      res.status(500).json({ message: "Failed to fetch financial statement notes" });
+    }
+  });
+
+  // POST /api/financial-statement-notes - Create note
+  app.post('/api/financial-statement-notes', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.write'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      
+      const validated = insertFinancialStatementNoteSchema.parse(req.body);
+      
+      const note = await storage.createFinancialStatementNote({
+        ...validated,
+        tenantId,
+        createdBy: userId,
+        goingConcernReviewedBy: validated.noteType === 'going_concern' ? userId : validated.goingConcernReviewedBy,
+      });
+      
+      res.status(201).json(note);
+    } catch (error: any) {
+      console.error("Error creating financial statement note:", error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: "Invalid note data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create financial statement note" });
+    }
+  });
+
+  // GET /api/financial-statement-notes/:id - Get single note
+  app.get('/api/financial-statement-notes/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { id } = req.params;
+      
+      const note = await storage.getFinancialStatementNoteById(tenantId, id);
+      
+      if (!note) {
+        return res.status(404).json({ message: "Financial statement note not found" });
+      }
+      
+      res.json(note);
+    } catch (error: any) {
+      console.error("Error fetching financial statement note:", error);
+      res.status(500).json({ message: "Failed to fetch financial statement note" });
+    }
+  });
+
+  // PUT /api/financial-statement-notes/:id - Update note (creates new version)
+  app.put('/api/financial-statement-notes/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.write'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      
+      // Verify note exists
+      const existing = await storage.getFinancialStatementNoteById(tenantId, id);
+      if (!existing) {
+        return res.status(404).json({ message: "Financial statement note not found" });
+      }
+      
+      const updates = {
+        ...req.body,
+        goingConcernReviewedBy: req.body.noteType === 'going_concern' ? userId : req.body.goingConcernReviewedBy,
+      };
+      
+      const updatedNote = await storage.updateFinancialStatementNote(tenantId, id, updates);
+      
+      res.json(updatedNote);
+    } catch (error: any) {
+      console.error("Error updating financial statement note:", error);
+      res.status(500).json({ message: "Failed to update financial statement note" });
+    }
+  });
+
+  // DELETE /api/financial-statement-notes/:id - Soft delete
+  app.delete('/api/financial-statement-notes/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.write'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { id } = req.params;
+      
+      // Verify note exists
+      const existing = await storage.getFinancialStatementNoteById(tenantId, id);
+      if (!existing) {
+        return res.status(404).json({ message: "Financial statement note not found" });
+      }
+      
+      await storage.deleteFinancialStatementNote(tenantId, id);
+      
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting financial statement note:", error);
+      res.status(500).json({ message: "Failed to delete financial statement note" });
+    }
+  });
+
+  // GET /api/financial-statement-notes/:id/versions - Get version history
+  app.get('/api/financial-statement-notes/:id/versions', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { id } = req.params;
+      
+      // Verify note exists
+      const note = await storage.getFinancialStatementNoteById(tenantId, id);
+      if (!note) {
+        return res.status(404).json({ message: "Financial statement note not found" });
+      }
+      
+      const versions = await storage.getNoteVersionHistory(tenantId, id);
+      
+      res.json(versions);
+    } catch (error: any) {
+      console.error("Error fetching note version history:", error);
+      res.status(500).json({ message: "Failed to fetch version history" });
+    }
+  });
+
+  // GET /api/going-concern-status - Get current going concern status
+  app.get('/api/going-concern-status', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      
+      const status = await storage.getGoingConcernStatus(tenantId);
+      
+      res.json(status || { status: 'positive', assessmentDate: null, reviewedBy: null });
+    } catch (error: any) {
+      console.error("Error fetching going concern status:", error);
+      res.status(500).json({ message: "Failed to fetch going concern status" });
     }
   });
 

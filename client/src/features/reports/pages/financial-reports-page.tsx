@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Calendar as CalendarIcon, TrendingUp, DollarSign, FileBarChart, Activity, Download, ChevronDown, ChevronRight, ArrowUp, ArrowDown, FileSpreadsheet } from "lucide-react";
+import { Link } from "wouter";
+import { Calendar as CalendarIcon, TrendingUp, DollarSign, FileBarChart, Activity, Download, ChevronDown, ChevronRight, ArrowUp, ArrowDown, FileSpreadsheet, FileText, AlertTriangle } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -1048,7 +1049,16 @@ export default function FinancialReports() {
     enabled: !!currentTenant?.id,
   });
 
+  // Going concern status query
+  const { data: goingConcernStatus } = useQuery<{status: string; assessmentDate: Date | null; reviewedBy: string | null}>({
+    queryKey: ['/api/going-concern-status', currentTenant?.id],
+    enabled: !!currentTenant?.id,
+  });
+
   const baseCurrency = currencies.find(c => c.isBaseCurrency);
+  const showGoingConcernWarning = goingConcernStatus && 
+    goingConcernStatus.status !== 'positive' && 
+    goingConcernStatus.status !== null;
 
   if (!currentTenant) {
     return (
@@ -1063,9 +1073,25 @@ export default function FinancialReports() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Financial Reports</h1>
-        <p className="text-muted-foreground">Comprehensive financial insights with visualizations</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold">Financial Reports</h1>
+          <p className="text-muted-foreground">Comprehensive financial insights with visualizations</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {showGoingConcernWarning && (
+            <Badge variant="destructive" data-testid={`badge-going-concern-${goingConcernStatus.status}`}>
+              <AlertTriangle className="w-3 h-3 mr-1" />
+              Going Concern {goingConcernStatus.status === 'uncertainty' ? 'Uncertainty' : 'Doubt'}
+            </Badge>
+          )}
+          <Link href="/reports/financial-statement-notes">
+            <Button variant="outline" size="sm" data-testid="button-view-notes">
+              <FileText className="w-4 h-4 mr-2" />
+              View Notes
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <Tabs defaultValue="profit-loss" className="space-y-6" data-testid="tabs-financial-reports">

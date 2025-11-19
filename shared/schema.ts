@@ -48,6 +48,10 @@ export const ALERT_SEVERITY = ['low', 'medium', 'high', 'critical'] as const;
 export const ALERT_STATUS = ['open', 'under_review', 'closed', 'escalated_to_sar'] as const;
 export const SAR_STATUS = ['draft', 'under_review', 'approved', 'filed', 'rejected'] as const;
 
+// Financial Statement Notes Enums
+export const FINANCIAL_STATEMENT_NOTE_TYPE = ['accounting_policy', 'contingent_liability', 'contingent_asset', 'related_party_transaction', 'subsequent_event', 'going_concern', 'significant_accounting_judgment', 'general'] as const;
+export const GOING_CONCERN_STATUS = ['positive', 'uncertainty', 'doubt'] as const;
+
 // Session storage table for Replit Auth
 export const sessions = pgTable(
   "sessions",
@@ -3898,6 +3902,52 @@ export const insertScheduledReportRunSchema = createInsertSchema(scheduledReport
 
 export type InsertScheduledReportRun = z.infer<typeof insertScheduledReportRunSchema>;
 export type ScheduledReportRun = typeof scheduledReportRuns.$inferSelect;
+
+// ============================================================================
+// FINANCIAL STATEMENT NOTES (IAS 1 Compliance)
+// ============================================================================
+
+export const financialStatementNotes = pgTable("financial_statement_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  reportingPeriodStart: timestamp("reporting_period_start").notNull(),
+  reportingPeriodEnd: timestamp("reporting_period_end").notNull(),
+  noteType: varchar("note_type", { length: 100 }).notNull(), // 'accounting_policy', 'contingent_liability', etc.
+  noteTitle: varchar("note_title", { length: 500 }).notNull(),
+  noteContent: text("note_content").notNull(), // Rich text/markdown content
+  displayOrder: integer("display_order").default(0).notNull(),
+  isActive: boolean("is_active").default(true).notNull(), // Soft delete
+  
+  // Going Concern specific fields (only for going_concern type)
+  goingConcernStatus: varchar("going_concern_status", { length: 50 }), // 'positive', 'uncertainty', 'doubt'
+  goingConcernAssessmentDate: timestamp("going_concern_assessment_date"),
+  goingConcernReviewedBy: varchar("going_concern_reviewed_by").references(() => users.id),
+  
+  // Version control
+  versionNumber: integer("version_number").default(1).notNull(),
+  previousVersionId: varchar("previous_version_id"), // Self-reference to previous version
+  
+  // Audit fields
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("financial_statement_notes_tenant_period_idx").on(table.tenantId, table.reportingPeriodStart, table.reportingPeriodEnd),
+  index("financial_statement_notes_tenant_type_idx").on(table.tenantId, table.noteType),
+  index("financial_statement_notes_tenant_active_idx").on(table.tenantId, table.isActive),
+  index("financial_statement_notes_created_by_idx").on(table.createdBy),
+]);
+
+export const insertFinancialStatementNoteSchema = createInsertSchema(financialStatementNotes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  versionNumber: true,
+  previousVersionId: true,
+});
+
+export type InsertFinancialStatementNote = z.infer<typeof insertFinancialStatementNoteSchema>;
+export type FinancialStatementNote = typeof financialStatementNotes.$inferSelect;
 
 // ============================================================================
 // AUDIT LOGS (immutable audit trail for all entities)
