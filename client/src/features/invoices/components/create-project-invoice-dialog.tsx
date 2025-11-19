@@ -891,14 +891,17 @@ export function CreateProjectInvoiceDialog({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Tax (Optional)</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select 
+                        onValueChange={(value) => field.onChange(value === "none" ? "" : value)} 
+                        value={field.value || "none"}
+                      >
                         <FormControl>
                           <SelectTrigger data-testid="select-tax">
                             <SelectValue placeholder="Select tax" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">No tax</SelectItem>
+                          <SelectItem value="none">No tax</SelectItem>
                           {taxes.map((tax) => (
                             <SelectItem key={tax.id} value={tax.id}>
                               {tax.name} ({safeDecimal(tax.rate)}%)
