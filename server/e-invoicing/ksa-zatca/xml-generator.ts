@@ -1,0 +1,186 @@
+import { randomUUID } from 'crypto';
+import type { Invoice, Customer, TenantCompanyProfile, InvoiceLineItem } from '@shared/schema';
+
+export class KSAZATCAXMLGenerator {
+  /**
+   * Generate ZATCA-compliant XML for KSA e-invoice
+   */
+  static generateInvoiceXML(
+    invoice: Invoice,
+    customer: Customer,
+    companyProfile: TenantCompanyProfile,
+    lineItems: InvoiceLineItem[],
+    previousInvoiceHash?: string | null
+  ): {
+    xml: string;
+    uuid: string;
+    hash: string;
+  } {
+    // Generate UUID for this invoice
+    const invoiceUUID = randomUUID();
+    
+    // Determine invoice type (B2B or B2C)
+    const invoiceType = customer.taxId ? 'B2B' : 'B2C';
+    const invoiceTypeCode = invoiceType === 'B2B' ? '0100000' : '0200000';
+    
+    // Build XML structure
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2">
+  
+  <cbc:ProfileID>reporting:1.0</cbc:ProfileID>
+  <cbc:ID>${invoice.invoiceNumber}</cbc:ID>
+  <cbc:UUID>${invoiceUUID}</cbc:UUID>
+  <cbc:IssueDate>${invoice.invoiceDate.toISOString().split('T')[0]}</cbc:IssueDate>
+  <cbc:IssueTime>${invoice.invoiceDate.toISOString().split('T')[1].split('.')[0]}</cbc:IssueTime>
+  <cbc:InvoiceTypeCode name="${invoiceType}">${invoiceTypeCode}</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>${invoice.currencyCode || 'SAR'}</cbc:DocumentCurrencyCode>
+  <cbc:TaxCurrencyCode>SAR</cbc:TaxCurrencyCode>
+  
+  ${previousInvoiceHash ? `
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>ICV</cbc:ID>
+    <cbc:UUID>1</cbc:UUID>
+  </cac:AdditionalDocumentReference>
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>PIH</cbc:ID>
+    <cac:Attachment>
+      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">${previousInvoiceHash}</cbc:EmbeddedDocumentBinaryObject>
+    </cac:Attachment>
+  </cac:AdditionalDocumentReference>
+  ` : ''}
+  
+  <!-- QR Code Placeholder (generated separately) -->
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>QR</cbc:ID>
+    <cac:Attachment>
+      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">QR_CODE_PLACEHOLDER</cbc:EmbeddedDocumentBinaryObject>
+    </cac:Attachment>
+  </cac:AdditionalDocumentReference>
+  
+  <!-- Supplier (Company) -->
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="CRN">${companyProfile.commercialRegistration || ''}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="TIN">${companyProfile.taxId || ''}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PostalAddress>
+        <cbc:StreetName>${companyProfile.address || ''}</cbc:StreetName>
+        <cbc:BuildingNumber>${companyProfile.buildingNumber || ''}</cbc:BuildingNumber>
+        <cbc:CitySubdivisionName>${companyProfile.district || ''}</cbc:CitySubdivisionName>
+        <cbc:CityName>${companyProfile.city || ''}</cbc:CityName>
+        <cbc:PostalZone>${companyProfile.postalCode || ''}</cbc:PostalZone>
+        <cac:Country>
+          <cbc:IdentificationCode>SA</cbc:IdentificationCode>
+        </cac:Country>
+      </cac:PostalAddress>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>${companyProfile.taxId || ''}</cbc:CompanyID>
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>
+      <cac:PartyLegalEntity>
+        <cbc:RegistrationName>${companyProfile.name}</cbc:RegistrationName>
+      </cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  
+  <!-- Customer -->
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      ${customer.taxId ? `
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="TIN">${customer.taxId}</cbc:ID>
+      </cac:PartyIdentification>
+      ` : ''}
+      <cac:PostalAddress>
+        <cbc:StreetName>${customer.billingAddress?.street || ''}</cbc:StreetName>
+        <cbc:CityName>${customer.billingAddress?.city || ''}</cbc:CityName>
+        <cbc:PostalZone>${customer.billingAddress?.postalCode || ''}</cbc:PostalZone>
+        <cac:Country>
+          <cbc:IdentificationCode>${customer.billingAddress?.country || 'SA'}</cbc:IdentificationCode>
+        </cac:Country>
+      </cac:PostalAddress>
+      ${customer.taxId ? `
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>${customer.taxId}</cbc:CompanyID>
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>
+      ` : ''}
+      <cac:PartyLegalEntity>
+        <cbc:RegistrationName>${customer.companyName || customer.displayName}</cbc:RegistrationName>
+      </cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  
+  <!-- Tax Total -->
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="${invoice.currencyCode || 'SAR'}">${invoice.taxAmount}</cbc:TaxAmount>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="${invoice.currencyCode || 'SAR'}">${invoice.subtotal}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="${invoice.currencyCode || 'SAR'}">${invoice.taxAmount}</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:ID>S</cbc:ID>
+        <cbc:Percent>15</cbc:Percent>
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>
+  </cac:TaxTotal>
+  
+  <!-- Legal Monetary Total -->
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="${invoice.currencyCode || 'SAR'}">${invoice.subtotal}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${invoice.currencyCode || 'SAR'}">${invoice.subtotal}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${invoice.currencyCode || 'SAR'}">${invoice.total}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="${invoice.currencyCode || 'SAR'}">${invoice.total}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+  
+  <!-- Invoice Lines -->
+  ${lineItems.map((line, index) => {
+    const lineAmount = typeof line.amount === 'string' ? parseFloat(line.amount) : line.amount;
+    const lineRate = typeof line.unitPrice === 'string' ? parseFloat(line.unitPrice) : line.unitPrice;
+    const lineTax = (lineAmount * 0.15).toFixed(2);
+    
+    return `
+  <cac:InvoiceLine>
+    <cbc:ID>${index + 1}</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="PCE">${line.quantity}</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="${invoice.currencyCode || 'SAR'}">${lineAmount.toFixed(2)}</cbc:LineExtensionAmount>
+    <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="${invoice.currencyCode || 'SAR'}">${lineTax}</cbc:TaxAmount>
+    </cac:TaxTotal>
+    <cac:Item>
+      <cbc:Name>${line.description}</cbc:Name>
+      <cac:ClassifiedTaxCategory>
+        <cbc:ID>S</cbc:ID>
+        <cbc:Percent>15</cbc:Percent>
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:ClassifiedTaxCategory>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="${invoice.currencyCode || 'SAR'}">${lineRate.toFixed(2)}</cbc:PriceAmount>
+    </cac:Price>
+  </cac:InvoiceLine>
+  `;
+  }).join('')}
+</Invoice>`;
+
+    // Calculate cryptographic hash of XML (SHA-256)
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(xml).digest('base64');
+    
+    return { xml, uuid: invoiceUUID, hash };
+  }
+}

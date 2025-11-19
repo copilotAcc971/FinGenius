@@ -36,6 +36,7 @@ import { withTransaction } from './accounting/service';
 import { getAccountBalance, updateHistoricalBalances } from './accounting/historical-balance-service';
 import { submitJournalEntryForApproval, approveJournalEntryStep, rejectJournalEntry, autoPostApprovedEntry } from './accounting/workflow-engine';
 import { UAEPeppolService } from './e-invoicing/uae-peppol/peppol-service';
+import { KSAZATCAService } from './e-invoicing/ksa-zatca/zatca-service';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -2257,6 +2258,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('[Peppol API] Status check error:', error);
       res.status(500).json({ message: error.message || 'Failed to get Peppol status' });
+    }
+  });
+
+  // ===== KSA ZATCA E-INVOICING =====
+
+  // Prepare invoice for ZATCA compliance (generate XML, UUID, hash, QR code)
+  app.post('/api/invoices/:id/zatca/prepare', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.update'), async (req: any, res) => {
+    const tenantId = req.tenantId!;
+    const { id } = req.params;
+    
+    try {
+      const zatcaService = new KSAZATCAService(storage);
+      const result = await zatcaService.prepareInvoice(tenantId, id);
+      
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json({ message: result.error });
+      }
+    } catch (error: any) {
+      console.error('[ZATCA API] Prepare error:', error);
+      res.status(500).json({ message: error.message || 'Failed to prepare invoice for ZATCA' });
+    }
+  });
+
+  // Clear B2B invoice with FATOORAH (real-time clearance)
+  app.post('/api/invoices/:id/zatca/clear', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.update'), async (req: any, res) => {
+    const tenantId = req.tenantId!;
+    const { id } = req.params;
+    
+    try {
+      const zatcaService = new KSAZATCAService(storage);
+      const result = await zatcaService.clearB2BInvoice(tenantId, id);
+      
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json({ message: result.error });
+      }
+    } catch (error: any) {
+      console.error('[ZATCA API] Clearance error:', error);
+      res.status(500).json({ message: error.message || 'Failed to clear B2B invoice with ZATCA' });
+    }
+  });
+
+  // Report B2C invoice to FATOORAH (within 24 hours)
+  app.post('/api/invoices/:id/zatca/report', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.update'), async (req: any, res) => {
+    const tenantId = req.tenantId!;
+    const { id } = req.params;
+    
+    try {
+      const zatcaService = new KSAZATCAService(storage);
+      const result = await zatcaService.reportB2CInvoice(tenantId, id);
+      
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json({ message: result.error });
+      }
+    } catch (error: any) {
+      console.error('[ZATCA API] Reporting error:', error);
+      res.status(500).json({ message: error.message || 'Failed to report B2C invoice to ZATCA' });
+    }
+  });
+
+  // Get ZATCA status for invoice
+  app.get('/api/invoices/:id/zatca/status', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.read'), async (req: any, res) => {
+    const tenantId = req.tenantId!;
+    const { id } = req.params;
+    
+    try {
+      const invoice = await storage.getInvoice(id);
+      if (!invoice || invoice.tenantId !== tenantId) {
+        return res.status(404).json({ message: 'Invoice not found' });
+      }
+      
+      res.json({
+        clearanceStatus: invoice.zatcaClearanceStatus || 'not_prepared',
+        clearedAt: invoice.zatcaClearedAt,
+        reportedAt: invoice.zatcaReportedAt,
+        uuid: invoice.zatcaUuid,
+        hash: invoice.zatcaHash,
+        hasQrCode: !!invoice.zatcaQrCode
+      });
+    } catch (error: any) {
+      console.error('[ZATCA API] Status check error:', error);
+      res.status(500).json({ message: error.message || 'Failed to get ZATCA status' });
     }
   });
 

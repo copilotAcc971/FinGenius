@@ -36,6 +36,8 @@ The application features a multi-tenant architecture employing a "verified-tenan
 - **Employee Expense Management:** Features expense submission with receipt upload, approval workflows, reimbursement processing, and automatic journal entries.
 - **Inventory Management:** Full module including stock adjustments, opening stock, composite items, inventory valuation reports, and automatic journal entries compliant with IAS 2.
 - **Open Banking Integration:** Provider-agnostic architecture, currently implemented with Lean Technologies (UAE). Includes OAuth2, bank connection management, daily transaction sync (with AI-powered reconciliation using OpenAI GPT-4o-mini), payment initiation, and secure webhook handling.
+- **UAE Peppol E-Invoicing:** PINT-AE compliant with UBL 2.1 XML generation, TLV QR codes (UAE FTA compliant), ASP integration foundation, 14-day transmission deadline tracking, complete audit trail.
+- **KSA ZATCA E-Invoicing (Phase 2):** ZATCA-compliant XML with UUID/hash/hash chaining, TLV QR codes, FATOORAH integration for B2B real-time clearance and B2C 24-hour reporting, SHA-256 cryptographic hashing, PKI digital signature support.
 - **AI Copilot:** An AI assistant with live voice conversation capabilities.
     - **Backend:** WebSocket server with session-based authentication, OpenAI Realtime API integration, 11 accounting functions, PCM16 audio streaming, server-side VAD, function call handling with confirmation, heartbeat monitoring.
     - **Frontend:** AudioManager, AudioWorklet processor, CopilotWebSocketClient with auto-reconnection, real-time audio streaming/playback.
