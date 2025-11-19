@@ -542,14 +542,14 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
 
                   <div className="col-span-1">
                     <Select
-                      value={item.taxId}
-                      onValueChange={(value) => updateLineItem(index, "taxId", value)}
+                      value={item.taxId || "none"}
+                      onValueChange={(value) => updateLineItem(index, "taxId", value === "none" ? "" : value)}
                     >
                       <SelectTrigger data-testid={`select-tax-${index}`}>
                         <SelectValue placeholder="Tax" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         {taxes?.map((tax) => (
                           <SelectItem key={tax.id} value={tax.id}>
                             {tax.name}
