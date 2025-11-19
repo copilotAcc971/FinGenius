@@ -152,6 +152,9 @@ import {
   type CashFlowActivity,
   type ARAgingReport,
   type APAgingReport,
+  type EquityStatementReport,
+  type EquityStatementCategory,
+  type EquityComponentLine,
   type FXConfig,
   type InsertFXConfig,
   customReportConfigs,
@@ -459,6 +462,7 @@ export interface IStorage {
   getEnhancedCashFlowReport(tenantId: string, startDate: Date, endDate: Date, comparisonStartDate?: Date, comparisonEndDate?: Date): Promise<EnhancedCashFlowReport>;
   getARAgingReport(tenantId: string, groupBy?: 'customer' | 'invoice' | 'project'): Promise<ARAgingReport>;
   getAPAgingReport(tenantId: string, groupBy?: 'vendor' | 'invoice' | 'project'): Promise<APAgingReport>;
+  getEquityStatementReport(tenantId: string, startDate: Date, endDate: Date, comparisonStartDate?: Date, comparisonEndDate?: Date): Promise<EquityStatementReport>;
 
   // Currencies
   getCurrencies(tenantId: string): Promise<Currency[]>;
@@ -6306,6 +6310,395 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  async getEquityStatementReport(
+    tenantId: string,
+    startDate: Date,
+    endDate: Date,
+    comparisonStartDate?: Date,
+    comparisonEndDate?: Date
+  ): Promise<EquityStatementReport> {
+    // ===============================================================================
+    // IAS 1.106-110 - Statement of Changes in Equity (SOCE) Compliance
+    // ===============================================================================
+    // 
+    // This method generates a Statement of Changes in Equity in compliance with
+    // IAS 1 requirements:
+    //
+    // ✓ IAS 1.106 - Components Presented:
+    //   - Total comprehensive income for the period (net profit + OCI)
+    //   - Effects of retrospective application or restatement (not yet implemented)
+    //   - Reconciliation between opening and closing balances for each equity component
+    //   - Separate presentation of transactions with owners in their capacity as owners
+    //
+    // ✓ IAS 1.107 - Equity Components Tracked:
+    //   - Share capital / Capital stock
+    //   - Retained earnings
+    //   - Reserves (revaluation, FX translation, other)
+    //   - Treasury stock (if applicable)
+    //
+    // ✓ IAS 1.38 - Comparative Information:
+    //   - Supports optional comparison period via comparisonStartDate/comparisonEndDate
+    //   - Variance analysis calculated for closing balances
+    //
+    // ✓ Reconciliation with Balance Sheet:
+    //   - Total closing equity must match Balance Sheet equity section
+    //   - Verification flag: reconcilesWithBalanceSheet
+    //
+    // ✓ Multi-currency Support (IAS 21):
+    //   - FX translation standard and method disclosed
+    //   - Base currency clearly identified
+    //
+    // Movements tracked:
+    // 1. Opening balance (at startDate)
+    // 2. Net profit/loss for period (from P&L report)
+    // 3. Dividends declared/paid (equity transactions)
+    // 4. Share capital changes (issuances, buybacks)
+    // 5. Other comprehensive income (OCI) - FX translation reserves
+    // 6. Other movements (reserves transfers, corrections)
+    // 7. Closing balance (at endDate)
+    //
+    // ===============================================================================
+
+    // Helper function to calculate variance percentage
+    const calculateVariancePercentage = (current: number, previous: number): number | "Infinity" | "-Infinity" => {
+      if (previous === 0 && current === 0) return 0;
+      if (previous === 0 && current > 0) return "Infinity";
+      if (previous === 0 && current < 0) return "-Infinity";
+      if (current === 0 && previous !== 0) return -100;
+      return ((current - previous) / Math.abs(previous)) * 100;
+    };
+
+    // Helper function to get balance at a specific date
+    const getBalanceAtDate = async (accountId: string, date: Date): Promise<number> => {
+      const result = await db
+        .select({
+          balance: accountTransactionHistory.runningBalance
+        })
+        .from(accountTransactionHistory)
+        .where(
+          and(
+            eq(accountTransactionHistory.tenantId, tenantId),
+            eq(accountTransactionHistory.accountId, accountId),
+            lte(accountTransactionHistory.transactionDate, date)
+          )
+        )
+        .orderBy(desc(accountTransactionHistory.transactionDate))
+        .limit(1);
+
+      return result[0]?.balance ? parseFloat(result[0].balance) : 0;
+    };
+
+    // Helper to get movements for a date range by analyzing transaction patterns
+    const getEquityMovements = async (accountId: string, start: Date, end: Date) => {
+      // Query all transactions in the period
+      const transactions = await db
+        .select({
+          amount: journalEntryLegs.amount,
+          type: journalEntryLegs.type,
+          description: journalEntries.description,
+          entryDate: journalEntries.entryDate,
+        })
+        .from(journalEntryLegs)
+        .innerJoin(journalEntries, eq(journalEntryLegs.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(journalEntryLegs.tenantId, tenantId),
+            eq(journalEntryLegs.accountId, accountId),
+            gte(journalEntries.entryDate, start),
+            lte(journalEntries.entryDate, end),
+            eq(journalEntries.status, 'posted')
+          )
+        );
+
+      let dividends = 0;
+      let shareCapitalChanges = 0;
+      let otherComprehensiveIncome = 0;
+      let otherMovements = 0;
+
+      for (const tx of transactions) {
+        const amount = parseFloat(tx.amount);
+        const description = tx.description?.toLowerCase() || '';
+        
+        // Classify based on description keywords
+        if (description.includes('dividend') || description.includes('distribution')) {
+          // Dividends reduce equity (debit to retained earnings)
+          dividends += (tx.type === 'Debit' ? amount : -amount);
+        } else if (description.includes('share') || description.includes('capital') || description.includes('stock')) {
+          // Share capital changes
+          shareCapitalChanges += (tx.type === 'Credit' ? amount : -amount);
+        } else if (description.includes('translation') || description.includes('fx') || description.includes('revaluation')) {
+          // Other comprehensive income (OCI)
+          otherComprehensiveIncome += (tx.type === 'Credit' ? amount : -amount);
+        } else {
+          // Other movements
+          otherMovements += (tx.type === 'Credit' ? amount : -amount);
+        }
+      }
+
+      return {
+        dividends,
+        shareCapitalChanges,
+        otherComprehensiveIncome,
+        otherMovements,
+      };
+    };
+
+    // Get net profit for the period from P&L
+    const plReport = await this.getProfitLossReport(tenantId, startDate, endDate);
+    const netProfitLoss = parseFloat(plReport.netProfit);
+
+    // Get all equity accounts
+    const equityAccounts = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.tenantId, tenantId),
+          eq(accounts.type, 'equity'),
+          eq(accounts.isActive, true)
+        )
+      );
+
+    // Process each equity account
+    const equityComponents: EquityComponentLine[] = await Promise.all(
+      equityAccounts.map(async (account) => {
+        const openingBalance = await getBalanceAtDate(account.id, startDate);
+        const closingBalance = await getBalanceAtDate(account.id, endDate);
+        const movements = await getEquityMovements(account.id, startDate, endDate);
+        
+        // Determine if this is a retained earnings account
+        const isRetainedEarnings = account.accountCategory?.toLowerCase().includes('retained') || 
+                                   account.name.toLowerCase().includes('retained');
+        
+        const component: EquityComponentLine = {
+          accountId: account.id,
+          accountCode: account.code,
+          accountName: account.name,
+          accountCategory: account.accountCategory || 'Other Equity',
+          openingBalance: openingBalance.toFixed(2),
+          netProfitLoss: isRetainedEarnings ? netProfitLoss.toFixed(2) : '0.00',
+          dividends: movements.dividends.toFixed(2),
+          shareCapitalChanges: movements.shareCapitalChanges.toFixed(2),
+          otherComprehensiveIncome: movements.otherComprehensiveIncome.toFixed(2),
+          otherMovements: movements.otherMovements.toFixed(2),
+          closingBalance: closingBalance.toFixed(2),
+        };
+
+        // Add comparison period data if provided
+        if (comparisonStartDate && comparisonEndDate) {
+          const compOpeningBalance = await getBalanceAtDate(account.id, comparisonStartDate);
+          const compClosingBalance = await getBalanceAtDate(account.id, comparisonEndDate);
+          const compMovements = await getEquityMovements(account.id, comparisonStartDate, comparisonEndDate);
+          const compPLReport = await this.getProfitLossReport(tenantId, comparisonStartDate, comparisonEndDate);
+          const compNetProfitLoss = parseFloat(compPLReport.netProfit);
+
+          component.comparisonOpeningBalance = compOpeningBalance.toFixed(2);
+          component.comparisonNetProfitLoss = isRetainedEarnings ? compNetProfitLoss.toFixed(2) : '0.00';
+          component.comparisonDividends = compMovements.dividends.toFixed(2);
+          component.comparisonShareCapitalChanges = compMovements.shareCapitalChanges.toFixed(2);
+          component.comparisonOtherComprehensiveIncome = compMovements.otherComprehensiveIncome.toFixed(2);
+          component.comparisonOtherMovements = compMovements.otherMovements.toFixed(2);
+          component.comparisonClosingBalance = compClosingBalance.toFixed(2);
+
+          // Calculate variances
+          component.openingBalanceVariance = (openingBalance - compOpeningBalance).toFixed(2);
+          component.netProfitLossVariance = (parseFloat(component.netProfitLoss) - parseFloat(component.comparisonNetProfitLoss)).toFixed(2);
+          component.dividendsVariance = (movements.dividends - compMovements.dividends).toFixed(2);
+          component.shareCapitalChangesVariance = (movements.shareCapitalChanges - compMovements.shareCapitalChanges).toFixed(2);
+          component.otherComprehensiveIncomeVariance = (movements.otherComprehensiveIncome - compMovements.otherComprehensiveIncome).toFixed(2);
+          component.otherMovementsVariance = (movements.otherMovements - compMovements.otherMovements).toFixed(2);
+          component.closingBalanceVariance = (closingBalance - compClosingBalance).toFixed(2);
+          component.closingBalanceVariancePercentage = calculateVariancePercentage(closingBalance, compClosingBalance);
+        }
+
+        return component;
+      })
+    );
+
+    // Group components by category
+    const categoriesMap = new Map<string, EquityComponentLine[]>();
+    for (const component of equityComponents) {
+      const category = component.accountCategory;
+      if (!categoriesMap.has(category)) {
+        categoriesMap.set(category, []);
+      }
+      categoriesMap.get(category)!.push(component);
+    }
+
+    // Build category summaries
+    const equityCategories: EquityStatementCategory[] = [];
+    for (const [category, components] of categoriesMap) {
+      const subtotals = {
+        opening: components.reduce((sum, c) => sum + parseFloat(c.openingBalance), 0),
+        netProfitLoss: components.reduce((sum, c) => sum + parseFloat(c.netProfitLoss), 0),
+        dividends: components.reduce((sum, c) => sum + parseFloat(c.dividends), 0),
+        shareCapitalChanges: components.reduce((sum, c) => sum + parseFloat(c.shareCapitalChanges), 0),
+        otherComprehensiveIncome: components.reduce((sum, c) => sum + parseFloat(c.otherComprehensiveIncome), 0),
+        otherMovements: components.reduce((sum, c) => sum + parseFloat(c.otherMovements), 0),
+        closing: components.reduce((sum, c) => sum + parseFloat(c.closingBalance), 0),
+      };
+
+      const categoryData: EquityStatementCategory = {
+        category,
+        components,
+        subtotalOpeningBalance: subtotals.opening.toFixed(2),
+        subtotalNetProfitLoss: subtotals.netProfitLoss.toFixed(2),
+        subtotalDividends: subtotals.dividends.toFixed(2),
+        subtotalShareCapitalChanges: subtotals.shareCapitalChanges.toFixed(2),
+        subtotalOtherComprehensiveIncome: subtotals.otherComprehensiveIncome.toFixed(2),
+        subtotalOtherMovements: subtotals.otherMovements.toFixed(2),
+        subtotalClosingBalance: subtotals.closing.toFixed(2),
+      };
+
+      if (comparisonStartDate && comparisonEndDate) {
+        const compSubtotals = {
+          opening: components.reduce((sum, c) => sum + parseFloat(c.comparisonOpeningBalance || '0'), 0),
+          netProfitLoss: components.reduce((sum, c) => sum + parseFloat(c.comparisonNetProfitLoss || '0'), 0),
+          dividends: components.reduce((sum, c) => sum + parseFloat(c.comparisonDividends || '0'), 0),
+          shareCapitalChanges: components.reduce((sum, c) => sum + parseFloat(c.comparisonShareCapitalChanges || '0'), 0),
+          otherComprehensiveIncome: components.reduce((sum, c) => sum + parseFloat(c.comparisonOtherComprehensiveIncome || '0'), 0),
+          otherMovements: components.reduce((sum, c) => sum + parseFloat(c.comparisonOtherMovements || '0'), 0),
+          closing: components.reduce((sum, c) => sum + parseFloat(c.comparisonClosingBalance || '0'), 0),
+        };
+
+        categoryData.comparisonSubtotalOpeningBalance = compSubtotals.opening.toFixed(2);
+        categoryData.comparisonSubtotalNetProfitLoss = compSubtotals.netProfitLoss.toFixed(2);
+        categoryData.comparisonSubtotalDividends = compSubtotals.dividends.toFixed(2);
+        categoryData.comparisonSubtotalShareCapitalChanges = compSubtotals.shareCapitalChanges.toFixed(2);
+        categoryData.comparisonSubtotalOtherComprehensiveIncome = compSubtotals.otherComprehensiveIncome.toFixed(2);
+        categoryData.comparisonSubtotalOtherMovements = compSubtotals.otherMovements.toFixed(2);
+        categoryData.comparisonSubtotalClosingBalance = compSubtotals.closing.toFixed(2);
+        categoryData.closingBalanceVariance = (subtotals.closing - compSubtotals.closing).toFixed(2);
+        categoryData.closingBalanceVariancePercentage = calculateVariancePercentage(subtotals.closing, compSubtotals.closing);
+      }
+
+      equityCategories.push(categoryData);
+    }
+
+    // Calculate total equity movements
+    const totalOpeningBalance = equityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotalOpeningBalance), 0);
+    const totalNetProfitLoss = equityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotalNetProfitLoss), 0);
+    const totalDividends = equityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotalDividends), 0);
+    const totalShareCapitalChanges = equityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotalShareCapitalChanges), 0);
+    const totalOtherComprehensiveIncome = equityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotalOtherComprehensiveIncome), 0);
+    const totalOtherMovements = equityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotalOtherMovements), 0);
+    const totalClosingBalance = equityCategories.reduce((sum, cat) => sum + parseFloat(cat.subtotalClosingBalance), 0);
+
+    // Get Balance Sheet to verify reconciliation
+    const balanceSheet = await this.getEnhancedBalanceSheetReport(tenantId, endDate);
+    const balanceSheetEquity = parseFloat(balanceSheet.totalEquity);
+    const reconcilesWithBalanceSheet = Math.abs(totalClosingBalance - balanceSheetEquity) < 0.01;
+
+    // Validate reconciliation - throw error if equity doesn't match Balance Sheet
+    if (!reconcilesWithBalanceSheet) {
+      const difference = Math.abs(totalClosingBalance - balanceSheetEquity);
+      throw new Error(
+        `Equity Statement reconciliation failed: Total closing equity (${totalClosingBalance.toFixed(2)}) ` +
+        `does not match Balance Sheet equity (${balanceSheetEquity.toFixed(2)}). ` +
+        `Difference: ${difference.toFixed(2)}. Please verify journal entries and account balances.`
+      );
+    }
+
+    // Get base currency and IFRS settings
+    const baseCurrencyRecord = await db.query.currencies.findFirst({
+      where: and(
+        eq(currencies.tenantId, tenantId),
+        eq(currencies.isBaseCurrency, true)
+      )
+    });
+    const baseCurrency = baseCurrencyRecord?.code || 'USD';
+
+    const companyProfile = await db
+      .select()
+      .from(tenantCompanyProfiles)
+      .where(eq(tenantCompanyProfiles.tenantId, tenantId))
+      .limit(1);
+    const profile = companyProfile[0];
+
+    // Build the report
+    const report: EquityStatementReport = {
+      tenantId,
+      startDate,
+      endDate,
+      equityCategories,
+      totalOpeningBalance: totalOpeningBalance.toFixed(2),
+      totalNetProfitLoss: totalNetProfitLoss.toFixed(2),
+      totalDividends: totalDividends.toFixed(2),
+      totalShareCapitalChanges: totalShareCapitalChanges.toFixed(2),
+      totalOtherComprehensiveIncome: totalOtherComprehensiveIncome.toFixed(2),
+      totalOtherMovements: totalOtherMovements.toFixed(2),
+      totalClosingBalance: totalClosingBalance.toFixed(2),
+      reconcilesWithBalanceSheet,
+      baseCurrency,
+      ifrsComplianceEnabled: profile?.ifrsComplianceEnabled || false,
+      fxTranslationStandard: profile?.fxTranslationStandard || null,
+      fxTranslationApplied: false,
+    };
+
+    // Add comparison period data if provided
+    if (comparisonStartDate && comparisonEndDate) {
+      report.comparisonStartDate = comparisonStartDate;
+      report.comparisonEndDate = comparisonEndDate;
+
+      const compTotalOpeningBalance = equityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotalOpeningBalance || '0'),
+        0
+      );
+      const compTotalNetProfitLoss = equityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotalNetProfitLoss || '0'),
+        0
+      );
+      const compTotalDividends = equityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotalDividends || '0'),
+        0
+      );
+      const compTotalShareCapitalChanges = equityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotalShareCapitalChanges || '0'),
+        0
+      );
+      const compTotalOtherComprehensiveIncome = equityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotalOtherComprehensiveIncome || '0'),
+        0
+      );
+      const compTotalOtherMovements = equityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotalOtherMovements || '0'),
+        0
+      );
+      const compTotalClosingBalance = equityCategories.reduce(
+        (sum, cat) => sum + parseFloat(cat.comparisonSubtotalClosingBalance || '0'),
+        0
+      );
+
+      report.comparisonTotalOpeningBalance = compTotalOpeningBalance.toFixed(2);
+      report.comparisonTotalNetProfitLoss = compTotalNetProfitLoss.toFixed(2);
+      report.comparisonTotalDividends = compTotalDividends.toFixed(2);
+      report.comparisonTotalShareCapitalChanges = compTotalShareCapitalChanges.toFixed(2);
+      report.comparisonTotalOtherComprehensiveIncome = compTotalOtherComprehensiveIncome.toFixed(2);
+      report.comparisonTotalOtherMovements = compTotalOtherMovements.toFixed(2);
+      report.comparisonTotalClosingBalance = compTotalClosingBalance.toFixed(2);
+      report.closingBalanceVariance = (totalClosingBalance - compTotalClosingBalance).toFixed(2);
+      report.closingBalanceVariancePercentage = calculateVariancePercentage(totalClosingBalance, compTotalClosingBalance);
+
+      // Verify comparison period reconciliation
+      const compBalanceSheet = await this.getEnhancedBalanceSheetReport(tenantId, comparisonEndDate);
+      const compBalanceSheetEquity = parseFloat(compBalanceSheet.totalEquity);
+      const compReconcilesWithBalanceSheet = Math.abs(compTotalClosingBalance - compBalanceSheetEquity) < 0.01;
+      report.comparisonReconcilesWithBalanceSheet = compReconcilesWithBalanceSheet;
+
+      // Validate comparison period reconciliation
+      if (!compReconcilesWithBalanceSheet) {
+        const compDifference = Math.abs(compTotalClosingBalance - compBalanceSheetEquity);
+        throw new Error(
+          `Equity Statement comparison period reconciliation failed: Total closing equity (${compTotalClosingBalance.toFixed(2)}) ` +
+          `does not match Balance Sheet equity (${compBalanceSheetEquity.toFixed(2)}). ` +
+          `Difference: ${compDifference.toFixed(2)}. Please verify journal entries and account balances for the comparison period.`
+        );
+      }
+    }
+
+    return report;
+  }
+
   // Currencies
   async getCurrencies(tenantId: string): Promise<Currency[]> {
     return await db.query.currencies.findMany({
@@ -9841,6 +10234,10 @@ export class MemStorage implements IStorage {
 
   async getEnhancedCashFlowReport(tenantId: string, startDate: Date, endDate: Date, comparisonStartDate?: Date, comparisonEndDate?: Date): Promise<EnhancedCashFlowReport> {
     throw new Error('Enhanced Cash Flow Report not implemented in MemStorage');
+  }
+
+  async getEquityStatementReport(tenantId: string, startDate: Date, endDate: Date, comparisonStartDate?: Date, comparisonEndDate?: Date): Promise<EquityStatementReport> {
+    throw new Error('Equity Statement Report not implemented in MemStorage');
   }
 
   // Currency operations - Stubs

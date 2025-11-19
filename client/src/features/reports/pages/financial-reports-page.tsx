@@ -228,6 +228,87 @@ interface EnhancedCashFlowReport {
   fxTranslationApplied?: boolean;
 }
 
+interface EquityComponentLine {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  accountCategory: string;
+  openingBalance: string;
+  netProfitLoss: string;
+  dividends: string;
+  shareCapitalChanges: string;
+  otherComprehensiveIncome: string;
+  otherMovements: string;
+  closingBalance: string;
+  comparisonOpeningBalance?: string;
+  comparisonNetProfitLoss?: string;
+  comparisonDividends?: string;
+  comparisonShareCapitalChanges?: string;
+  comparisonOtherComprehensiveIncome?: string;
+  comparisonOtherMovements?: string;
+  comparisonClosingBalance?: string;
+  openingBalanceVariance?: string;
+  netProfitLossVariance?: string;
+  dividendsVariance?: string;
+  shareCapitalChangesVariance?: string;
+  otherComprehensiveIncomeVariance?: string;
+  otherMovementsVariance?: string;
+  closingBalanceVariance?: string;
+  closingBalanceVariancePercentage?: number | "Infinity" | "-Infinity";
+}
+
+interface EquityStatementCategory {
+  category: string;
+  components: EquityComponentLine[];
+  subtotalOpeningBalance: string;
+  subtotalNetProfitLoss: string;
+  subtotalDividends: string;
+  subtotalShareCapitalChanges: string;
+  subtotalOtherComprehensiveIncome: string;
+  subtotalOtherMovements: string;
+  subtotalClosingBalance: string;
+  comparisonSubtotalOpeningBalance?: string;
+  comparisonSubtotalNetProfitLoss?: string;
+  comparisonSubtotalDividends?: string;
+  comparisonSubtotalShareCapitalChanges?: string;
+  comparisonSubtotalOtherComprehensiveIncome?: string;
+  comparisonSubtotalOtherMovements?: string;
+  comparisonSubtotalClosingBalance?: string;
+  closingBalanceVariance?: string;
+  closingBalanceVariancePercentage?: number | "Infinity" | "-Infinity";
+}
+
+interface EquityStatementReport {
+  tenantId: string;
+  startDate: Date;
+  endDate: Date;
+  comparisonStartDate?: Date;
+  comparisonEndDate?: Date;
+  equityCategories: EquityStatementCategory[];
+  totalOpeningBalance: string;
+  totalNetProfitLoss: string;
+  totalDividends: string;
+  totalShareCapitalChanges: string;
+  totalOtherComprehensiveIncome: string;
+  totalOtherMovements: string;
+  totalClosingBalance: string;
+  comparisonTotalOpeningBalance?: string;
+  comparisonTotalNetProfitLoss?: string;
+  comparisonTotalDividends?: string;
+  comparisonTotalShareCapitalChanges?: string;
+  comparisonTotalOtherComprehensiveIncome?: string;
+  comparisonTotalOtherMovements?: string;
+  comparisonTotalClosingBalance?: string;
+  closingBalanceVariance?: string;
+  closingBalanceVariancePercentage?: number | "Infinity" | "-Infinity";
+  reconcilesWithBalanceSheet: boolean;
+  comparisonReconcilesWithBalanceSheet?: boolean;
+  baseCurrency: string;
+  ifrsComplianceEnabled: boolean;
+  fxTranslationStandard: string | null;
+  fxTranslationApplied: boolean;
+}
+
 function FxDisclosure({ 
   standard, 
   method, 
@@ -860,12 +941,21 @@ export default function FinancialReports() {
   const [cfShowComparison, setCfShowComparison] = useState(false);
   const [cfComparisonStartDate, setCfComparisonStartDate] = useState("");
   const [cfComparisonEndDate, setCfComparisonEndDate] = useState("");
+  const [equityStartDate, setEquityStartDate] = useState(
+    format(new Date(new Date().getFullYear(), 0, 1), "yyyy-MM-dd")
+  );
+  const [equityEndDate, setEquityEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [equityShowComparison, setEquityShowComparison] = useState(false);
+  const [equityComparisonStartDate, setEquityComparisonStartDate] = useState("");
+  const [equityComparisonEndDate, setEquityComparisonEndDate] = useState("");
+  const [expandedEquityCategories, setExpandedEquityCategories] = useState<Set<string>>(new Set());
 
   // Control when to fetch reports
   const [fetchPLComparison, setFetchPLComparison] = useState(false);
   const [fetchBS, setFetchBS] = useState(false);
   const [fetchTB, setFetchTB] = useState(false);
   const [fetchCF, setFetchCF] = useState(false);
+  const [fetchEquity, setFetchEquity] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -939,6 +1029,19 @@ export default function FinancialReports() {
     enabled: !!currentTenant?.id && fetchCF,
   });
 
+  // Equity Statement Query - IAS 1.106-110 Compliance
+  const { data: equityReport, isLoading: equityLoading } = useQuery<EquityStatementReport>({
+    queryKey: ["/api/reports/equity-statement", { 
+      tenantId: currentTenant?.id, 
+      startDate: equityStartDate, 
+      endDate: equityEndDate,
+      ...(equityShowComparison && equityComparisonStartDate && equityComparisonEndDate 
+        ? { comparisonStartDate: equityComparisonStartDate, comparisonEndDate: equityComparisonEndDate } 
+        : {})
+    }],
+    enabled: !!currentTenant?.id && fetchEquity,
+  });
+
   // Currency query for formatting
   const { data: currencies = [] } = useQuery<Currency[]>({
     queryKey: ['/api/currencies', { tenantId: currentTenant?.id }],
@@ -966,7 +1069,7 @@ export default function FinancialReports() {
       </div>
 
       <Tabs defaultValue="profit-loss" className="space-y-6" data-testid="tabs-financial-reports">
-        <TabsList className="grid w-full grid-cols-4 lg:w-auto" data-testid="tabs-list-reports">
+        <TabsList className="grid w-full grid-cols-5 lg:w-auto" data-testid="tabs-list-reports">
           <TabsTrigger value="profit-loss" data-testid="tab-profit-loss">
             <TrendingUp className="h-4 w-4 mr-2" />
             P&L
@@ -974,6 +1077,10 @@ export default function FinancialReports() {
           <TabsTrigger value="balance-sheet" data-testid="tab-balance-sheet">
             <DollarSign className="h-4 w-4 mr-2" />
             Balance Sheet
+          </TabsTrigger>
+          <TabsTrigger value="equity-statement" data-testid="tab-equity-statement">
+            <FileSpreadsheet className="h-4 w-4 mr-2" />
+            Equity Statement
           </TabsTrigger>
           <TabsTrigger value="trial-balance" data-testid="tab-trial-balance">
             <FileBarChart className="h-4 w-4 mr-2" />
@@ -2086,6 +2193,407 @@ export default function FinancialReports() {
           )}
         </TabsContent>
 
+        {/* Statement of Changes in Equity Tab - IAS 1.106-110 Compliance */}
+        <TabsContent value="equity-statement" className="space-y-6" data-testid="content-equity-statement">
+          <Card>
+            <CardHeader>
+              <CardTitle>Statement of Changes in Equity</CardTitle>
+              <CardDescription>Reconciliation of equity components per IAS 1.106-110</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Start Date</label>
+                  <input
+                    type="date"
+                    value={equityStartDate}
+                    onChange={(e) => setEquityStartDate(e.target.value)}
+                    className="w-full h-10 px-3 py-2 border rounded-md"
+                    data-testid="input-equity-start-date"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">End Date</label>
+                  <input
+                    type="date"
+                    value={equityEndDate}
+                    onChange={(e) => setEquityEndDate(e.target.value)}
+                    className="w-full h-10 px-3 py-2 border rounded-md"
+                    data-testid="input-equity-end-date"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t pt-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="equity-comparison"
+                    checked={equityShowComparison}
+                    onChange={(e) => setEquityShowComparison(e.target.checked)}
+                    className="h-4 w-4"
+                    data-testid="checkbox-equity-comparison"
+                  />
+                  <label htmlFor="equity-comparison" className="text-sm font-medium cursor-pointer">
+                    Enable Period Comparison
+                  </label>
+                </div>
+
+                {equityShowComparison && (
+                  <div className="grid gap-4 md:grid-cols-2 pl-6">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Comparison Start Date</label>
+                      <input
+                        type="date"
+                        value={equityComparisonStartDate}
+                        onChange={(e) => setEquityComparisonStartDate(e.target.value)}
+                        className="w-full h-10 px-3 py-2 border rounded-md"
+                        data-testid="input-equity-comparison-start"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Comparison End Date</label>
+                      <input
+                        type="date"
+                        value={equityComparisonEndDate}
+                        onChange={(e) => setEquityComparisonEndDate(e.target.value)}
+                        className="w-full h-10 px-3 py-2 border rounded-md"
+                        data-testid="input-equity-comparison-end"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <Button
+                onClick={() => setFetchEquity(true)}
+                className="w-full"
+                data-testid="button-generate-equity"
+              >
+                Generate Report
+              </Button>
+            </CardContent>
+          </Card>
+
+          {equityLoading && (
+            <Card>
+              <CardContent className="pt-6">
+                <div className="space-y-4">
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-64 w-full" />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {!equityLoading && equityReport && (
+            <>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Equity Movement Analysis</CardTitle>
+                      <CardDescription>
+                        Period: {format(new Date(equityReport.startDate), "MMM dd, yyyy")} to {format(new Date(equityReport.endDate), "MMM dd, yyyy")}
+                      </CardDescription>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const headers = equityShowComparison && equityReport.comparisonStartDate
+                            ? ["Component", "Opening Balance", "Net Profit/Loss", "Dividends", "Share Capital Changes", "OCI", "Other Movements", "Closing Balance", "Comparison Closing", "Variance", "Variance %"]
+                            : ["Component", "Opening Balance", "Net Profit/Loss", "Dividends", "Share Capital Changes", "OCI", "Other Movements", "Closing Balance"];
+                          
+                          const rows: string[][] = [];
+                          
+                          equityReport.equityCategories.forEach(cat => {
+                            rows.push([`${cat.category} (Category)`, "", "", "", "", "", "", "", "", "", ""]);
+                            cat.components.forEach(comp => {
+                              if (equityShowComparison && equityReport.comparisonStartDate) {
+                                const varPct = comp.closingBalanceVariancePercentage === "Infinity" ? "∞%" 
+                                  : comp.closingBalanceVariancePercentage === "-Infinity" ? "-∞%"
+                                  : typeof comp.closingBalanceVariancePercentage === "number" ? `${comp.closingBalanceVariancePercentage.toFixed(1)}%` : "N/A";
+                                rows.push([
+                                  comp.accountName,
+                                  comp.openingBalance,
+                                  comp.netProfitLoss,
+                                  comp.dividends,
+                                  comp.shareCapitalChanges,
+                                  comp.otherComprehensiveIncome,
+                                  comp.otherMovements,
+                                  comp.closingBalance,
+                                  comp.comparisonClosingBalance || "",
+                                  comp.closingBalanceVariance || "",
+                                  varPct
+                                ]);
+                              } else {
+                                rows.push([
+                                  comp.accountName,
+                                  comp.openingBalance,
+                                  comp.netProfitLoss,
+                                  comp.dividends,
+                                  comp.shareCapitalChanges,
+                                  comp.otherComprehensiveIncome,
+                                  comp.otherMovements,
+                                  comp.closingBalance
+                                ]);
+                              }
+                            });
+                          });
+                          
+                          rows.push(["", "", "", "", "", "", "", "", "", "", ""]);
+                          if (equityShowComparison && equityReport.comparisonStartDate) {
+                            const totalVarPct = equityReport.closingBalanceVariancePercentage === "Infinity" ? "∞%" 
+                              : equityReport.closingBalanceVariancePercentage === "-Infinity" ? "-∞%"
+                              : typeof equityReport.closingBalanceVariancePercentage === "number" ? `${equityReport.closingBalanceVariancePercentage.toFixed(1)}%` : "N/A";
+                            rows.push([
+                              "TOTAL EQUITY",
+                              equityReport.totalOpeningBalance,
+                              equityReport.totalNetProfitLoss,
+                              equityReport.totalDividends,
+                              equityReport.totalShareCapitalChanges,
+                              equityReport.totalOtherComprehensiveIncome,
+                              equityReport.totalOtherMovements,
+                              equityReport.totalClosingBalance,
+                              equityReport.comparisonTotalClosingBalance || "",
+                              equityReport.closingBalanceVariance || "",
+                              totalVarPct
+                            ]);
+                          } else {
+                            rows.push([
+                              "TOTAL EQUITY",
+                              equityReport.totalOpeningBalance,
+                              equityReport.totalNetProfitLoss,
+                              equityReport.totalDividends,
+                              equityReport.totalShareCapitalChanges,
+                              equityReport.totalOtherComprehensiveIncome,
+                              equityReport.totalOtherMovements,
+                              equityReport.totalClosingBalance
+                            ]);
+                          }
+                          
+                          downloadCSV(headers, rows, `Equity-Statement-${format(new Date(equityReport.endDate), "yyyy-MM-dd")}.csv`);
+                        }}
+                        data-testid="button-export-equity-csv"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Export CSV
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const headers = equityShowComparison && equityReport.comparisonStartDate
+                            ? ["Component", "Opening Balance", "Net Profit/Loss", "Dividends", "Share Capital Changes", "OCI", "Other Movements", "Closing Balance", "Comparison Closing", "Variance", "Variance %"]
+                            : ["Component", "Opening Balance", "Net Profit/Loss", "Dividends", "Share Capital Changes", "OCI", "Other Movements", "Closing Balance"];
+                          
+                          const rows: string[][] = [];
+                          
+                          equityReport.equityCategories.forEach(cat => {
+                            rows.push([`${cat.category} (Category)`, "", "", "", "", "", "", "", "", "", ""]);
+                            cat.components.forEach(comp => {
+                              if (equityShowComparison && equityReport.comparisonStartDate) {
+                                const varPct = comp.closingBalanceVariancePercentage === "Infinity" ? "∞%" 
+                                  : comp.closingBalanceVariancePercentage === "-Infinity" ? "-∞%"
+                                  : typeof comp.closingBalanceVariancePercentage === "number" ? `${comp.closingBalanceVariancePercentage.toFixed(1)}%` : "N/A";
+                                rows.push([
+                                  comp.accountName,
+                                  comp.openingBalance,
+                                  comp.netProfitLoss,
+                                  comp.dividends,
+                                  comp.shareCapitalChanges,
+                                  comp.otherComprehensiveIncome,
+                                  comp.otherMovements,
+                                  comp.closingBalance,
+                                  comp.comparisonClosingBalance || "",
+                                  comp.closingBalanceVariance || "",
+                                  varPct
+                                ]);
+                              } else {
+                                rows.push([
+                                  comp.accountName,
+                                  comp.openingBalance,
+                                  comp.netProfitLoss,
+                                  comp.dividends,
+                                  comp.shareCapitalChanges,
+                                  comp.otherComprehensiveIncome,
+                                  comp.otherMovements,
+                                  comp.closingBalance
+                                ]);
+                              }
+                            });
+                          });
+                          
+                          rows.push(["", "", "", "", "", "", "", "", "", "", ""]);
+                          if (equityShowComparison && equityReport.comparisonStartDate) {
+                            const totalVarPct = equityReport.closingBalanceVariancePercentage === "Infinity" ? "∞%" 
+                              : equityReport.closingBalanceVariancePercentage === "-Infinity" ? "-∞%"
+                              : typeof equityReport.closingBalanceVariancePercentage === "number" ? `${equityReport.closingBalanceVariancePercentage.toFixed(1)}%` : "N/A";
+                            rows.push([
+                              "TOTAL EQUITY",
+                              equityReport.totalOpeningBalance,
+                              equityReport.totalNetProfitLoss,
+                              equityReport.totalDividends,
+                              equityReport.totalShareCapitalChanges,
+                              equityReport.totalOtherComprehensiveIncome,
+                              equityReport.totalOtherMovements,
+                              equityReport.totalClosingBalance,
+                              equityReport.comparisonTotalClosingBalance || "",
+                              equityReport.closingBalanceVariance || "",
+                              totalVarPct
+                            ]);
+                          } else {
+                            rows.push([
+                              "TOTAL EQUITY",
+                              equityReport.totalOpeningBalance,
+                              equityReport.totalNetProfitLoss,
+                              equityReport.totalDividends,
+                              equityReport.totalShareCapitalChanges,
+                              equityReport.totalOtherComprehensiveIncome,
+                              equityReport.totalOtherMovements,
+                              equityReport.totalClosingBalance
+                            ]);
+                          }
+                          
+                          downloadExcel(headers, rows, `Equity-Statement-${format(new Date(equityReport.endDate), "yyyy-MM-dd")}.xlsx`);
+                        }}
+                        data-testid="button-export-equity-excel"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Export Excel
+                      </Button>
+                    </div>
+                  </div>
+                  {equityReport.reconcilesWithBalanceSheet ? (
+                    <Badge variant="default" className="mt-2" data-testid="badge-reconciliation-success">
+                      ✓ Reconciles with Balance Sheet
+                    </Badge>
+                  ) : (
+                    <Badge variant="destructive" className="mt-2" data-testid="badge-reconciliation-failure">
+                      ✗ Does Not Reconcile with Balance Sheet
+                    </Badge>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="min-w-[200px]">Component</TableHead>
+                          <TableHead className="text-right">Opening Balance</TableHead>
+                          <TableHead className="text-right">Net Profit/Loss</TableHead>
+                          <TableHead className="text-right">Dividends</TableHead>
+                          <TableHead className="text-right">Share Capital</TableHead>
+                          <TableHead className="text-right">OCI</TableHead>
+                          <TableHead className="text-right">Other</TableHead>
+                          <TableHead className="text-right font-semibold">Closing Balance</TableHead>
+                          {equityShowComparison && equityReport.comparisonStartDate && (
+                            <>
+                              <TableHead className="text-right">Comparison</TableHead>
+                              <TableHead className="text-right">Variance</TableHead>
+                              <TableHead className="text-right">% Change</TableHead>
+                            </>
+                          )}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {equityReport.equityCategories.map((category) => (
+                          <>
+                            <TableRow
+                              key={category.category}
+                              className="bg-muted/50 font-medium cursor-pointer hover-elevate"
+                              onClick={() => {
+                                const newExpanded = new Set(expandedEquityCategories);
+                                if (newExpanded.has(category.category)) {
+                                  newExpanded.delete(category.category);
+                                } else {
+                                  newExpanded.add(category.category);
+                                }
+                                setExpandedEquityCategories(newExpanded);
+                              }}
+                              data-testid={`row-category-${category.category}`}
+                            >
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  {expandedEquityCategories.has(category.category) ? (
+                                    <ChevronDown className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4" />
+                                  )}
+                                  {category.category}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">{formatCurrency(parseFloat(category.subtotalOpeningBalance), baseCurrency?.code || 'USD')}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(parseFloat(category.subtotalNetProfitLoss), baseCurrency?.code || 'USD')}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(parseFloat(category.subtotalDividends), baseCurrency?.code || 'USD')}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(parseFloat(category.subtotalShareCapitalChanges), baseCurrency?.code || 'USD')}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(parseFloat(category.subtotalOtherComprehensiveIncome), baseCurrency?.code || 'USD')}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(parseFloat(category.subtotalOtherMovements), baseCurrency?.code || 'USD')}</TableCell>
+                              <TableCell className="text-right font-semibold">{formatCurrency(parseFloat(category.subtotalClosingBalance), baseCurrency?.code || 'USD')}</TableCell>
+                              {equityShowComparison && equityReport.comparisonStartDate && (
+                                <>
+                                  <TableCell className="text-right">{formatCurrency(parseFloat(category.comparisonSubtotalClosingBalance || '0'), baseCurrency?.code || 'USD')}</TableCell>
+                                  <TableCell className="text-right">{formatCurrency(parseFloat(category.closingBalanceVariance || '0'), baseCurrency?.code || 'USD')}</TableCell>
+                                  <TableCell className="text-right">{renderBSVariancePercentage(category.closingBalanceVariancePercentage)}</TableCell>
+                                </>
+                              )}
+                            </TableRow>
+                            {expandedEquityCategories.has(category.category) && category.components.map((comp) => (
+                              <TableRow key={comp.accountId} data-testid={`row-component-${comp.accountId}`}>
+                                <TableCell className="pl-12 text-sm">{comp.accountName}</TableCell>
+                                <TableCell className="text-right text-sm">{formatCurrency(parseFloat(comp.openingBalance), baseCurrency?.code || 'USD')}</TableCell>
+                                <TableCell className="text-right text-sm">{formatCurrency(parseFloat(comp.netProfitLoss), baseCurrency?.code || 'USD')}</TableCell>
+                                <TableCell className="text-right text-sm">{formatCurrency(parseFloat(comp.dividends), baseCurrency?.code || 'USD')}</TableCell>
+                                <TableCell className="text-right text-sm">{formatCurrency(parseFloat(comp.shareCapitalChanges), baseCurrency?.code || 'USD')}</TableCell>
+                                <TableCell className="text-right text-sm">{formatCurrency(parseFloat(comp.otherComprehensiveIncome), baseCurrency?.code || 'USD')}</TableCell>
+                                <TableCell className="text-right text-sm">{formatCurrency(parseFloat(comp.otherMovements), baseCurrency?.code || 'USD')}</TableCell>
+                                <TableCell className="text-right text-sm font-semibold">{formatCurrency(parseFloat(comp.closingBalance), baseCurrency?.code || 'USD')}</TableCell>
+                                {equityShowComparison && equityReport.comparisonStartDate && (
+                                  <>
+                                    <TableCell className="text-right text-sm">{formatCurrency(parseFloat(comp.comparisonClosingBalance || '0'), baseCurrency?.code || 'USD')}</TableCell>
+                                    <TableCell className="text-right text-sm">{formatCurrency(parseFloat(comp.closingBalanceVariance || '0'), baseCurrency?.code || 'USD')}</TableCell>
+                                    <TableCell className="text-right text-sm">{renderBSVariancePercentage(comp.closingBalanceVariancePercentage)}</TableCell>
+                                  </>
+                                )}
+                              </TableRow>
+                            ))}
+                          </>
+                        ))}
+                        <TableRow className="border-t-2 font-bold" data-testid="row-total-equity">
+                          <TableCell>TOTAL EQUITY</TableCell>
+                          <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.totalOpeningBalance), baseCurrency?.code || 'USD')}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.totalNetProfitLoss), baseCurrency?.code || 'USD')}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.totalDividends), baseCurrency?.code || 'USD')}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.totalShareCapitalChanges), baseCurrency?.code || 'USD')}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.totalOtherComprehensiveIncome), baseCurrency?.code || 'USD')}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.totalOtherMovements), baseCurrency?.code || 'USD')}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.totalClosingBalance), baseCurrency?.code || 'USD')}</TableCell>
+                          {equityShowComparison && equityReport.comparisonStartDate && (
+                            <>
+                              <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.comparisonTotalClosingBalance || '0'), baseCurrency?.code || 'USD')}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(parseFloat(equityReport.closingBalanceVariance || '0'), baseCurrency?.code || 'USD')}</TableCell>
+                              <TableCell className="text-right">{renderBSVariancePercentage(equityReport.closingBalanceVariancePercentage)}</TableCell>
+                            </>
+                          )}
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {equityReport.ifrsComplianceEnabled && equityReport.fxTranslationStandard ? (
+                <FxDisclosure
+                  standard={equityReport.fxTranslationStandard}
+                  baseCurrency={equityReport.baseCurrency}
+                  applied={equityReport.fxTranslationApplied}
+                />
+              ) : null}
+            </>
+          )}
+        </TabsContent>
 
         {/* Trial Balance Tab */}
         <TabsContent value="trial-balance" className="space-y-6" data-testid="content-trial-balance">

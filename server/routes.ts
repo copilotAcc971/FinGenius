@@ -7116,6 +7116,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/reports/equity-statement - Statement of Changes in Equity (IAS 1.106-110)
+  app.get('/api/reports/equity-statement', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { startDate, endDate, comparisonStartDate, comparisonEndDate } = req.query;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ message: "startDate and endDate are required" });
+      }
+
+      const start = new Date(startDate as string);
+      const end = new Date(endDate as string);
+      
+      // Validate dates
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ message: "Invalid date format" });
+      }
+
+      if (start > end) {
+        return res.status(400).json({ message: "startDate must be before or equal to endDate" });
+      }
+
+      // Optional comparison period
+      let compStart: Date | undefined;
+      let compEnd: Date | undefined;
+
+      if (comparisonStartDate && comparisonEndDate) {
+        compStart = new Date(comparisonStartDate as string);
+        compEnd = new Date(comparisonEndDate as string);
+
+        if (isNaN(compStart.getTime()) || isNaN(compEnd.getTime())) {
+          return res.status(400).json({ message: "Invalid comparison date format" });
+        }
+
+        if (compStart > compEnd) {
+          return res.status(400).json({ message: "comparisonStartDate must be before or equal to comparisonEndDate" });
+        }
+      }
+
+      const report = await storage.getEquityStatementReport(tenantId, start, end, compStart, compEnd);
+      
+      // Validate report was generated successfully
+      if (!report) {
+        return res.status(404).json({ 
+          message: "Equity statement report could not be generated",
+          details: "No data available for the specified period"
+        });
+      }
+
+      // Validate report has required fields
+      if (!report.equityCategories || !report.totalClosingBalance) {
+        return res.status(422).json({ 
+          message: "Invalid equity statement report",
+          details: "Report is missing required fields"
+        });
+      }
+
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error generating equity statement report:", error);
+      
+      // Handle reconciliation errors specifically
+      if (error.message && error.message.includes('reconciliation failed')) {
+        return res.status(422).json({ 
+          message: "Equity statement reconciliation error",
+          details: error.message,
+          errorType: "reconciliation_error"
+        });
+      }
+
+      // Handle other validation errors
+      if (error.name === 'ValidationError' || error.message.includes('validation')) {
+        return res.status(400).json({ 
+          message: "Invalid request parameters",
+          details: error.message
+        });
+      }
+
+      // Generic error handler
+      res.status(500).json({ 
+        message: "Failed to generate equity statement report",
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  });
+
   // ============================================================================
   // CUSTOM REPORTS ROUTES
   // ============================================================================

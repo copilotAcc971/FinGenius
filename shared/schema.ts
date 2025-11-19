@@ -2902,6 +2902,122 @@ export const apAgingReportSchema = z.object({
 export type APAgingReport = z.infer<typeof apAgingReportSchema>;
 
 // ====================================
+// STATEMENT OF CHANGES IN EQUITY (SOCE) - IAS 1 Compliance
+// ====================================
+
+// Equity component line (for a specific equity account)
+export const equityComponentLineSchema = z.object({
+  accountId: z.string(),
+  accountCode: z.string(),
+  accountName: z.string(),
+  accountCategory: z.string(),
+  openingBalance: z.string(),
+  netProfitLoss: z.string(),
+  dividends: z.string(),
+  shareCapitalChanges: z.string(),
+  otherComprehensiveIncome: z.string(),
+  otherMovements: z.string(),
+  closingBalance: z.string(),
+  
+  // Comparison period (optional)
+  comparisonOpeningBalance: z.string().optional(),
+  comparisonNetProfitLoss: z.string().optional(),
+  comparisonDividends: z.string().optional(),
+  comparisonShareCapitalChanges: z.string().optional(),
+  comparisonOtherComprehensiveIncome: z.string().optional(),
+  comparisonOtherMovements: z.string().optional(),
+  comparisonClosingBalance: z.string().optional(),
+  
+  // Variance calculations
+  openingBalanceVariance: z.string().optional(),
+  netProfitLossVariance: z.string().optional(),
+  dividendsVariance: z.string().optional(),
+  shareCapitalChangesVariance: z.string().optional(),
+  otherComprehensiveIncomeVariance: z.string().optional(),
+  otherMovementsVariance: z.string().optional(),
+  closingBalanceVariance: z.string().optional(),
+  closingBalanceVariancePercentage: z.union([z.number(), z.literal("Infinity"), z.literal("-Infinity")]).optional(),
+});
+
+export type EquityComponentLine = z.infer<typeof equityComponentLineSchema>;
+
+// Equity statement category (grouping of equity accounts)
+export const equityStatementCategorySchema = z.object({
+  category: z.string(),
+  components: z.array(equityComponentLineSchema),
+  subtotalOpeningBalance: z.string(),
+  subtotalNetProfitLoss: z.string(),
+  subtotalDividends: z.string(),
+  subtotalShareCapitalChanges: z.string(),
+  subtotalOtherComprehensiveIncome: z.string(),
+  subtotalOtherMovements: z.string(),
+  subtotalClosingBalance: z.string(),
+  
+  // Comparison period subtotals
+  comparisonSubtotalOpeningBalance: z.string().optional(),
+  comparisonSubtotalNetProfitLoss: z.string().optional(),
+  comparisonSubtotalDividends: z.string().optional(),
+  comparisonSubtotalShareCapitalChanges: z.string().optional(),
+  comparisonSubtotalOtherComprehensiveIncome: z.string().optional(),
+  comparisonSubtotalOtherMovements: z.string().optional(),
+  comparisonSubtotalClosingBalance: z.string().optional(),
+  
+  // Variance
+  closingBalanceVariance: z.string().optional(),
+  closingBalanceVariancePercentage: z.union([z.number(), z.literal("Infinity"), z.literal("-Infinity")]).optional(),
+});
+
+export type EquityStatementCategory = z.infer<typeof equityStatementCategorySchema>;
+
+// Statement of Changes in Equity (SOCE) Report
+export const equityStatementReportSchema = z.object({
+  tenantId: z.string(),
+  startDate: z.date(),
+  endDate: z.date(),
+  
+  // Optional comparison period
+  comparisonStartDate: z.date().optional(),
+  comparisonEndDate: z.date().optional(),
+  
+  // Equity categories (Share Capital, Retained Earnings, Reserves, etc.)
+  equityCategories: z.array(equityStatementCategorySchema),
+  
+  // Total equity movements
+  totalOpeningBalance: z.string(),
+  totalNetProfitLoss: z.string(),
+  totalDividends: z.string(),
+  totalShareCapitalChanges: z.string(),
+  totalOtherComprehensiveIncome: z.string(),
+  totalOtherMovements: z.string(),
+  totalClosingBalance: z.string(),
+  
+  // Comparison period totals
+  comparisonTotalOpeningBalance: z.string().optional(),
+  comparisonTotalNetProfitLoss: z.string().optional(),
+  comparisonTotalDividends: z.string().optional(),
+  comparisonTotalShareCapitalChanges: z.string().optional(),
+  comparisonTotalOtherComprehensiveIncome: z.string().optional(),
+  comparisonTotalOtherMovements: z.string().optional(),
+  comparisonTotalClosingBalance: z.string().optional(),
+  
+  // Variance
+  closingBalanceVariance: z.string().optional(),
+  closingBalanceVariancePercentage: z.union([z.number(), z.literal("Infinity"), z.literal("-Infinity")]).optional(),
+  
+  // Reconciliation check
+  reconcilesWithBalanceSheet: z.boolean(),
+  comparisonReconcilesWithBalanceSheet: z.boolean().optional(),
+  
+  // IFRS Compliance & Multi-currency
+  baseCurrency: z.string(),
+  ifrsComplianceEnabled: z.boolean(),
+  fxTranslationStandard: z.string().nullable(),
+  fxTranslationApplied: z.boolean(),
+});
+
+export type EquityStatementReport = z.infer<typeof equityStatementReportSchema>;
+
+// ====================================
 // OPEN BANKING INTEGRATION
 // ====================================
 
