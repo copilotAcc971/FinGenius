@@ -53,12 +53,9 @@ export function FxTranslationControl() {
 
   const executeMutation = useMutation({
     mutationFn: async (data: { periodStart: Date; periodEnd: Date }) => {
-      return await apiRequest('/api/fx-translation/execute', {
-        method: 'POST',
-        body: JSON.stringify({
-          periodStart: data.periodStart.toISOString(),
-          periodEnd: data.periodEnd.toISOString(),
-        }),
+      return await apiRequest('/api/fx-translation/execute', 'POST', {
+        periodStart: data.periodStart.toISOString(),
+        periodEnd: data.periodEnd.toISOString(),
       });
     },
     onSuccess: (data: any) => {
