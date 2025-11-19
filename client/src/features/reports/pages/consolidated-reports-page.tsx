@@ -27,10 +27,10 @@ export default function ConsolidatedReports() {
       <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] gap-4">
         <div className="text-center">
           <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">
-            No Workspace Selected
+            No Organization Selected
           </h2>
           <p className="text-gray-500 dark:text-gray-400">
-            Please select or create a workspace to continue
+            Please select or create an organization to continue
           </p>
         </div>
       </div>

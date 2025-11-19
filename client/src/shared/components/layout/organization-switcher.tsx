@@ -18,9 +18,9 @@ import {
 } from "@/shared/components/ui/popover";
 import { useTenant } from "@/shared/hooks/useTenant";
 import type { Tenant } from "@shared/schema";
-import { CreateWorkspaceDialog } from "@/features/auth/components/create-workspace-dialog";
+import { CreateOrganizationDialog } from "@/features/auth/components/create-organization-dialog";
 
-export function WorkspaceSwitcher() {
+export function OrganizationSwitcher() {
   const [open, setOpen] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const { currentTenant, setCurrentTenant } = useTenant();
@@ -37,12 +37,12 @@ export function WorkspaceSwitcher() {
         <Button
           variant="default"
           onClick={() => setShowCreateDialog(true)}
-          data-testid="button-create-first-workspace"
+          data-testid="button-create-first-organization"
         >
           <Plus className="mr-2 h-4 w-4" />
-          Create Your First Workspace
+          Create Your First Organization
         </Button>
-        <CreateWorkspaceDialog
+        <CreateOrganizationDialog
           open={showCreateDialog}
           onOpenChange={setShowCreateDialog}
         />
@@ -59,20 +59,20 @@ export function WorkspaceSwitcher() {
             role="combobox"
             aria-expanded={open}
             className="w-[200px] justify-between"
-            data-testid="button-workspace-switcher"
+            data-testid="button-organization-switcher"
           >
             <span className="truncate">
-              {currentTenant?.name || "Select workspace..."}
+              {currentTenant?.name || "Select organization..."}
             </span>
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-[200px] p-0">
           <Command>
-            <CommandInput placeholder="Search workspace..." />
+            <CommandInput placeholder="Search organization..." />
             <CommandList>
-              <CommandEmpty>No workspace found.</CommandEmpty>
-              <CommandGroup heading="Workspaces">
+              <CommandEmpty>No organization found.</CommandEmpty>
+              <CommandGroup heading="Organizations">
                 {tenants.map((tenant) => (
                   <CommandItem
                     key={tenant.id}
@@ -80,7 +80,7 @@ export function WorkspaceSwitcher() {
                       setCurrentTenant(tenant);
                       setOpen(false);
                     }}
-                    data-testid={`workspace-${tenant.id}`}
+                    data-testid={`organization-${tenant.id}`}
                   >
                     <Check
                       className={`mr-2 h-4 w-4 ${
@@ -100,10 +100,10 @@ export function WorkspaceSwitcher() {
                     setOpen(false);
                     setShowCreateDialog(true);
                   }}
-                  data-testid="button-create-workspace"
+                  data-testid="button-create-organization"
                 >
                   <Plus className="mr-2 h-4 w-4" />
-                  Create Workspace
+                  Create Organization
                 </CommandItem>
               </CommandGroup>
             </CommandList>
@@ -111,7 +111,7 @@ export function WorkspaceSwitcher() {
         </PopoverContent>
       </Popover>
 
-      <CreateWorkspaceDialog
+      <CreateOrganizationDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
       />

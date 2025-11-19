@@ -223,7 +223,7 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
         <DialogHeader>
           <DialogTitle>{customer ? "Edit Customer" : "Add Customer"}</DialogTitle>
           <DialogDescription>
-            {customer ? "Update customer information" : "Add a new customer to your workspace"}
+            {customer ? "Update customer information" : "Add a new customer to your organization"}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

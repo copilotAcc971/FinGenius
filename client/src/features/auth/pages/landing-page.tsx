@@ -253,7 +253,7 @@ export default function Landing() {
                   Built for Multi-Tenant Operations
                 </h2>
                 <p className="text-lg text-muted-foreground leading-relaxed">
-                  Manage multiple businesses or clients with complete data isolation, instant workspace switching, 
+                  Manage multiple businesses or clients with complete data isolation, instant organization switching, 
                   and tenant-scoped permissions. Built from the ground up with security and scalability in mind.
                 </p>
                 <ul className="space-y-4">
@@ -263,11 +263,11 @@ export default function Landing() {
                   </li>
                   <li className="flex items-start gap-3">
                     <CheckCircle className="h-5 w-5 text-foreground mt-0.5 flex-shrink-0" />
-                    <span className="text-base text-muted-foreground">Independent role and permission management per workspace</span>
+                    <span className="text-base text-muted-foreground">Independent role and permission management per organization</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <CheckCircle className="h-5 w-5 text-foreground mt-0.5 flex-shrink-0" />
-                    <span className="text-base text-muted-foreground">Instant workspace switching with zero cross-contamination</span>
+                    <span className="text-base text-muted-foreground">Instant organization switching with zero cross-contamination</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <CheckCircle className="h-5 w-5 text-foreground mt-0.5 flex-shrink-0" />

@@ -5,7 +5,7 @@ import { Toaster } from "@/shared/components/ui/toaster";
 import { TooltipProvider } from "@/shared/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/shared/components/ui/sidebar";
 import { AppSidebar } from "@/shared/components/layout/app-sidebar";
-import { WorkspaceSwitcher } from "@/shared/components/layout/workspace-switcher";
+import { OrganizationSwitcher } from "@/shared/components/layout/organization-switcher";
 import { UserMenu } from "@/shared/components/layout/user-menu";
 import { CommandPalette } from "@/shared/components/layout/command-palette";
 import { Breadcrumbs } from "@/shared/components/layout/breadcrumbs";
@@ -121,7 +121,7 @@ function AppContent() {
                 <header className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background">
                   <div className="flex items-center gap-4">
                     <SidebarTrigger data-testid="button-sidebar-toggle" />
-                    <WorkspaceSwitcher />
+                    <OrganizationSwitcher />
                   </div>
                   <div className="flex items-center gap-4">
                     <TenantBadge />

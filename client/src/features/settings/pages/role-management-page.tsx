@@ -49,7 +49,7 @@ export default function RoleManagement() {
         <div>
           <h1 className="text-3xl font-semibold" data-testid="text-page-title">Role Management</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage roles and permissions for your workspace
+            Manage roles and permissions for your organization
           </p>
         </div>
         <Button data-testid="button-create-role">

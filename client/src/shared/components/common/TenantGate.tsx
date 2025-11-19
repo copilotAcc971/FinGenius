@@ -5,7 +5,7 @@ import { useTenant } from "@/shared/hooks/useTenant";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Loader2, Building2 } from "lucide-react";
-import { WorkspaceSwitcher } from "../layout/workspace-switcher";
+import { OrganizationSwitcher } from "../layout/organization-switcher";
 import type { Tenant } from "@shared/schema";
 
 interface TenantGateProps {
@@ -50,7 +50,7 @@ export function TenantGate({ children }: TenantGateProps) {
         <Card className="w-[400px]">
           <CardContent className="flex flex-col items-center justify-center p-8">
             <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-            <p className="text-sm text-muted-foreground">Loading workspace...</p>
+            <p className="text-sm text-muted-foreground">Loading organization...</p>
           </CardContent>
         </Card>
       </div>
@@ -65,13 +65,13 @@ export function TenantGate({ children }: TenantGateProps) {
             <div className="flex justify-center mb-4">
               <Building2 className="h-12 w-12 text-muted-foreground" />
             </div>
-            <CardTitle>Select a Workspace</CardTitle>
+            <CardTitle>Select an Organization</CardTitle>
             <CardDescription>
-              Please select a workspace to continue
+              Please select an organization to continue
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
-            <WorkspaceSwitcher />
+            <OrganizationSwitcher />
           </CardContent>
         </Card>
       </div>

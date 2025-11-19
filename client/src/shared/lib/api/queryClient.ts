@@ -16,7 +16,7 @@ async function getTenantIdFromSession(timeout: number = 5000): Promise<string> {
     if (!tenant) {
       console.error("[queryClient] Tenant context unavailable after timeout");
       throw new Error(
-        "No workspace selected. Please select a workspace to continue."
+        "No organization selected. Please select an organization to continue."
       );
     }
     
@@ -25,7 +25,7 @@ async function getTenantIdFromSession(timeout: number = 5000): Promise<string> {
     if (!currentTenant) {
       console.error("[queryClient] Tenant lost between wait and fetch");
       throw new Error(
-        "Workspace disconnected. Please select a workspace to continue."
+        "Organization disconnected. Please select an organization to continue."
       );
     }
     
@@ -33,7 +33,7 @@ async function getTenantIdFromSession(timeout: number = 5000): Promise<string> {
     return currentTenant.id;
   } catch (error) {
     console.error("[queryClient] Failed to get tenant context:", error);
-    throw error instanceof Error ? error : new Error("Failed to load workspace context. Please select a workspace and try again.");
+    throw error instanceof Error ? error : new Error("Failed to load organization context. Please select an organization and try again.");
   }
 }
 

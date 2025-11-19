@@ -48,7 +48,7 @@ export default function UserManagement() {
         <div>
           <h1 className="text-3xl font-semibold" data-testid="text-page-title">User Management</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage workspace members and their role assignments
+            Manage organization members and their role assignments
           </p>
         </div>
         <Button data-testid="button-invite-user">
@@ -66,7 +66,7 @@ export default function UserManagement() {
           {members.length === 0 ? (
             <Card className="p-12">
               <div className="text-center text-muted-foreground">
-                No members found in this workspace.
+                No members found in this organization.
               </div>
             </Card>
           ) : (

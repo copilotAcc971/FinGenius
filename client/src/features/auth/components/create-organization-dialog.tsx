@@ -26,18 +26,18 @@ import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import { useTenant } from "@/shared/hooks/useTenant";
 
 const formSchema = z.object({
-  name: z.string().min(1, "Workspace name is required").max(255),
+  name: z.string().min(1, "Organization name is required").max(255),
 });
 
-interface CreateWorkspaceDialogProps {
+interface CreateOrganizationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export function CreateWorkspaceDialog({
+export function CreateOrganizationDialog({
   open,
   onOpenChange,
-}: CreateWorkspaceDialogProps) {
+}: CreateOrganizationDialogProps) {
   const { toast } = useToast();
   const { setCurrentTenant } = useTenant();
 
@@ -57,8 +57,8 @@ export function CreateWorkspaceDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/tenants"] });
       setCurrentTenant(newTenant);
       toast({
-        title: "Workspace created",
-        description: "Your new workspace has been created successfully.",
+        title: "Organization created",
+        description: "Your new organization has been created successfully.",
       });
       form.reset();
       onOpenChange(false);
@@ -77,7 +77,7 @@ export function CreateWorkspaceDialog({
       }
       toast({
         title: "Error",
-        description: "Failed to create workspace. Please try again.",
+        description: "Failed to create organization. Please try again.",
         variant: "destructive",
       });
     },
@@ -89,11 +89,11 @@ export function CreateWorkspaceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]" data-testid="dialog-create-workspace">
+      <DialogContent className="sm:max-w-[425px]" data-testid="dialog-create-organization">
         <DialogHeader>
-          <DialogTitle>Create Workspace</DialogTitle>
+          <DialogTitle>Create Organization</DialogTitle>
           <DialogDescription>
-            Create a new workspace to organize your accounting data.
+            Create a new organization to organize your accounting data.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -103,9 +103,9 @@ export function CreateWorkspaceDialog({
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Workspace Name</FormLabel>
+                  <FormLabel>Organization Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="My Company" {...field} data-testid="input-workspace-name" />
+                    <Input placeholder="My Company" {...field} data-testid="input-organization-name" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

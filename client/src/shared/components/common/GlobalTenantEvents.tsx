@@ -41,8 +41,8 @@ export function GlobalTenantEvents() {
       
       // Show warning toast
       toast({
-        title: "Workspace Disconnected",
-        description: "Please select a workspace to continue.",
+        title: "Organization Disconnected",
+        description: "Please select an organization to continue.",
         variant: "destructive",
       });
     };
@@ -56,7 +56,7 @@ export function GlobalTenantEvents() {
         
         // Show success toast
         toast({
-          title: "Workspace Selected",
+          title: "Organization Selected",
           description: `Now viewing ${tenant.name}`,
         });
       }

@@ -157,7 +157,7 @@ export function VendorDialog({ open, onOpenChange, vendor }: VendorDialogProps) 
         <DialogHeader>
           <DialogTitle>{vendor ? "Edit Vendor" : "Add Vendor"}</DialogTitle>
           <DialogDescription>
-            {vendor ? "Update vendor information" : "Add a new vendor to your workspace"}
+            {vendor ? "Update vendor information" : "Add a new vendor to your organization"}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

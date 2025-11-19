@@ -131,8 +131,8 @@ export function BulkBillUpload({ open, onOpenChange, tenantId }: BulkBillUploadP
   const handleSaveAll = async () => {
     if (!tenantId) {
       toast({
-        title: "No workspace selected",
-        description: "Please select a workspace before saving bills",
+        title: "No organization selected",
+        description: "Please select an organization before saving bills",
         variant: "destructive",
       });
       return;

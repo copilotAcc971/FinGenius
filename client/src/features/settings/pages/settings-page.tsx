@@ -30,8 +30,8 @@ export default function Settings() {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] gap-4">
         <div className="text-center">
-          <h2 className="text-2xl font-semibold mb-2">No Workspace Selected</h2>
-          <p className="text-muted-foreground">Please select or create a workspace to continue</p>
+          <h2 className="text-2xl font-semibold mb-2">No Organization Selected</h2>
+          <p className="text-muted-foreground">Please select or create an organization to continue</p>
         </div>
       </div>
     );
@@ -41,21 +41,21 @@ export default function Settings() {
     <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-3xl font-semibold">Settings</h1>
-        <p className="text-muted-foreground">Manage your workspace and account settings</p>
+        <p className="text-muted-foreground">Manage your organization and account settings</p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Workspace Settings</CardTitle>
-          <CardDescription>Manage your workspace information</CardDescription>
+          <CardTitle>Organization Settings</CardTitle>
+          <CardDescription>Manage your organization information</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="workspace-name">Workspace Name</Label>
+            <Label htmlFor="organization-name">Organization Name</Label>
             <Input
-              id="workspace-name"
+              id="organization-name"
               defaultValue={currentTenant.name}
-              data-testid="input-workspace-name"
+              data-testid="input-organization-name"
             />
           </div>
           <div className="space-y-2">
@@ -70,7 +70,7 @@ export default function Settings() {
               Your Stripe Connect account for receiving payments
             </p>
           </div>
-          <Button data-testid="button-save-workspace">Save Changes</Button>
+          <Button data-testid="button-save-organization">Save Changes</Button>
         </CardContent>
       </Card>
 
@@ -92,17 +92,17 @@ export default function Settings() {
       <Card>
         <CardHeader>
           <CardTitle>Danger Zone</CardTitle>
-          <CardDescription>Irreversible workspace actions</CardDescription>
+          <CardDescription>Irreversible organization actions</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between p-4 border rounded-lg">
             <div>
-              <p className="font-medium">Delete Workspace</p>
+              <p className="font-medium">Delete Organization</p>
               <p className="text-sm text-muted-foreground">
-                Permanently delete this workspace and all its data
+                Permanently delete this organization and all its data
               </p>
             </div>
-            <Button variant="destructive" data-testid="button-delete-workspace">
+            <Button variant="destructive" data-testid="button-delete-organization">
               Delete
             </Button>
           </div>
