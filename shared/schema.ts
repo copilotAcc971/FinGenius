@@ -52,6 +52,15 @@ export const SAR_STATUS = ['draft', 'under_review', 'approved', 'filed', 'reject
 export const FINANCIAL_STATEMENT_NOTE_TYPE = ['accounting_policy', 'contingent_liability', 'contingent_asset', 'related_party_transaction', 'subsequent_event', 'going_concern', 'significant_accounting_judgment', 'general'] as const;
 export const GOING_CONCERN_STATUS = ['positive', 'uncertainty', 'doubt'] as const;
 
+// IAS 2 NRV Assessment Status Enum
+export const NRV_ASSESSMENT_STATUS = ['pending', 'approved', 'applied'] as const;
+
+// IAS 21 FX Translation Run Status Enum
+export const FX_TRANSLATION_RUN_STATUS = ['running', 'completed', 'failed'] as const;
+
+// IFRS 18 P&L Category Enum
+export const IFRS18_CATEGORY = ['operating_income', 'operating_expense', 'investing_income', 'investing_expense', 'financing_income', 'financing_expense', 'none'] as const;
+
 // Session storage table for Replit Auth
 export const sessions = pgTable(
   "sessions",
@@ -172,6 +181,7 @@ export const fxConfigs = pgTable('fx_configs', {
   primarySourceProvider: varchar('primary_source_provider').default('github').notNull(), // 'github' | 'api' | 'fluentax' | 'manual'
   fallbackRateSource: varchar('fallback_rate_source'), // Optional fallback if primary fails
   lastRefreshAt: timestamp('last_refresh_at'),
+  fxTranslationApplied: boolean('fx_translation_applied').default(false).notNull(), // IAS 21: Track if FX translation has been run
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
@@ -513,17 +523,24 @@ export const accounts = pgTable("accounts", {
   isCashEquivalent: boolean("is_cash_equivalent").default(false).notNull(), // Short-term highly liquid investments (IAS 7.7)
   cashEquivalentMaturityDays: integer("cash_equivalent_maturity_days"), // Must be <=90 days if isCashEquivalent=true
   
+  // IFRS 18 Presentation & Disclosure
+  ifrs18Category: varchar("ifrs18_category", { length: 50 }).notNull().default("none"), // operating_income, operating_expense, investing_income, investing_expense, financing_income, financing_expense, none
+  requiredSubtotal: varchar("required_subtotal", { length: 100 }), // e.g., "Operating Profit", "Profit Before Financing"
+  presentationOrder: integer("presentation_order"), // For P&L ordering
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   index("accounts_cash_flow_classification_idx").on(table.tenantId, table.cashFlowClassification),
   index("accounts_cash_equivalent_idx").on(table.tenantId, table.isCashEquivalent),
+  index("accounts_ifrs18_category_idx").on(table.tenantId, table.ifrs18Category),
 ]);
 
 export const insertAccountSchema = createInsertSchema(accounts, {
   type: z.enum(['asset', 'liability', 'equity', 'income', 'expense']),
   openingBalance: decimalString,
   cashFlowClassification: z.enum(['operating', 'investing', 'financing', 'none']).default('none'),
+  ifrs18Category: z.enum(['operating_income', 'operating_expense', 'investing_income', 'investing_expense', 'financing_income', 'financing_expense', 'none']).default('none'),
 }).omit({
   id: true,
   code: true,
@@ -563,6 +580,11 @@ export const items = pgTable("items", {
   quantityOnHand: decimal("quantity_on_hand", { precision: 10, scale: 2 }).default("0"),
   reorderLevel: decimal("reorder_level", { precision: 10, scale: 2 }),
   
+  // IAS 2 Net Realizable Value (NRV) tracking
+  nrvLastAssessed: timestamp("nrv_last_assessed"), // Last NRV assessment date
+  nrvValue: decimal("nrv_value", { precision: 12, scale: 2 }), // Current Net Realizable Value
+  totalWriteDowns: decimal("total_write_downs", { precision: 12, scale: 2 }).default("0"), // Cumulative write-downs
+  
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -582,6 +604,83 @@ export const insertItemSchema = createInsertSchema(items, {
 
 export type InsertItem = z.infer<typeof insertItemSchema>;
 export type Item = typeof items.$inferSelect;
+
+// ====================================
+// IAS 2 NET REALIZABLE VALUE (NRV) ASSESSMENTS
+// ====================================
+
+// NRV Assessments (IAS 2 - Inventories)
+export const nrvAssessments = pgTable("nrv_assessments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  itemId: varchar("item_id").notNull().references(() => items.id),
+  assessmentDate: timestamp("assessment_date").notNull(),
+  costValue: decimal("cost_value", { precision: 12, scale: 2 }).notNull(), // Item cost at assessment
+  nrvValue: decimal("nrv_value", { precision: 12, scale: 2 }).notNull(), // Net realizable value
+  writeDownAmount: decimal("write_down_amount", { precision: 12, scale: 2 }).notNull(), // Calculated write-down
+  status: varchar("status", { length: 50 }).notNull().default("pending"), // 'pending', 'approved', 'applied'
+  notes: text("notes"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("nrv_assessments_tenant_item_idx").on(table.tenantId, table.itemId),
+  index("nrv_assessments_tenant_date_idx").on(table.tenantId, table.assessmentDate),
+]);
+
+export const insertNrvAssessmentSchema = createInsertSchema(nrvAssessments, {
+  costValue: decimalString,
+  nrvValue: decimalString,
+  writeDownAmount: decimalString,
+  status: z.enum(['pending', 'approved', 'applied']).default('pending'),
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertNrvAssessment = z.infer<typeof insertNrvAssessmentSchema>;
+export type NrvAssessment = typeof nrvAssessments.$inferSelect;
+
+// ====================================
+// IAS 21 FX TRANSLATION RUNS
+// ====================================
+
+// FX Translation Runs (IAS 21 - Foreign Currency Translation)
+export const fxTranslationRuns = pgTable("fx_translation_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  runDate: timestamp("run_date").notNull(),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("running"), // 'running', 'completed', 'failed'
+  ociAmount: decimal("oci_amount", { precision: 12, scale: 2 }), // Other Comprehensive Income translation adjustment
+  retainedEarningsAmount: decimal("retained_earnings_amount", { precision: 12, scale: 2 }), // RE translation adjustment
+  affectedAccounts: jsonb("affected_accounts").$type<string[]>().default([]), // Array of account IDs
+  metadata: jsonb("metadata").$type<Record<string, any>>().default({}), // Run details, exchange rates used, etc.
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("fx_translation_runs_tenant_date_idx").on(table.tenantId, table.runDate),
+]);
+
+export const insertFxTranslationRunSchema = createInsertSchema(fxTranslationRuns, {
+  ociAmount: decimalString,
+  retainedEarningsAmount: decimalString,
+  status: z.enum(['running', 'completed', 'failed']).default('running'),
+  affectedAccounts: z.array(z.string()).optional(),
+  metadata: z.record(z.any()).optional(),
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertFxTranslationRun = z.infer<typeof insertFxTranslationRunSchema>;
+export type FxTranslationRun = typeof fxTranslationRuns.$inferSelect;
 
 // Taxes
 export const taxes = pgTable("taxes", {
