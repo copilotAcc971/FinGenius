@@ -397,16 +397,16 @@ export default function CurrenciesPage() {
               <div className="space-y-2">
                 <Label htmlFor="fallback-rate-source">Fallback Source (Optional)</Label>
                 <Select
-                  value={fxConfig?.fallbackRateSource ?? ''}
+                  value={fxConfig?.fallbackRateSource ?? 'none'}
                   onValueChange={(value) => {
-                    updateConfigMutation.mutate({ fallbackRateSource: value || null as any });
+                    updateConfigMutation.mutate({ fallbackRateSource: value === 'none' ? null : value as any });
                   }}
                 >
                   <SelectTrigger id="fallback-rate-source" data-testid="select-fallback-rate-source">
                     <SelectValue placeholder="None" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
                     <SelectItem value="cbuae">CBUAE (UAE)</SelectItem>
                     <SelectItem value="ecb">ECB (Europe)</SelectItem>
                     <SelectItem value="sama">SAMA (Saudi Arabia)</SelectItem>
