@@ -38,7 +38,7 @@ import { Calendar } from "@/shared/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
-import { cn } from "@/shared/lib/utils";
+import { cn } from "@/shared/lib/utils/utils";
 
 const formSchema = insertNrvAssessmentSchema;
 
