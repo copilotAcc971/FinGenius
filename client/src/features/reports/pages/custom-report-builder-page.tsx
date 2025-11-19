@@ -370,14 +370,14 @@ export default function CustomReportBuilder() {
                 <div className="space-y-2">
                   <Label htmlFor="filter-accounts">Accounts</Label>
                   <Select
-                    value={filters.accounts?.[0] || ""}
-                    onValueChange={(value) => setFilters(prev => ({ ...prev, accounts: value ? [value] : [] }))}
+                    value={filters.accounts?.[0] || "all"}
+                    onValueChange={(value) => setFilters(prev => ({ ...prev, accounts: value === "all" ? [] : [value] }))}
                   >
                     <SelectTrigger id="filter-accounts" data-testid="select-filter-accounts">
                       <SelectValue placeholder="Select account (optional)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Accounts</SelectItem>
+                      <SelectItem value="all">All Accounts</SelectItem>
                       {accounts.map((account: any) => (
                         <SelectItem key={account.id} value={account.id}>
                           {account.code} - {account.name}
@@ -393,14 +393,14 @@ export default function CustomReportBuilder() {
                 <div className="space-y-2">
                   <Label htmlFor="filter-customers">Customer</Label>
                   <Select
-                    value={filters.customers?.[0] || ""}
-                    onValueChange={(value) => setFilters(prev => ({ ...prev, customers: value ? [value] : [] }))}
+                    value={filters.customers?.[0] || "all"}
+                    onValueChange={(value) => setFilters(prev => ({ ...prev, customers: value === "all" ? [] : [value] }))}
                   >
                     <SelectTrigger id="filter-customers" data-testid="select-filter-customers">
                       <SelectValue placeholder="Select customer (optional)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Customers</SelectItem>
+                      <SelectItem value="all">All Customers</SelectItem>
                       {customers.map((customer: any) => (
                         <SelectItem key={customer.id} value={customer.id}>
                           {customer.name}
@@ -416,14 +416,14 @@ export default function CustomReportBuilder() {
                 <div className="space-y-2">
                   <Label htmlFor="filter-vendors">Vendor</Label>
                   <Select
-                    value={filters.vendors?.[0] || ""}
-                    onValueChange={(value) => setFilters(prev => ({ ...prev, vendors: value ? [value] : [] }))}
+                    value={filters.vendors?.[0] || "all"}
+                    onValueChange={(value) => setFilters(prev => ({ ...prev, vendors: value === "all" ? [] : [value] }))}
                   >
                     <SelectTrigger id="filter-vendors" data-testid="select-filter-vendors">
                       <SelectValue placeholder="Select vendor (optional)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Vendors</SelectItem>
+                      <SelectItem value="all">All Vendors</SelectItem>
                       {vendors.map((vendor: any) => (
                         <SelectItem key={vendor.id} value={vendor.id}>
                           {vendor.name}
@@ -439,14 +439,14 @@ export default function CustomReportBuilder() {
                 <div className="space-y-2">
                   <Label htmlFor="filter-status">Status</Label>
                   <Select
-                    value={filters.status?.[0] || ""}
-                    onValueChange={(value) => setFilters(prev => ({ ...prev, status: value ? [value] : [] }))}
+                    value={filters.status?.[0] || "all"}
+                    onValueChange={(value) => setFilters(prev => ({ ...prev, status: value === "all" ? [] : [value] }))}
                   >
                     <SelectTrigger id="filter-status" data-testid="select-filter-status">
                       <SelectValue placeholder="Select status (optional)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Statuses</SelectItem>
+                      <SelectItem value="all">All Statuses</SelectItem>
                       {reportType === "transaction_list" && (
                         <>
                           <SelectItem value="draft">Draft</SelectItem>
