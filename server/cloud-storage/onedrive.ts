@@ -217,13 +217,16 @@ export class OneDriveService {
 
     const folderId = await withAutoRefresh(connectionId, tenantId, async (accessToken) => {
       try {
-        // ✅ Escape single quotes by doubling them
-        const escapedName = folderName.replace(/'/g, "''");
+        // Step 1: Escape single quotes by doubling them
+        const escapedQuotes = folderName.replace(/'/g, "''");
         
-        // ✅ Build URL manually (no SDK double-encoding!)
-        let url: string | null = `https://graph.microsoft.com/v1.0/me/drive/root/search(q='${escapedName}')`;
+        // Step 2: Encode the entire quoted value for URL safety
+        const encodedValue = encodeURIComponent(`'${escapedQuotes}'`);
         
-        // ✅ Paginate through all results
+        // Step 3: Build URL with function syntax
+        let url: string | null = `https://graph.microsoft.com/v1.0/me/drive/root/search(q=${encodedValue})`;
+        
+        // Paginate through all results
         while (url) {
           const response = await axios.get(url, {
             headers: {
@@ -233,7 +236,7 @@ export class OneDriveService {
             validateStatus: (status) => status < 500,
           });
           
-          // ✅ Surface non-404 errors
+          // Surface non-404 errors
           if (response.status >= 400) {
             if (response.status === 404) {
               return null;
@@ -243,7 +246,7 @@ export class OneDriveService {
           
           const data = response.data;
           
-          // ✅ Search for exact folder match (case-insensitive)
+          // Find exact folder match (case-insensitive)
           if (data.value && data.value.length > 0) {
             const folder = data.value.find(
               (item: any) => 
@@ -257,7 +260,7 @@ export class OneDriveService {
             }
           }
           
-          // ✅ Follow pagination link
+          // Follow pagination
           url = data['@odata.nextLink'] || null;
         }
         
@@ -266,7 +269,7 @@ export class OneDriveService {
         return null;
         
       } catch (error: any) {
-        // Only swallow 404s, throw everything else
+        // Only swallow 404s
         if (error.response?.status === 404 || error.message?.includes('404')) {
           return null;
         }

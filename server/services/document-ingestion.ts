@@ -150,26 +150,29 @@ export async function storeDocument(
   console.log(`[Document Ingestion] ✓ Saved to local: ${localPath}`);
 
   // Step 2: Parallel cloud uploads with Promise.allSettled
-  const cloudUploads: Promise<{ provider: string; fileId: string }>[] = [];
+  // Tag promises with provider names
+  const taggedUploads: Promise<{ provider: string; fileId?: string; error?: any }>[] = [];
 
   if (options?.uploadToGoogleDrive) {
-    cloudUploads.push(
+    taggedUploads.push(
       googleDriveService
         .uploadFile(tenantId, userId, buffer, filename, options?.folderId)
         .then((fileId) => ({ provider: 'google_drive', fileId }))
+        .catch((error) => ({ provider: 'google_drive', error }))
     );
   }
 
   if (options?.uploadToOneDrive) {
-    cloudUploads.push(
+    taggedUploads.push(
       oneDriveService
         .uploadFile(tenantId, userId, buffer, filename, options?.folderId)
         .then((fileId) => ({ provider: 'onedrive', fileId }))
+        .catch((error) => ({ provider: 'onedrive', error }))
     );
   }
 
   // Step 3: Wait for all cloud uploads (don't fail on partial errors)
-  const results = await Promise.allSettled(cloudUploads);
+  const results = await Promise.allSettled(taggedUploads);
 
   // Step 4: Process results
   const finalResult: {
@@ -181,27 +184,24 @@ export async function storeDocument(
 
   const errors: { provider: string; error: string }[] = [];
 
-  results.forEach((result, index) => {
+  results.forEach((result) => {
     if (result.status === 'fulfilled') {
-      const { provider, fileId } = result.value;
-      if (provider === 'google_drive') {
-        finalResult.googleDriveFileId = fileId;
-        console.log(`[Document Ingestion] ✓ Uploaded to Google Drive: ${fileId}`);
-      } else if (provider === 'onedrive') {
-        finalResult.oneDriveFileId = fileId;
-        console.log(`[Document Ingestion] ✓ Uploaded to OneDrive: ${fileId}`);
+      const { provider, fileId, error } = result.value;
+      if (fileId) {
+        if (provider === 'google_drive') {
+          finalResult.googleDriveFileId = fileId;
+          console.log(`[Document Ingestion] ✓ Uploaded to Google Drive: ${fileId}`);
+        } else if (provider === 'onedrive') {
+          finalResult.oneDriveFileId = fileId;
+          console.log(`[Document Ingestion] ✓ Uploaded to OneDrive: ${fileId}`);
+        }
+      } else if (error) {
+        errors.push({
+          provider,
+          error: error.message || 'Upload failed',
+        });
+        console.error(`[Document Ingestion] ✗ ${provider} upload failed:`, error);
       }
-    } else {
-      // Determine which provider failed based on index
-      const provider = options?.uploadToGoogleDrive && index === 0
-        ? 'google_drive'
-        : 'onedrive';
-
-      errors.push({
-        provider,
-        error: result.reason?.message || 'Upload failed',
-      });
-      console.error(`[Document Ingestion] ✗ ${provider} upload failed:`, result.reason);
     }
   });
 
