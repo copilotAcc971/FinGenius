@@ -88,6 +88,20 @@ export const ANOMALY_DETECTION_TYPE = ['unusual_amount', 'duplicate_transaction'
 export const ANOMALY_ENTITY_TYPE = ['invoice', 'bill', 'payment', 'journal_entry'] as const;
 export const ANOMALY_STATUS = ['new', 'investigating', 'resolved', 'false_positive'] as const;
 
+// Task 8-1: AI Interaction Logs & LLM Multi-Provider Enums
+export const LLM_PROVIDER = ['openai', 'kimi', 'qwen', 'deepseek', 'anthropic', 'gemini', 'mcp_custom'] as const;
+export const AI_TASK_TYPE = ['chat', 'document_extraction', 'vision_analysis', 'embedding', 'report_generation', 'function_calling', 'code_generation'] as const;
+export const AI_LOG_STATUS = ['processing', 'success', 'failed', 'timeout'] as const;
+export const DATA_CATEGORY = ['financial', 'personal', 'operational', 'metadata'] as const;
+export const DATA_RESIDENCY = ['UAE', 'KSA', 'EU', 'US', 'China', 'global'] as const;
+export const LOG_RETENTION_CATEGORY = ['metadata_only', 'encrypted_content', 'audit_trail'] as const;
+
+// Task 8-2: Portable Integration & MCP Enums
+export const INTEGRATION_PROVIDER = ['onedrive', 'google_drive', 'stripe', 'twilio', 'lean_technologies', 'custom_api'] as const;
+export const INTEGRATION_STATUS = ['connected', 'disconnected', 'expired', 'error'] as const;
+export const MCP_SERVER_STATUS = ['running', 'stopped', 'error', 'initializing'] as const;
+export const MCP_HEALTH_STATUS = ['healthy', 'degraded', 'unhealthy', 'unknown'] as const;
+
 // Session storage table for Replit Auth
 export const sessions = pgTable(
   "sessions",
@@ -106,6 +120,11 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
+  // Phase 8: User preferences for timezone and AI
+  timezone: varchar("timezone", { length: 50 }).default("Asia/Dubai"), // User's preferred timezone for alerts
+  llmPreferences: jsonb("llm_preferences"), // { preferredProviders: { chat: 'qwen', vision: 'kimi', ... }, dataResidency: 'UAE', optOutProviders: ['openai'] }
+  aiConsentGiven: boolean("ai_consent_given").default(false), // User has consented to AI processing
+  aiConsentDate: timestamp("ai_consent_date"), // When consent was given
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2634,6 +2653,368 @@ export const insertAlertRateLimitSchema = createInsertSchema(alertRateLimits).om
 
 export type InsertAlertRateLimit = z.infer<typeof insertAlertRateLimitSchema>;
 export type AlertRateLimit = typeof alertRateLimits.$inferSelect;
+
+// ====================================
+// TASK 8-1: AI INTERACTION LOGS (SECURE - GDPR/SOX COMPLIANT)
+// ====================================
+
+/**
+ * AI Interaction Logs - Security-First Design
+ * 
+ * CRITICAL SECURITY NOTES:
+ * - NO plaintext sensitive data (customer names, amounts, tax IDs)
+ * - Stores METADATA ONLY (task type, document IDs, hashes)
+ * - Optional encrypted payloads with KMS envelope encryption
+ * - RBAC-protected (only compliance officers can read)
+ * - Dual retention: 7yr metadata (SOX), 90-day encrypted content (GDPR)
+ * - All log access is logged (audit the auditors)
+ */
+export const aiInteractionLogs = pgTable("ai_interaction_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  
+  // AI Provider Information (ENFORCED with CHECK constraints)
+  provider: varchar("provider", { length: 50 }).notNull(), // 'openai', 'kimi', 'qwen', 'deepseek', 'anthropic', 'gemini', 'mcp_custom'
+  model: varchar("model", { length: 100 }), // 'gpt-4o', 'moonshot-v1', 'qwen-2.5-72b', etc.
+  
+  // Task Classification (METADATA ONLY - no sensitive content)
+  taskType: varchar("task_type", { length: 100 }).notNull(), // 'chat', 'document_extraction', 'vision_analysis', 'embedding', 'report_generation', 'function_calling', 'code_generation'
+  functionName: varchar("function_name", { length: 200 }), // 'create_invoice', 'extract_bill_data', etc.
+  actionTaken: varchar("action_taken", { length: 200 }), // What the AI actually did (SOX audit requirement)
+  
+  // Document/Entity References (IDs only, no content)
+  documentId: varchar("document_id", { length: 255 }), // Reference to source document
+  entityType: varchar("entity_type", { length: 50 }), // 'invoice', 'bill', 'journal_entry', etc.
+  entityId: varchar("entity_id", { length: 255 }), // ID of entity being processed
+  documentHash: varchar("document_hash", { length: 64 }), // SHA-256 hash for verification
+  
+  // Usage & Cost Tracking
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  cost: decimal("cost", { precision: 10, scale: 6 }), // USD cost
+  
+  // ✅ SECURE: KMS Envelope Encryption (proper metadata for provenance)
+  encryptedPayload: text("encrypted_payload"), // Encrypted data (base64)
+  kmsKeyAlias: varchar("kms_key_alias", { length: 255 }), // KMS master key alias
+  encryptedDataKey: text("encrypted_data_key"), // Encrypted DEK (base64)
+  encryptionIv: varchar("encryption_iv", { length: 64 }), // Initialization vector
+  encryptionAuthTag: varchar("encryption_auth_tag", { length: 64 }), // GCM auth tag
+  payloadIntegrityHash: varchar("payload_integrity_hash", { length: 64 }), // SHA-256 of plaintext (for verification)
+  
+  // Compliance & Consent
+  dataCategory: varchar("data_category", { length: 50 }).notNull(), // 'financial', 'personal', 'operational', 'metadata'
+  dataResidency: varchar("data_residency", { length: 50 }), // 'UAE', 'KSA', 'EU', 'US', 'China', 'global'
+  consentGiven: boolean("consent_given").default(false).notNull(), // User consented to this provider
+  consentRevokedAt: timestamp("consent_revoked_at"), // If consent was later revoked
+  
+  // Timing & Performance
+  startedAt: timestamp("started_at").notNull(),
+  completedAt: timestamp("completed_at"),
+  duration: integer("duration_ms"), // Milliseconds
+  
+  // Status & Error (no sensitive error messages)
+  status: varchar("status", { length: 20 }).notNull(), // 'processing', 'success', 'failed', 'timeout'
+  errorCode: varchar("error_code", { length: 50 }), // Error code (no sensitive details)
+  
+  // Retention Policy (GDPR/SOX compliance)
+  retentionCategory: varchar("retention_category", { length: 50 }).notNull().default('metadata_only'), // 'metadata_only', 'encrypted_content', 'audit_trail'
+  purgeAfter: timestamp("purge_after"), // Auto-delete encrypted content after this date
+  userDataRedacted: boolean("user_data_redacted").default(false), // GDPR erasure flag (keeps metadata for SOX)
+  
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("ai_logs_tenant_idx").on(table.tenantId),
+  index("ai_logs_user_idx").on(table.userId),
+  index("ai_logs_provider_idx").on(table.provider),
+  index("ai_logs_task_type_idx").on(table.taskType),
+  index("ai_logs_started_at_idx").on(table.startedAt),
+  index("ai_logs_purge_after_idx").on(table.purgeAfter),
+  index("ai_logs_status_idx").on(table.status),
+  // CHECK constraints for enum enforcement (SOX audit requirement)
+  sql`CONSTRAINT check_ai_log_provider CHECK (provider IN ('openai', 'kimi', 'qwen', 'deepseek', 'anthropic', 'gemini', 'mcp_custom'))`,
+  sql`CONSTRAINT check_ai_log_task_type CHECK (task_type IN ('chat', 'document_extraction', 'vision_analysis', 'embedding', 'report_generation', 'function_calling', 'code_generation'))`,
+  sql`CONSTRAINT check_ai_log_status CHECK (status IN ('processing', 'success', 'failed', 'timeout'))`,
+  sql`CONSTRAINT check_ai_log_data_category CHECK (data_category IN ('financial', 'personal', 'operational', 'metadata'))`,
+  sql`CONSTRAINT check_ai_log_data_residency CHECK (data_residency IS NULL OR data_residency IN ('UAE', 'KSA', 'EU', 'US', 'China', 'global'))`,
+  sql`CONSTRAINT check_ai_log_retention_category CHECK (retention_category IN ('metadata_only', 'encrypted_content', 'audit_trail'))`,
+]);
+
+export const insertAIInteractionLogSchema = createInsertSchema(aiInteractionLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAIInteractionLog = z.infer<typeof insertAIInteractionLogSchema>;
+export type AIInteractionLog = typeof aiInteractionLogs.$inferSelect;
+
+// AI Log Access Audits (Append-Only, Tamper-Evident)
+/**
+ * Separate append-only table to track WHO accessed AI logs
+ * Cannot be edited/deleted - only INSERT allowed (SOX compliance)
+ * "Audit the auditors" requirement
+ */
+export const aiLogAccessAudits = pgTable("ai_log_access_audits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  aiLogId: varchar("ai_log_id").notNull().references(() => aiInteractionLogs.id),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  
+  // Who accessed the log
+  accessedBy: varchar("accessed_by").notNull().references(() => users.id),
+  accessedAt: timestamp("accessed_at").defaultNow().notNull(),
+  
+  // Purpose of access
+  purpose: varchar("purpose", { length: 50 }).notNull(), // 'audit', 'compliance', 'troubleshooting', 'export'
+  accessMethod: varchar("access_method", { length: 50 }).notNull(), // 'ui', 'api', 'export', 'report'
+  
+  // What was accessed (for granular auditing)
+  accessedFields: jsonb("accessed_fields"), // ['encryptedPayload', 'metadata'] - what was viewed
+  decryptionAttempted: boolean("decryption_attempted").default(false), // Did user decrypt payload?
+  
+  // Client information (for security tracking)
+  ipAddress: varchar("ip_address", { length: 45 }), // IPv4 or IPv6
+  userAgent: text("user_agent"),
+  
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("ai_log_access_audits_ai_log_idx").on(table.aiLogId),
+  index("ai_log_access_audits_tenant_idx").on(table.tenantId),
+  index("ai_log_access_audits_accessed_by_idx").on(table.accessedBy),
+  index("ai_log_access_audits_accessed_at_idx").on(table.accessedAt),
+  // CHECK constraint for purpose enum
+  sql`CONSTRAINT check_ai_log_access_purpose CHECK (purpose IN ('audit', 'compliance', 'troubleshooting', 'export', 'report'))`,
+  sql`CONSTRAINT check_ai_log_access_method CHECK (access_method IN ('ui', 'api', 'export', 'report', 'batch'))`,
+]);
+
+export const insertAILogAccessAuditSchema = createInsertSchema(aiLogAccessAudits).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAILogAccessAudit = z.infer<typeof insertAILogAccessAuditSchema>;
+export type AILogAccessAudit = typeof aiLogAccessAudits.$inferSelect;
+
+// ====================================
+// TASK 8-2: PORTABLE INTEGRATION CONNECTIONS
+// ====================================
+
+/**
+ * Integration Connections - Platform-Agnostic OAuth Storage
+ * Works on Replit, AWS, Azure, self-hosted
+ * Stores encrypted OAuth tokens with full KMS envelope encryption metadata
+ */
+export const integrationConnections = pgTable("integration_connections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id), // Who connected this integration
+  
+  // Provider Information (ENFORCED with CHECK constraints)
+  provider: varchar("provider", { length: 50 }).notNull(), // 'onedrive', 'google_drive', 'stripe', 'twilio', 'lean_technologies', 'custom_api'
+  providerUserId: varchar("provider_user_id", { length: 255 }), // User ID at provider (email, account ID, etc.)
+  providerAccountName: varchar("provider_account_name", { length: 255 }), // Display name (user@example.com, Acme Corp)
+  
+  // ✅ SECURE: KMS Envelope Encryption for Access Token
+  encryptedAccessToken: text("encrypted_access_token").notNull(), // Encrypted token (base64)
+  accessTokenKmsKeyAlias: varchar("access_token_kms_key_alias", { length: 255 }).notNull(), // KMS master key alias
+  accessTokenEncryptedDek: text("access_token_encrypted_dek").notNull(), // Encrypted data key
+  accessTokenIv: varchar("access_token_iv", { length: 64 }).notNull(), // Initialization vector
+  accessTokenAuthTag: varchar("access_token_auth_tag", { length: 64 }).notNull(), // GCM auth tag
+  
+  // ✅ SECURE: KMS Envelope Encryption for Refresh Token (optional)
+  encryptedRefreshToken: text("encrypted_refresh_token"),
+  refreshTokenKmsKeyAlias: varchar("refresh_token_kms_key_alias", { length: 255 }),
+  refreshTokenEncryptedDek: text("refresh_token_encrypted_dek"),
+  refreshTokenIv: varchar("refresh_token_iv", { length: 64 }),
+  refreshTokenAuthTag: varchar("refresh_token_auth_tag", { length: 64 }),
+  
+  // Token Metadata
+  tokenExpiresAt: timestamp("token_expires_at"),
+  scopes: jsonb("scopes"), // Granted OAuth scopes (array of strings)
+  
+  // Connection Status (ENFORCED with CHECK constraints)
+  status: varchar("status", { length: 20 }).notNull().default('connected'), // 'connected', 'disconnected', 'expired', 'error'
+  lastVerifiedAt: timestamp("last_verified_at"), // Last successful health check
+  lastError: text("last_error"), // Last connection error (no sensitive data)
+  
+  // Provider-specific metadata
+  metadata: jsonb("metadata"), // {folderId, driveId, etc.}
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("integration_connections_tenant_idx").on(table.tenantId),
+  index("integration_connections_user_idx").on(table.userId),
+  index("integration_connections_provider_idx").on(table.provider),
+  index("integration_connections_status_idx").on(table.status),
+  unique("unique_integration_tenant_user_provider").on(table.tenantId, table.userId, table.provider),
+  // CHECK constraints for enum enforcement
+  sql`CONSTRAINT check_integration_provider CHECK (provider IN ('onedrive', 'google_drive', 'stripe', 'twilio', 'lean_technologies', 'custom_api'))`,
+  sql`CONSTRAINT check_integration_status CHECK (status IN ('connected', 'disconnected', 'expired', 'error'))`,
+]);
+
+export const insertIntegrationConnectionSchema = createInsertSchema(integrationConnections).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertIntegrationConnection = z.infer<typeof insertIntegrationConnectionSchema>;
+export type IntegrationConnection = typeof integrationConnections.$inferSelect;
+
+// ====================================
+// TASK 8-3: MCP SERVERS (MODEL CONTEXT PROTOCOL)
+// ====================================
+
+/**
+ * MCP Servers - Dynamic AI Tool Integration
+ * Allows connecting to ANY AI provider or API via MCP protocol
+ * Supports custom internal LLMs, OpenAPI-generated tools, etc.
+ * WITH SECURITY ISOLATION: Process-level, container, or sandbox isolation
+ */
+export const mcpServers = pgTable("mcp_servers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").references(() => tenants.id), // NULL = global/system-wide server
+  
+  // Server Configuration
+  name: varchar("name", { length: 255 }).notNull(), // 'stripe-connector', 'internal-llm', 'shopify-api'
+  description: text("description"),
+  command: varchar("command", { length: 500 }).notNull(), // 'npx', 'python', 'node', 'docker', etc.
+  args: jsonb("args").notNull(), // ['-y', '@modelcontextprotocol/server-openapi']
+  env: jsonb("env"), // {OPENAPI_URL: '...', API_KEY: '${SECRET_NAME}'}
+  
+  // ✅ SECURITY: Isolation Controls
+  isolationMode: varchar("isolation_mode", { length: 50 }).notNull().default('process'), // 'process', 'container', 'sandbox', 'vm'
+  containerImage: varchar("container_image", { length: 500 }), // Docker image (if isolation_mode='container')
+  sandboxProfile: varchar("sandbox_profile", { length: 100 }), // Sandbox profile name (if isolation_mode='sandbox')
+  allowedCapabilities: jsonb("allowed_capabilities"), // ['network', 'filesystem_read', 'filesystem_write'] - capabilities whitelist
+  resourceLimits: jsonb("resource_limits"), // {cpu: '0.5', memory: '512Mi', maxProcesses: 10}
+  
+  // ✅ SECURITY: Tenant Boundary Enforcement
+  trustBoundary: varchar("trust_boundary", { length: 50 }).notNull().default('tenant_scoped'), // 'tenant_scoped', 'global_trusted', 'untrusted'
+  allowCrossTenantAccess: boolean("allow_cross_tenant_access").default(false).notNull(), // Can this server access other tenants?
+  
+  // Health & Status (ENFORCED with CHECK constraints)
+  status: varchar("status", { length: 20 }).notNull().default('stopped'), // 'running', 'stopped', 'error', 'initializing'
+  healthStatus: varchar("health_status", { length: 20 }).default('unknown'), // 'healthy', 'degraded', 'unhealthy', 'unknown'
+  healthCheckUrl: varchar("health_check_url", { length: 500 }), // Optional HTTP health check endpoint
+  lastHealthCheck: timestamp("last_health_check"),
+  
+  // Process Management
+  pid: integer("pid"), // Process ID (if running locally without container)
+  containerId: varchar("container_id", { length: 255 }), // Container ID (if isolation_mode='container')
+  startedAt: timestamp("started_at"),
+  stoppedAt: timestamp("stopped_at"),
+  restartCount: integer("restart_count").default(0).notNull(),
+  lastError: text("last_error"),
+  
+  // Configuration
+  enabled: boolean("enabled").default(true).notNull(), // Can be disabled without deletion
+  autoRestart: boolean("auto_restart").default(true).notNull(), // Auto-restart on failure
+  maxRestarts: integer("max_restarts").default(5).notNull(), // Max restart attempts per hour
+  
+  // Tools (auto-discovered from MCP server)
+  availableTools: jsonb("available_tools"), // [{name, description, parameters}, ...]
+  
+  // Metadata
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("mcp_servers_tenant_idx").on(table.tenantId),
+  index("mcp_servers_status_idx").on(table.status),
+  index("mcp_servers_enabled_idx").on(table.enabled),
+  index("mcp_servers_trust_boundary_idx").on(table.trustBoundary),
+  unique("unique_mcp_server_name_tenant").on(table.tenantId, table.name),
+  // CHECK constraints for enum enforcement
+  sql`CONSTRAINT check_mcp_status CHECK (status IN ('running', 'stopped', 'error', 'initializing'))`,
+  sql`CONSTRAINT check_mcp_health_status CHECK (health_status IN ('healthy', 'degraded', 'unhealthy', 'unknown'))`,
+  sql`CONSTRAINT check_mcp_isolation_mode CHECK (isolation_mode IN ('process', 'container', 'sandbox', 'vm'))`,
+  sql`CONSTRAINT check_mcp_trust_boundary CHECK (trust_boundary IN ('tenant_scoped', 'global_trusted', 'untrusted'))`,
+]);
+
+export const insertMCPServerSchema = createInsertSchema(mcpServers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  pid: true,
+  startedAt: true,
+  stoppedAt: true,
+  restartCount: true,
+  lastHealthCheck: true,
+  lastError: true,
+  availableTools: true,
+});
+
+export type InsertMCPServer = z.infer<typeof insertMCPServerSchema>;
+export type MCPServer = typeof mcpServers.$inferSelect;
+
+// ====================================
+// TASK 8-5: ENCRYPTION KEYS (KMS/DEK MANAGEMENT)
+// ====================================
+
+/**
+ * Encryption Keys - Data Encryption Key (DEK) Management for Envelope Encryption
+ * 
+ * Each tenant has multiple DEKs for different purposes (AI logs, OAuth tokens, etc.)
+ * DEKs are encrypted with a master key and rotated every 90 days
+ * Supports key versioning for rotation without re-encrypting all data
+ */
+export const encryptionKeys = pgTable("encryption_keys", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  
+  // Key Purpose & Versioning
+  purpose: varchar("purpose", { length: 50 }).notNull(), // 'ai_logs', 'oauth_tokens', 'documents', 'webhook_signatures'
+  version: integer("version").notNull(), // Key version number (1, 2, 3, ...)
+  
+  // KMS Metadata
+  kmsKeyAlias: varchar("kms_key_alias", { length: 512 }).notNull(), // Master key alias/ARN (wider for AWS ARNs)
+  encryptedDEK: text("encrypted_dek").notNull(), // Encrypted Data Encryption Key (base64)
+  dekAlgorithm: varchar("dek_algorithm", { length: 50 }).notNull().default('AES-256-GCM'), // Encryption algorithm
+  dekFingerprint: varchar("dek_fingerprint", { length: 64 }).notNull(), // SHA-256 of plaintext DEK (for verification, NEVER store plaintext)
+  
+  // Key Lifecycle
+  status: varchar("status", { length: 20 }).notNull().default('active'), // 'active', 'rotating', 'deprecated', 'revoked'
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  activatedAt: timestamp("activated_at"), // When key became active
+  expiresAt: timestamp("expires_at"), // When key should be rotated (90 days default, configurable)
+  rotatedAt: timestamp("rotated_at"), // When key was actually rotated
+  revokedAt: timestamp("revoked_at"), // If key was compromised
+  
+  // Rotation Tracking
+  previousKeyId: varchar("previous_key_id").references((): any => encryptionKeys.id), // Link to previous key version
+  rotationReason: text("rotation_reason"), // 'scheduled', 'compromised', 'compliance', 'manual'
+  
+  // Usage Tracking
+  encryptionCount: integer("encryption_count").default(0).notNull(), // How many times used
+  lastUsedAt: timestamp("last_used_at"), // Last encryption operation
+  
+}, (table) => [
+  index("encryption_keys_tenant_idx").on(table.tenantId),
+  index("encryption_keys_purpose_idx").on(table.purpose),
+  index("encryption_keys_status_idx").on(table.status),
+  index("encryption_keys_expires_at_idx").on(table.expiresAt), // For rotation job
+  // Unique constraint: One active key per tenant/purpose
+  unique("unique_encryption_key_tenant_purpose_version").on(table.tenantId, table.purpose, table.version),
+  // ✅ CRITICAL: Partial unique index ensures ONLY ONE active key per tenant/purpose
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS unique_active_key_per_tenant_purpose ON encryption_keys (tenant_id, purpose) WHERE status = 'active'`,
+  // Optional: Also prevent multiple 'rotating' keys
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS unique_rotating_key_per_tenant_purpose ON encryption_keys (tenant_id, purpose) WHERE status = 'rotating'`,
+  // CHECK constraints for enum enforcement
+  sql`CONSTRAINT check_encryption_key_purpose CHECK (purpose IN ('ai_logs', 'oauth_tokens', 'documents', 'webhook_signatures'))`,
+  sql`CONSTRAINT check_encryption_key_status CHECK (status IN ('active', 'rotating', 'deprecated', 'revoked'))`,
+  sql`CONSTRAINT check_encryption_key_algorithm CHECK (dek_algorithm IN ('AES-256-GCM', 'AES-256-CBC'))`,
+]);
+
+export const insertEncryptionKeySchema = createInsertSchema(encryptionKeys).omit({
+  id: true,
+  createdAt: true,
+  encryptionCount: true,
+  lastUsedAt: true,
+});
+
+export type InsertEncryptionKey = z.infer<typeof insertEncryptionKeySchema>;
+export type EncryptionKey = typeof encryptionKeys.$inferSelect;
 
 // Relations
 export const tenantsRelations = relations(tenants, ({ one, many }) => ({
