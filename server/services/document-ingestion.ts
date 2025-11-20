@@ -1,11 +1,13 @@
 import { simpleParser, ParsedMail, Attachment } from 'mailparser';
 import axios from 'axios';
 import { createWriteStream } from 'fs';
-import { mkdir, unlink } from 'fs/promises';
+import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join, extname, basename } from 'path';
 import { randomBytes } from 'crypto';
 import { db } from '../db';
 import { inboundDocuments, type InsertInboundDocument } from '@shared/schema';
+import { googleDriveService } from '../cloud-storage/google-drive';
+import { oneDriveService } from '../cloud-storage/onedrive';
 
 const UPLOAD_BASE_DIR = 'attached_assets/inbound-documents';
 
@@ -107,25 +109,36 @@ export function extractMetadata(
 /**
  * Store document to local and optionally cloud storage
  * Returns local path and cloud file IDs (if applicable)
+ * 
+ * RESILIENT DESIGN:
+ * - Local storage ALWAYS succeeds (primary storage)
+ * - Cloud uploads run in parallel with Promise.allSettled
+ * - Partial failures are acceptable (local + 1 cloud = success)
+ * - Errors are logged but don't block the operation
  */
 export async function storeDocument(
   tenantId: string,
   buffer: Buffer,
   filename: string,
   options?: {
+    userId?: string;  // Optional, defaults to 'system' for webhooks
     uploadToGoogleDrive?: boolean;
     uploadToOneDrive?: boolean;
+    folderId?: string;
   }
 ): Promise<{
   localPath: string;
   googleDriveFileId?: string;
   oneDriveFileId?: string;
+  errors?: { provider: string; error: string }[];
 }> {
-  // Create tenant-specific directory
+  // Default userId to 'system' for webhook/unauthenticated uploads
+  const userId = options?.userId || 'system';
+
+  // Step 1: Save to local disk (ALWAYS succeeds)
   const uploadDir = join(UPLOAD_BASE_DIR, tenantId);
   await mkdir(uploadDir, { recursive: true });
 
-  // Generate unique filename to prevent collisions
   const uniqueId = randomBytes(8).toString('hex');
   const ext = extname(filename);
   const baseName = basename(filename, ext);
@@ -133,41 +146,70 @@ export async function storeDocument(
   const uniqueFilename = `${uniqueId}-${sanitizedBaseName}${ext}`;
   const localPath = join(uploadDir, uniqueFilename);
 
-  // Save to local disk
-  const stream = createWriteStream(localPath);
-  await new Promise((resolve, reject) => {
-    stream.write(buffer, (error) => {
-      if (error) reject(error);
-      else resolve(true);
-    });
-    stream.end();
-  });
+  await writeFile(localPath, buffer);
+  console.log(`[Document Ingestion] ✓ Saved to local: ${localPath}`);
 
-  console.log(`[Document Ingestion] Saved file to: ${localPath}`);
+  // Step 2: Parallel cloud uploads with Promise.allSettled
+  const cloudUploads: Promise<{ provider: string; fileId: string }>[] = [];
 
-  // TODO: Implement cloud storage uploads
-  // For now, just return local path
-  const result: {
+  if (options?.uploadToGoogleDrive) {
+    cloudUploads.push(
+      googleDriveService
+        .uploadFile(tenantId, userId, buffer, filename, options?.folderId)
+        .then((fileId) => ({ provider: 'google_drive', fileId }))
+    );
+  }
+
+  if (options?.uploadToOneDrive) {
+    cloudUploads.push(
+      oneDriveService
+        .uploadFile(tenantId, userId, buffer, filename, options?.folderId)
+        .then((fileId) => ({ provider: 'onedrive', fileId }))
+    );
+  }
+
+  // Step 3: Wait for all cloud uploads (don't fail on partial errors)
+  const results = await Promise.allSettled(cloudUploads);
+
+  // Step 4: Process results
+  const finalResult: {
     localPath: string;
     googleDriveFileId?: string;
     oneDriveFileId?: string;
+    errors?: { provider: string; error: string }[];
   } = { localPath };
 
-  // Placeholder for Google Drive upload
-  if (options?.uploadToGoogleDrive) {
-    // const googleDriveService = await getGoogleDriveClient();
-    // result.googleDriveFileId = await uploadToGoogleDrive(...);
-    console.log('[Document Ingestion] Google Drive upload not yet implemented');
+  const errors: { provider: string; error: string }[] = [];
+
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      const { provider, fileId } = result.value;
+      if (provider === 'google_drive') {
+        finalResult.googleDriveFileId = fileId;
+        console.log(`[Document Ingestion] ✓ Uploaded to Google Drive: ${fileId}`);
+      } else if (provider === 'onedrive') {
+        finalResult.oneDriveFileId = fileId;
+        console.log(`[Document Ingestion] ✓ Uploaded to OneDrive: ${fileId}`);
+      }
+    } else {
+      // Determine which provider failed based on index
+      const provider = options?.uploadToGoogleDrive && index === 0
+        ? 'google_drive'
+        : 'onedrive';
+
+      errors.push({
+        provider,
+        error: result.reason?.message || 'Upload failed',
+      });
+      console.error(`[Document Ingestion] ✗ ${provider} upload failed:`, result.reason);
+    }
+  });
+
+  if (errors.length > 0) {
+    finalResult.errors = errors;
   }
 
-  // Placeholder for OneDrive upload
-  if (options?.uploadToOneDrive) {
-    // const oneDriveService = await getOneDriveClient();
-    // result.oneDriveFileId = await uploadToOneDrive(...);
-    console.log('[Document Ingestion] OneDrive upload not yet implemented');
-  }
-
-  return result;
+  return finalResult;
 }
 
 /**
@@ -207,7 +249,12 @@ export async function cleanupLocalFile(localPath: string): Promise<void> {
  */
 export async function processEmailWebhook(
   tenantId: string,
-  rawEmail: string | Buffer
+  rawEmail: string | Buffer,
+  options?: {
+    userId?: string;  // Optional, defaults to 'system' for webhooks
+    uploadToGoogleDrive?: boolean;
+    uploadToOneDrive?: boolean;
+  }
 ): Promise<string[]> {
   const parsed = await parseEmailAttachments(rawEmail);
   const documentIds: string[] = [];
@@ -220,10 +267,11 @@ export async function processEmailWebhook(
         attachment.contentType
       );
 
-      const { localPath, googleDriveFileId, oneDriveFileId } = await storeDocument(
+      const { localPath, googleDriveFileId, oneDriveFileId, errors } = await storeDocument(
         tenantId,
         attachment.content,
-        metadata.fileName
+        metadata.fileName,
+        options
       );
 
       const documentId = await createInboundDocumentRecord({
@@ -262,7 +310,12 @@ export async function processTwilioMediaWebhook(
   phoneNumber: string,
   mediaUrl: string,
   messageText: string,
-  messageType: 'whatsapp' | 'sms'
+  messageType: 'whatsapp' | 'sms',
+  options?: {
+    userId?: string;  // Optional, defaults to 'system' for webhooks
+    uploadToGoogleDrive?: boolean;
+    uploadToOneDrive?: boolean;
+  }
 ): Promise<string> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID || '';
   const authToken = process.env.TWILIO_AUTH_TOKEN || '';
@@ -279,10 +332,11 @@ export async function processTwilioMediaWebhook(
 
   const metadata = extractMetadata(filename, buffer, contentType);
 
-  const { localPath, googleDriveFileId, oneDriveFileId } = await storeDocument(
+  const { localPath, googleDriveFileId, oneDriveFileId, errors } = await storeDocument(
     tenantId,
     buffer,
-    metadata.fileName
+    metadata.fileName,
+    options
   );
 
   const documentId = await createInboundDocumentRecord({

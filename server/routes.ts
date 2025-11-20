@@ -11,6 +11,7 @@ import { generateInvoicePDF } from "./pdf-service";
 import { registerCronJob, unregisterCronJob, validateCronExpression } from "./cron";
 import googleDriveRoutes from "./google-drive-routes";
 import aiCopilotUploadRoutes from "./routes/ai-copilot-uploads";
+import cloudStorageOAuthRoutes from "./routes/cloud-storage-oauth";
 import { OpenBankingService, EncryptedPayloadValidationError, TokenRefreshError, nonceStore } from './open-banking';
 import { openBankingProviderFactory } from './open-banking/providers';
 import { TransactionSyncService } from './open-banking/transaction-sync-service';
@@ -259,8 +260,11 @@ async function verifyTenantAccess(req: any, res: any, next: any) {
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
 
-  // Google Drive routes (no auth required for now)
+  // Google Drive routes (legacy - will be deprecated)
   app.use(googleDriveRoutes);
+
+  // Cloud Storage OAuth routes (Google Drive + OneDrive)
+  app.use('/api/oauth', cloudStorageOAuthRoutes);
 
   // AI Copilot upload routes
   app.use('/api/ai-copilot', aiCopilotUploadRoutes);
