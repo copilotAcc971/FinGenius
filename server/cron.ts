@@ -267,3 +267,33 @@ function generateExcelAttachment(reportData: any, reportType: string): Buffer {
 export function validateCronExpression(expression: string): boolean {
   return cron.validate(expression);
 }
+
+// AI Copilot Upload Cleanup - runs every hour to clean up expired files
+export function initializeUploadCleanup() {
+  try {
+    console.log('[AI Copilot Uploads] Initializing cleanup cron job...');
+    
+    // Import cleanup function
+    import('./routes/ai-copilot-uploads').then(({ cleanupExpiredUploads }) => {
+      // Run cleanup every hour at minute 0
+      const task = cron.schedule('0 * * * *', async () => {
+        await cleanupExpiredUploads();
+      }, {
+        scheduled: true,
+        timezone: 'UTC'
+      });
+
+      cronJobs.set('ai-copilot-upload-cleanup', task);
+      console.log('[AI Copilot Uploads] Cleanup cron job registered (runs hourly)');
+      
+      // Run cleanup once on startup
+      cleanupExpiredUploads().catch(err => {
+        console.error('[AI Copilot Uploads] Error running initial cleanup:', err);
+      });
+    }).catch(err => {
+      console.error('[AI Copilot Uploads] Error importing cleanup function:', err);
+    });
+  } catch (error) {
+    console.error('[AI Copilot Uploads] Error initializing cleanup cron job:', error);
+  }
+}

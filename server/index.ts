@@ -2,12 +2,15 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startFXRatesUpdateJob } from "./jobs/fx-rates-update";
-import { initializeScheduledReports } from "./cron";
+import { initializeScheduledReports, initializeUploadCleanup } from "./cron";
 import { initializeTransactionSync } from "./jobs/transaction-sync";
+import { getBackgroundIndexer } from "./rag/background-indexer";
 import { seedPermissions } from './scripts/seed-rbac';
 import { initializeRBACForAllTenants } from './scripts/update-owner-permissions';
 import { webhookRouter } from './routes-webhook';
 import { createAICopilotWebSocketServer } from './ai-copilot/websocket-server';
+import { createDashboardMetricsWebSocketServer } from './dashboard/metrics-websocket-server';
+import { logBypassStatus, RBAC_BYPASS_ENABLED } from './rbac/dev-bypass';
 
 const app = express();
 
@@ -62,6 +65,9 @@ app.use((req, res, next) => {
   // Initialize AI Copilot WebSocket server
   createAICopilotWebSocketServer(server);
 
+  // Initialize Dashboard Metrics WebSocket server
+  createDashboardMetricsWebSocketServer(server);
+
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
@@ -83,21 +89,36 @@ app.use((req, res, next) => {
   }, async () => {
     log(`serving on port ${port}`);
     
+    // Log RBAC bypass status
+    logBypassStatus();
+    
     // Initialize RBAC and scheduled reports
     try {
-      await seedPermissions();
-      await initializeRBACForAllTenants();
+      // Skip RBAC initialization in bypass mode to speed up development
+      if (!RBAC_BYPASS_ENABLED) {
+        await seedPermissions();
+        await initializeRBACForAllTenants();
+      } else {
+        console.log('[RBAC] Skipping permissions seeding (bypass mode)');
+      }
       
       // Initialize scheduled reports with proper await
       await initializeScheduledReports();
       
       // Initialize daily transaction sync job
       initializeTransactionSync();
+      
+      // Initialize AI Copilot upload cleanup job
+      initializeUploadCleanup();
     } catch (error) {
       console.error('Error during server initialization:', error);
     }
     
     // Initialize FX rates scheduled job
     startFXRatesUpdateJob();
+    
+    // Initialize RAG background indexer (runs nightly at 2 AM UTC)
+    const backgroundIndexer = getBackgroundIndexer();
+    backgroundIndexer.start();
   });
 })();

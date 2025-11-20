@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -6,6 +6,7 @@ import { Skeleton } from "@/shared/components/ui/skeleton";
 import { StatusBadge } from "@/shared/components/common/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/components/ui/alert";
 import { Button } from "@/shared/components/ui/button";
+import { Badge } from "@/shared/components/ui/badge";
 import { 
   DollarSign, 
   TrendingDown, 
@@ -17,12 +18,19 @@ import {
   BarChart3,
   AlertCircle,
   AlertTriangle,
-  CalendarClock
+  CalendarClock,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  TrendingUp,
+  Wallet
 } from "lucide-react";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useAuth } from "@/shared/hooks/useAuth";
+import { useDashboardMetrics } from "@/shared/lib/dashboard/metrics-client";
 import { format } from "date-fns";
+import { motion, useSpring, useTransform } from "framer-motion";
 
 interface Invoice {
   id: string;
@@ -80,10 +88,92 @@ const QuickActionCard = ({
   </Link>
 );
 
+// Animated number component with smooth transitions
+function AnimatedNumber({ value, prefix = "", suffix = "" }: { value: number; prefix?: string; suffix?: string }) {
+  const springValue = useSpring(value, { stiffness: 75, damping: 15 });
+  const display = useTransform(springValue, (current) => 
+    `${prefix}${Math.round(current).toLocaleString()}${suffix}`
+  );
+
+  useEffect(() => {
+    springValue.set(value);
+  }, [springValue, value]);
+
+  return <motion.span>{display}</motion.span>;
+}
+
+// Connection status indicator
+function ConnectionStatus({ state, onRefresh }: { state: string; onRefresh: () => void }) {
+  const getStatusConfig = () => {
+    switch (state) {
+      case 'connected':
+        return {
+          icon: Wifi,
+          text: 'Live',
+          variant: 'default' as const,
+          className: 'bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 border-green-500/20'
+        };
+      case 'connecting':
+        return {
+          icon: RefreshCw,
+          text: 'Connecting',
+          variant: 'secondary' as const,
+          className: 'animate-pulse'
+        };
+      case 'error':
+        return {
+          icon: WifiOff,
+          text: 'Disconnected',
+          variant: 'destructive' as const,
+          className: ''
+        };
+      default:
+        return {
+          icon: WifiOff,
+          text: 'Offline',
+          variant: 'outline' as const,
+          className: ''
+        };
+    }
+  };
+
+  const config = getStatusConfig();
+  const Icon = config.icon;
+
+  return (
+    <Badge 
+      variant={config.variant}
+      className={`gap-1.5 ${config.className}`}
+      data-testid="badge-connection-status"
+    >
+      <Icon className={`h-3 w-3 ${state === 'connecting' ? 'animate-spin' : ''}`} />
+      {config.text}
+      {(state === 'error' || state === 'disconnected') && (
+        <button 
+          onClick={onRefresh} 
+          className="ml-1 hover:opacity-70"
+          data-testid="button-reconnect"
+        >
+          <RefreshCw className="h-3 w-3" />
+        </button>
+      )}
+    </Badge>
+  );
+}
+
 export default function Dashboard() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { currentTenant } = useTenant();
+  
+  // Connect to live metrics WebSocket
+  const { 
+    metrics: liveMetrics, 
+    connectionState, 
+    error: metricsError, 
+    refresh: refreshMetrics,
+    isConnected 
+  } = useDashboardMetrics(currentTenant?.id);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -98,10 +188,11 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ["/api/dashboard/stats", { tenantId: currentTenant?.id }],
-    enabled: !!currentTenant?.id,
-  });
+  useEffect(() => {
+    if (metricsError) {
+      console.error('[Dashboard] Metrics error:', metricsError);
+    }
+  }, [metricsError]);
 
   const { data: recentInvoices, isLoading: invoicesLoading } = useQuery<Invoice[]>({
     queryKey: ["/api/invoices", { tenantId: currentTenant?.id, limit: 5, sortBy: "createdAt", sortOrder: "desc" }],
@@ -149,13 +240,6 @@ export default function Dashboard() {
     );
   }
 
-  const metrics = stats || {
-    totalRevenue: 0,
-    totalExpenses: 0,
-    outstandingInvoices: 0,
-    pendingPayments: 0,
-  };
-
   const getCustomerName = (customerId: string) => {
     const customer = customers?.find(c => c.id === customerId);
     return customer?.name || "Unknown Customer";
@@ -170,11 +254,17 @@ export default function Dashboard() {
     goingConcernStatus.status !== 'positive' && 
     goingConcernStatus.status !== null;
 
+  // Use live metrics if available, otherwise show loading state
+  const hasMetrics = !!liveMetrics;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Dashboard</h1>
-        <p className="text-muted-foreground">Overview of your business finances</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold">Dashboard</h1>
+          <p className="text-muted-foreground">Overview of your business finances</p>
+        </div>
+        <ConnectionStatus state={connectionState} onRefresh={refreshMetrics} />
       </div>
 
       {showGoingConcernAlert && (
@@ -232,84 +322,163 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Metrics Cards */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="hover-elevate">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-32" />
-            ) : (
-              <div className="text-2xl font-semibold font-mono" data-testid="text-total-revenue">
-                ${metrics.totalRevenue.toLocaleString()}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground mt-1">
-              All-time revenue
+      {/* Live Metrics Cards */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold">Key Performance Indicators</h2>
+          {hasMetrics && (
+            <p className="text-xs text-muted-foreground">
+              Last updated: {format(new Date(liveMetrics.timestamp), 'h:mm:ss a')}
             </p>
-          </CardContent>
-        </Card>
+          )}
+        </div>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          {/* Revenue Today */}
+          <Card className="hover-elevate">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Revenue Today</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              {!hasMetrics ? (
+                <Skeleton className="h-8 w-32" />
+              ) : (
+                <div className="text-2xl font-semibold font-mono" data-testid="text-revenue-today">
+                  $<AnimatedNumber value={parseFloat(liveMetrics.kpis.totalRevenueToday)} />
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">
+                Invoices posted today
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card className="hover-elevate">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-            <TrendingDown className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-32" />
-            ) : (
-              <div className="text-2xl font-semibold font-mono" data-testid="text-total-expenses">
-                ${metrics.totalExpenses.toLocaleString()}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground mt-1">
-              All-time expenses
-            </p>
-          </CardContent>
-        </Card>
+          {/* Expenses Today */}
+          <Card className="hover-elevate">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Expenses Today</CardTitle>
+              <TrendingDown className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              {!hasMetrics ? (
+                <Skeleton className="h-8 w-32" />
+              ) : (
+                <div className="text-2xl font-semibold font-mono" data-testid="text-expenses-today">
+                  $<AnimatedNumber value={parseFloat(liveMetrics.kpis.totalExpensesToday)} />
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">
+                Bills posted today
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card className="hover-elevate">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Outstanding Invoices</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-32" />
-            ) : (
-              <div className="text-2xl font-semibold font-mono" data-testid="text-outstanding-invoices">
-                ${metrics.outstandingInvoices.toLocaleString()}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground mt-1">
-              Awaiting payment
-            </p>
-          </CardContent>
-        </Card>
+          {/* Outstanding Invoices */}
+          <Card className="hover-elevate">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Outstanding Invoices</CardTitle>
+              <FileText className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              {!hasMetrics ? (
+                <Skeleton className="h-8 w-32" />
+              ) : (
+                <>
+                  <div className="text-2xl font-semibold font-mono" data-testid="text-outstanding-invoices">
+                    $<AnimatedNumber value={parseFloat(liveMetrics.kpis.outstandingInvoices.total)} />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {liveMetrics.kpis.outstandingInvoices.count} invoice{liveMetrics.kpis.outstandingInvoices.count !== 1 ? 's' : ''} awaiting payment
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
 
-        <Card className="hover-elevate">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Payments</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-32" />
-            ) : (
-              <div className="text-2xl font-semibold font-mono" data-testid="text-pending-payments">
-                ${metrics.pendingPayments.toLocaleString()}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground mt-1">
-              To vendors
-            </p>
-          </CardContent>
-        </Card>
+          {/* Cash Position */}
+          <Card className="hover-elevate">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Cash Position</CardTitle>
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              {!hasMetrics ? (
+                <Skeleton className="h-8 w-32" />
+              ) : (
+                <div className="text-2xl font-semibold font-mono" data-testid="text-cash-position">
+                  $<AnimatedNumber value={parseFloat(liveMetrics.kpis.cashPosition)} />
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">
+                Current cash & equivalents
+              </p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
+
+      {/* AR & AP Aging Summary */}
+      {hasMetrics && (
+        <div className="grid gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                AR Aging Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Current</p>
+                  <p className="text-lg font-semibold font-mono">${parseFloat(liveMetrics.kpis.arAgingSummary.current).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">1-30 Days</p>
+                  <p className="text-lg font-semibold font-mono">${parseFloat(liveMetrics.kpis.arAgingSummary.days30).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">31-60 Days</p>
+                  <p className="text-lg font-semibold font-mono">${parseFloat(liveMetrics.kpis.arAgingSummary.days60).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">90+ Days</p>
+                  <p className="text-lg font-semibold font-mono text-destructive">${parseFloat(liveMetrics.kpis.arAgingSummary.days90Plus).toLocaleString()}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingDown className="h-5 w-5" />
+                AP Aging Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Current</p>
+                  <p className="text-lg font-semibold font-mono">${parseFloat(liveMetrics.kpis.apAgingSummary.current).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">1-30 Days</p>
+                  <p className="text-lg font-semibold font-mono">${parseFloat(liveMetrics.kpis.apAgingSummary.days30).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">31-60 Days</p>
+                  <p className="text-lg font-semibold font-mono">${parseFloat(liveMetrics.kpis.apAgingSummary.days60).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">90+ Days</p>
+                  <p className="text-lg font-semibold font-mono text-destructive">${parseFloat(liveMetrics.kpis.apAgingSummary.days90Plus).toLocaleString()}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Recent Documents Section */}
       <div>

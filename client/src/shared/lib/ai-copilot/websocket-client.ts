@@ -23,6 +23,9 @@ export class CopilotWebSocketClient {
   public onDisconnected: (() => void) | null = null;
   public onError: ((error: string) => void) | null = null;
   public onFunctionCallConfirmationRequired: ((confirmation: FunctionCallConfirmation) => void) | null = null;
+  public onChatResponse: ((content: string, timestamp: number) => void) | null = null;
+  public onVoiceNoteResponse: ((audioData: string, transcript: string, timestamp: number) => void) | null = null;
+  public onFunctionCallResult: ((result: { functionName: string; args: any; result?: any; error?: string; success: boolean }) => void) | null = null;
 
   constructor() {
     this.audioManager = new AudioManager();
@@ -132,12 +135,39 @@ export class CopilotWebSocketClient {
         }
         break;
 
+      case 'chat_response':
+        console.log('[CopilotWebSocket] Chat response received');
+        if (this.onChatResponse) {
+          this.onChatResponse(message.content, message.timestamp);
+        }
+        break;
+
+      case 'voice_note_response':
+        console.log('[CopilotWebSocket] Voice note response received');
+        if (this.onVoiceNoteResponse) {
+          this.onVoiceNoteResponse(message.audioData, message.transcript, message.timestamp);
+        }
+        break;
+
       case 'function_call_confirmation_required':
         if (this.onFunctionCallConfirmationRequired) {
           this.onFunctionCallConfirmationRequired({
             callId: message.callId,
             name: message.name,
             args: message.args
+          });
+        }
+        break;
+
+      case 'function_call_result':
+        console.log('[CopilotWebSocket] Function call result:', message.functionName, message.success);
+        if (this.onFunctionCallResult) {
+          this.onFunctionCallResult({
+            functionName: message.functionName,
+            args: message.args,
+            result: message.result,
+            error: message.error,
+            success: message.success
           });
         }
         break;
@@ -171,6 +201,46 @@ export class CopilotWebSocketClient {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'function_call_confirmed',
+        callId,
+        name,
+        args
+      }));
+    }
+  }
+
+  sendChatMessage(content: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'chat_message',
+        content
+      }));
+    }
+  }
+
+  confirmChatFunctionCall(callId: string, name: string, args: any): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'chat_function_confirmed',
+        callId,
+        name,
+        args
+      }));
+    }
+  }
+
+  sendVoiceNoteMessage(content: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'voice_note_message',
+        content
+      }));
+    }
+  }
+
+  confirmVoiceNoteFunctionCall(callId: string, name: string, args: any): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'voice_note_function_confirmed',
         callId,
         name,
         args

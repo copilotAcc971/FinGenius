@@ -10,6 +10,7 @@ import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
 import { registerCronJob, unregisterCronJob, validateCronExpression } from "./cron";
 import googleDriveRoutes from "./google-drive-routes";
+import aiCopilotUploadRoutes from "./routes/ai-copilot-uploads";
 import { OpenBankingService, EncryptedPayloadValidationError, TokenRefreshError, nonceStore } from './open-banking';
 import { openBankingProviderFactory } from './open-banking/providers';
 import { TransactionSyncService } from './open-banking/transaction-sync-service';
@@ -50,6 +51,7 @@ import { KSAZATCAService } from './e-invoicing/ksa-zatca/zatca-service';
 import { RiskScoringService } from './compliance/risk-scoring';
 import { SanctionsScreeningService } from './compliance/sanctions-screening';
 import { TransactionMonitoringService } from './compliance/transaction-monitoring';
+import { broadcastMetricsUpdate } from './dashboard/metrics-websocket-server';
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -259,6 +261,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Google Drive routes (no auth required for now)
   app.use(googleDriveRoutes);
+
+  // AI Copilot upload routes
+  app.use('/api/ai-copilot', aiCopilotUploadRoutes);
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
@@ -2035,6 +2040,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       res.json(invoice);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(req.tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       console.error("Error creating invoice:", error);
       
@@ -2093,6 +2103,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('Audit log failed:', err));
       
       res.json(updated);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(req.tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       console.error("Error updating invoice:", error);
       
@@ -2147,6 +2162,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }).catch(err => console.error('Audit log failed:', err));
         
         res.json({ message: "Invoice deleted successfully" });
+        
+        // Broadcast real-time dashboard metrics update
+        broadcastMetricsUpdate(invoice.tenantId).catch(err => 
+          console.error('[Dashboard] Failed to broadcast metrics update:', err)
+        );
       } else {
         res.status(404).json({ message: "Invoice not found or already deleted" });
       }
@@ -3611,6 +3631,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       res.status(201).json(result);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(req.tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -3662,6 +3687,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
       res.json(payment);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(req.tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -3708,6 +3738,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
       res.json({ message: "Payment deleted" });
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(req.tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -5074,6 +5109,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
       res.status(201).json(journalEntry);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -5132,6 +5172,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
       res.json(journalEntry);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -5178,6 +5223,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
       res.status(204).send();
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -5382,6 +5432,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       res.json(result);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       console.error('Error approving journal entry:', error);
       
@@ -5474,6 +5529,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       res.json(result);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       console.error('Error rejecting journal entry:', error);
       
@@ -5606,6 +5666,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
       res.status(201).json(bill);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -5674,6 +5739,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
       res.json(bill);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -5720,6 +5790,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
       res.json({ message: "Bill deleted" });
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -5844,6 +5919,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bill: result.bill,
         journalEntry: result.journalEntry,
       });
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
 
     } catch (error: any) {
       console.error("Error posting bill:", error);
@@ -6383,6 +6463,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.json(result);
+      
+      // Broadcast real-time dashboard metrics update
+      broadcastMetricsUpdate(tenantId).catch(err => 
+        console.error('[Dashboard] Failed to broadcast metrics update:', err)
+      );
     } catch (error: any) {
       // LOG FAILURE
       await auditLogger.logFinancialTransaction({
@@ -10661,6 +10746,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('[Compliance] Complete training error:', error);
       res.status(400).json({ message: error.message || 'Failed to complete training' });
+    }
+  });
+
+  // ============================================================================
+  // PUSH NOTIFICATIONS
+  // ============================================================================
+
+  // Get VAPID public key for client-side subscription
+  app.get('/api/push/vapid-public-key', isAuthenticated, async (req: any, res) => {
+    try {
+      const { getPushService } = await import('./notifications/push-service');
+      const pushService = getPushService();
+      const publicKey = pushService.getVapidPublicKey();
+      res.json({ publicKey });
+    } catch (error: any) {
+      console.error('[Push] Get VAPID key error:', error);
+      res.status(500).json({ message: error.message || 'Failed to get VAPID public key' });
+    }
+  });
+
+  // Subscribe to push notifications
+  app.post('/api/push/subscribe', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { subscription } = req.body;
+      const userId = req.user!.claims.sub;
+      const tenantId = req.tenantId;
+      const userAgent = req.headers['user-agent'];
+
+      if (!subscription || !subscription.endpoint || !subscription.keys) {
+        return res.status(400).json({ message: 'Invalid subscription data' });
+      }
+
+      const { getPushService } = await import('./notifications/push-service');
+      const pushService = getPushService();
+
+      await pushService.subscribe({
+        tenantId,
+        userId,
+        subscription,
+        userAgent,
+      });
+
+      res.json({ message: 'Subscribed to push notifications successfully' });
+    } catch (error: any) {
+      console.error('[Push] Subscribe error:', error);
+      res.status(400).json({ message: error.message || 'Failed to subscribe to push notifications' });
+    }
+  });
+
+  // Unsubscribe from push notifications
+  app.post('/api/push/unsubscribe', isAuthenticated, async (req: any, res) => {
+    try {
+      const { endpoint } = req.body;
+
+      if (!endpoint) {
+        return res.status(400).json({ message: 'Endpoint is required' });
+      }
+
+      const { getPushService } = await import('./notifications/push-service');
+      const pushService = getPushService();
+
+      await pushService.unsubscribe({ endpoint });
+
+      res.json({ message: 'Unsubscribed from push notifications successfully' });
+    } catch (error: any) {
+      console.error('[Push] Unsubscribe error:', error);
+      res.status(400).json({ message: error.message || 'Failed to unsubscribe from push notifications' });
+    }
+  });
+
+  // Get current user's subscriptions
+  app.get('/api/push/subscriptions', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user!.claims.sub;
+      const subscriptions = await storage.getPushSubscriptionsByUser(userId);
+      
+      // Don't expose sensitive keys in response
+      const sanitized = subscriptions.map(sub => ({
+        id: sub.id,
+        endpoint: sub.endpoint,
+        userAgent: sub.userAgent,
+        createdAt: sub.createdAt,
+        lastUsedAt: sub.lastUsedAt,
+      }));
+
+      res.json(sanitized);
+    } catch (error: any) {
+      console.error('[Push] Get subscriptions error:', error);
+      res.status(500).json({ message: 'Failed to get push subscriptions' });
+    }
+  });
+
+  // Test push notification (send to current user)
+  app.post('/api/push/test', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const userId = req.user!.claims.sub;
+      const tenantId = req.tenantId;
+
+      const { getPushService } = await import('./notifications/push-service');
+      const pushService = getPushService();
+
+      const results = await pushService.sendToUser({
+        tenantId,
+        userId,
+        notificationType: 'general',
+        payload: {
+          title: '🔔 Test Notification',
+          body: 'This is a test push notification from Copilot Accountant.',
+          icon: '/favicon.png',
+          tag: 'test-notification',
+          data: {
+            type: 'test',
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+
+      res.json({
+        message: 'Test notification sent',
+        ...results,
+      });
+    } catch (error: any) {
+      console.error('[Push] Test notification error:', error);
+      res.status(400).json({ message: error.message || 'Failed to send test notification' });
+    }
+  });
+
+  // Get notification logs (admin/owner only)
+  app.get('/api/push/logs', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('admin.manage'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { userId, notificationType, wasSent, startDate, endDate } = req.query;
+
+      const filters: any = {};
+      if (userId) filters.userId = userId;
+      if (notificationType) filters.notificationType = notificationType;
+      if (wasSent !== undefined) filters.wasSent = wasSent === 'true';
+      if (startDate) filters.startDate = new Date(startDate as string);
+      if (endDate) filters.endDate = new Date(endDate as string);
+
+      const logs = await storage.getPushNotificationLogs(tenantId, filters);
+      res.json(logs);
+    } catch (error: any) {
+      console.error('[Push] Get logs error:', error);
+      res.status(500).json({ message: 'Failed to get notification logs' });
     }
   });
 

@@ -38,11 +38,27 @@ The application features a multi-tenant architecture employing a "verified-tenan
 - **Open Banking Integration:** Provider-agnostic architecture, currently implemented with Lean Technologies (UAE). Includes OAuth2, bank connection management, daily transaction sync (with AI-powered reconciliation using OpenAI GPT-4o-mini), payment initiation, and secure webhook handling.
 - **UAE Peppol E-Invoicing:** PINT-AE compliant with UBL 2.1 XML generation, TLV QR codes (UAE FTA compliant), ASP integration foundation, 14-day transmission deadline tracking, complete audit trail.
 - **KSA ZATCA E-Invoicing (Phase 2):** ZATCA-compliant XML with UUID/hash/hash chaining, TLV QR codes, FATOORAH integration for B2B real-time clearance and B2C 24-hour reporting, SHA-256 cryptographic hashing, PKI digital signature support.
-- **AI Copilot:** An AI assistant with live voice conversation capabilities.
+- **AI Copilot:** An AI assistant with live voice conversation capabilities and strict authority-aware RBAC system.
     - **Backend:** WebSocket server with session-based authentication, OpenAI Realtime API integration, 11 accounting functions, PCM16 audio streaming, server-side VAD, function call handling with confirmation, heartbeat monitoring.
     - **Frontend:** AudioManager, AudioWorklet processor, CopilotWebSocketClient with auto-reconnection, real-time audio streaming/playback.
     - **UI:** Floating widget, push-to-talk/always-listening modes, audio visualizer, conversation transcript, function call confirmation dialog, status indicators, keyboard shortcuts.
     - **Security:** Session authentication, tenant isolation, RBAC integration, critical action confirmation.
+    - **Authority-Aware RBAC System (Phase 2):**
+        - **Dynamic Context Injection:** User role and permissions are injected into AI system prompt at runtime, making the AI aware of authority boundaries.
+        - **Entry-Level Employee Persona:** AI operates as a helpful colleague who respects chain of command and seeks approval for actions.
+        - **Plan & Confirm Protocol:** All mutating actions require numbered action plan presentation and explicit Yes/No confirmation before execution.
+        - **Permission Validation Layer:** RBAC permissions are validated before every function execution, with graceful denial responses.
+        - **Conversation State Machine:** Tracks conversation flow through states: Listening → Awaiting Confirmation → Executing → Listening.
+        - **Segregation of Duties:** Separate draft vs. post functions (draft_journal_entry/post_journal_entry, draft_invoice/post_invoice, draft_bill/post_bill) enforce accounting separation.
+        - **Authority Denial Responses:** When users lack permissions, AI provides professional explanations with escalation suggestions.
+        - **10 Accounting Roles:** Owner, CFO, Controller, Admin, Senior Accountant, Accountant, Junior Accountant, Bookkeeper, Sales, Purchase, Viewer with hierarchical authority levels.
+        - **Function Metadata Catalog:** Complete mapping of all accounting functions to their required permissions and impact levels (READ_ONLY, CREATE, MODIFY, DELETE, EXECUTE, CRITICAL).
+        - **Implementation Files:**
+            - `server/ai-copilot/authority-context.ts` - Dynamic context injection system
+            - `server/ai-copilot/conversation-state.ts` - State machine implementation
+            - `server/ai-copilot/plan-confirm-protocol.ts` - Protocol definitions and formatting
+            - `server/ai-copilot/websocket-server.ts` - Integrated WebSocket server with permission checks
+            - `shared/authority-matrix.ts` - Complete authority matrix with role definitions
 - **SOX Audit Logging:** Immutable audit trail system for SOX §802 compliance.
     - **Implementation:** Centralized audit service with immutable storage, sensitive data redaction (PII/PCI), before/after state capture.
     - **Coverage:** 20+ financial routes instrumented (invoices, bills, payments, journal entries, bank transactions, inventory).

@@ -13,6 +13,7 @@ import {
   unique,
   uniqueIndex,
   date,
+  customType,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -60,6 +61,12 @@ export const FX_TRANSLATION_RUN_STATUS = ['running', 'completed', 'failed'] as c
 
 // IFRS 18 P&L Category Enum
 export const IFRS18_CATEGORY = ['operating_income', 'operating_expense', 'investing_income', 'investing_expense', 'financing_income', 'financing_expense', 'none'] as const;
+
+// RAG Document Type Enum
+export const DOCUMENT_TYPE = ['invoice', 'bill', 'journal_entry', 'memo', 'customer', 'vendor', 'account', 'other'] as const;
+
+// Push Notification Type Enum
+export const PUSH_NOTIFICATION_TYPE = ['overdue_invoice', 'payment_received', 'approval_request', 'compliance_deadline', 'general'] as const;
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(
@@ -110,6 +117,19 @@ const decimalString = z.preprocess(
   (val) => (typeof val === 'number' ? val.toString() : val),
   z.string()
 );
+
+// Custom vector type for pgvector extension (vector(1536) for OpenAI text-embedding-3-small)
+const vector = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return 'vector(1536)';
+  },
+  toDriver(value: number[]): string {
+    return JSON.stringify(value);
+  },
+  fromDriver(value: string): number[] {
+    return JSON.parse(value);
+  },
+});
 
 // ====================================
 // MULTI-CURRENCY SUPPORT
@@ -294,6 +314,121 @@ export const insertTenantMemberRoleSchema = createInsertSchema(tenantMemberRoles
 
 export type InsertTenantMemberRole = z.infer<typeof insertTenantMemberRoleSchema>;
 export type TenantMemberRole = typeof tenantMemberRoles.$inferSelect;
+
+// RBAC: Role Permission Overrides (tenant-specific per-user permission customization)
+// Allows granting or revoking specific permissions to users, overriding their default role permissions
+export const rolePermissionOverrides = pgTable("role_permission_overrides", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  permissionId: varchar("permission_id").notNull().references(() => permissions.id, { onDelete: 'cascade' }),
+  granted: boolean("granted").notNull(), // true = grant permission, false = revoke permission
+  reason: text("reason"), // Optional: reason for override (audit trail)
+  grantedBy: varchar("granted_by").references(() => users.id), // Who created this override
+  expiresAt: timestamp("expires_at"), // Optional: auto-revoke after date
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_user_permission_override").on(table.tenantId, table.userId, table.permissionId),
+  index("role_permission_overrides_tenant_idx").on(table.tenantId),
+  index("role_permission_overrides_user_idx").on(table.userId),
+  index("role_permission_overrides_permission_idx").on(table.permissionId),
+  index("role_permission_overrides_expires_at_idx").on(table.expiresAt),
+]);
+
+export const insertRolePermissionOverrideSchema = createInsertSchema(rolePermissionOverrides).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertRolePermissionOverride = z.infer<typeof insertRolePermissionOverrideSchema>;
+export type RolePermissionOverride = typeof rolePermissionOverrides.$inferSelect;
+
+// ====================================
+// AUTHORITY MATRIX & FUNCTION PERMISSIONS (AI Copilot RBAC)
+// ====================================
+
+// Authority Matrix: Maps accounting roles to their permissions across modules
+// This defines the default permission levels for each role
+export const authorityMatrix = pgTable("authority_matrix", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  roleId: varchar("role_id").notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  module: varchar("module", { length: 100 }).notNull(), // e.g., 'invoices', 'bills', 'journal_entries'
+  permissionLevel: varchar("permission_level", { length: 50 }).notNull(), // READ, WRITE, EDIT, POST, DELETE, APPROVE
+  
+  // Constraints define special permissions
+  canDelete: boolean("can_delete").default(false).notNull(),
+  canApprove: boolean("can_approve").default(false).notNull(),
+  canPost: boolean("can_post").default(false).notNull(),
+  canReverse: boolean("can_reverse").default(false).notNull(),
+  canExecute: boolean("can_execute").default(false).notNull(), // Payment execution
+  canAuthorize: boolean("can_authorize").default(false).notNull(), // Payment authorization (dual control)
+  readOnly: boolean("read_only").default(false).notNull(),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_authority_matrix_entry").on(table.tenantId, table.roleId, table.module),
+  index("authority_matrix_tenant_idx").on(table.tenantId),
+  index("authority_matrix_role_idx").on(table.roleId),
+  index("authority_matrix_module_idx").on(table.module),
+]);
+
+export const insertAuthorityMatrixSchema = createInsertSchema(authorityMatrix).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAuthorityMatrix = z.infer<typeof insertAuthorityMatrixSchema>;
+export type AuthorityMatrix = typeof authorityMatrix.$inferSelect;
+
+// Function Permissions: Defines what AI Copilot functions require for execution
+// This maps AI functions (e.g., 'create_invoice', 'post_journal_entry') to required authority levels
+export const functionPermissions = pgTable("function_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").references(() => tenants.id, { onDelete: 'cascade' }), // NULL = global/system function
+  functionName: varchar("function_name", { length: 200 }).notNull(), // e.g., 'create_invoice', 'post_journal_entry'
+  displayName: varchar("display_name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull(), // e.g., 'data_creation', 'transaction_posting'
+  module: varchar("module", { length: 100 }).notNull(), // Which module this function belongs to
+  
+  requiredPermissionLevel: varchar("required_permission_level", { length: 50 }).notNull(), // READ, WRITE, EDIT, POST, DELETE, APPROVE
+  requiredImpactLevel: varchar("required_impact_level", { length: 50 }).notNull(), // READ_ONLY, CREATE, MODIFY, DELETE, EXECUTE, CRITICAL
+  
+  // Approval requirements
+  requiresApproval: boolean("requires_approval").default(false).notNull(), // AI must get user confirmation
+  requiresSecondaryApproval: boolean("requires_secondary_approval").default(false).notNull(), // Needs separate approver
+  
+  // Special constraints
+  requiresReversalAuthority: boolean("requires_reversal_authority").default(false).notNull(),
+  requiresPaymentExecutionAuthority: boolean("requires_payment_execution_authority").default(false).notNull(),
+  requiresDeleteAuthority: boolean("requires_delete_authority").default(false).notNull(),
+  
+  description: text("description"),
+  examples: text("examples").array(), // Example queries that trigger this function
+  isActive: boolean("is_active").default(true).notNull(),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("unique_function_permission").on(table.tenantId, table.functionName),
+  index("function_permissions_tenant_idx").on(table.tenantId),
+  index("function_permissions_function_name_idx").on(table.functionName),
+  index("function_permissions_module_idx").on(table.module),
+  index("function_permissions_category_idx").on(table.category),
+]);
+
+export const insertFunctionPermissionSchema = createInsertSchema(functionPermissions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertFunctionPermission = z.infer<typeof insertFunctionPermissionSchema>;
+export type FunctionPermission = typeof functionPermissions.$inferSelect;
 
 // Address schema for JSONB fields
 export const addressSchema = z.object({
@@ -1988,6 +2123,61 @@ export const insertRetainerDrawdownSchema = createInsertSchema(retainerDrawdowns
 
 export type InsertRetainerDrawdown = z.infer<typeof insertRetainerDrawdownSchema>;
 export type RetainerDrawdown = typeof retainerDrawdowns.$inferSelect;
+
+// AI Copilot Uploads (document uploads for AI processing)
+export const aiCopilotUploads = pgTable("ai_copilot_uploads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  filename: varchar("filename", { length: 255 }).notNull(),
+  originalFilename: varchar("original_filename", { length: 255 }).notNull(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  fileSize: integer("file_size").notNull(), // bytes
+  filePath: text("file_path").notNull(), // relative path in attached_assets
+  virusScanStatus: varchar("virus_scan_status", { length: 20 }).default("pending").notNull(), // pending, clean, infected
+  virusScanDetails: text("virus_scan_details"),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(), // 24 hours from upload
+  deletedAt: timestamp("deleted_at"), // soft delete
+}, (table) => [
+  index("ai_copilot_uploads_tenant_idx").on(table.tenantId),
+  index("ai_copilot_uploads_user_idx").on(table.userId),
+  index("ai_copilot_uploads_expires_at_idx").on(table.expiresAt),
+]);
+
+export const insertAiCopilotUploadSchema = createInsertSchema(aiCopilotUploads).omit({
+  id: true,
+  uploadedAt: true,
+});
+
+export type InsertAiCopilotUpload = z.infer<typeof insertAiCopilotUploadSchema>;
+export type AiCopilotUpload = typeof aiCopilotUploads.$inferSelect;
+
+// Document Embeddings (RAG knowledge base for AI Copilot semantic search)
+export const documentEmbeddings = pgTable("document_embeddings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  documentType: varchar("document_type", { length: 50 }).notNull(), // 'invoice', 'bill', 'journal_entry', 'memo', etc.
+  documentId: varchar("document_id").notNull(), // ID of the source document
+  content: text("content").notNull(), // Text content/chunk that was embedded
+  embedding: vector("embedding").notNull(), // 1536-dimensional vector from OpenAI text-embedding-3-small
+  metadata: jsonb("metadata"), // Additional context (customer name, date, amount, etc.)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("document_embeddings_tenant_idx").on(table.tenantId),
+  index("document_embeddings_document_type_idx").on(table.documentType),
+  index("document_embeddings_document_id_idx").on(table.documentId),
+  // Note: Vector similarity search index (HNSW) should be created via raw SQL migration
+  // CREATE INDEX document_embeddings_embedding_idx ON document_embeddings USING hnsw (embedding vector_cosine_ops);
+]);
+
+export const insertDocumentEmbeddingSchema = createInsertSchema(documentEmbeddings).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertDocumentEmbedding = z.infer<typeof insertDocumentEmbeddingSchema>;
+export type DocumentEmbedding = typeof documentEmbeddings.$inferSelect;
 
 // Relations
 export const tenantsRelations = relations(tenants, ({ one, many }) => ({
@@ -4126,6 +4316,64 @@ export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
 
 // ============================================================================
+// PUSH NOTIFICATIONS
+// ============================================================================
+
+// Push Subscriptions (Web Push API subscriptions for PWA notifications)
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(), // Public key for encryption
+  auth: text("auth").notNull(), // Authentication secret
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow(),
+  lastUsedAt: timestamp("last_used_at"),
+}, (table) => [
+  index("push_subscriptions_tenant_user_idx").on(table.tenantId, table.userId),
+  index("push_subscriptions_user_idx").on(table.userId),
+]);
+
+export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({
+  id: true,
+  createdAt: true,
+  lastUsedAt: true,
+});
+
+export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+
+// Push Notification Log (Track sent notifications for debugging and compliance)
+export const pushNotificationLog = pgTable("push_notification_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  subscriptionId: varchar("subscription_id").references(() => pushSubscriptions.id),
+  notificationType: varchar("notification_type", { length: 50 }).notNull(), // 'overdue_invoice', 'payment_received', 'approval_request', 'compliance_deadline', 'general'
+  title: varchar("title", { length: 255 }).notNull(),
+  body: text("body").notNull(),
+  data: jsonb("data"), // Additional notification data (invoice ID, etc.)
+  wasSent: boolean("was_sent").default(false).notNull(),
+  errorMessage: text("error_message"),
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("push_notification_log_tenant_idx").on(table.tenantId),
+  index("push_notification_log_user_idx").on(table.userId),
+  index("push_notification_log_type_idx").on(table.notificationType),
+  index("push_notification_log_sent_at_idx").on(table.sentAt),
+]);
+
+export const insertPushNotificationLogSchema = createInsertSchema(pushNotificationLog).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPushNotificationLog = z.infer<typeof insertPushNotificationLogSchema>;
+export type PushNotificationLog = typeof pushNotificationLog.$inferSelect;
+
+// ============================================================================
 // AML/KYC COMPLIANCE SYSTEM
 // ============================================================================
 
@@ -5281,5 +5529,31 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   user: one(users, {
     fields: [auditLogs.userId],
     references: [users.id],
+  }),
+}));
+
+export const pushSubscriptionsRelations = relations(pushSubscriptions, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [pushSubscriptions.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [pushSubscriptions.userId],
+    references: [users.id],
+  }),
+}));
+
+export const pushNotificationLogRelations = relations(pushNotificationLog, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [pushNotificationLog.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [pushNotificationLog.userId],
+    references: [users.id],
+  }),
+  subscription: one(pushSubscriptions, {
+    fields: [pushNotificationLog.subscriptionId],
+    references: [pushSubscriptions.id],
   }),
 }));

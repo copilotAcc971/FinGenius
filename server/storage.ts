@@ -229,6 +229,18 @@ import {
   fxTranslationRuns,
   type FxTranslationRun,
   type InsertFxTranslationRun,
+  authorityMatrix,
+  type AuthorityMatrix,
+  type InsertAuthorityMatrix,
+  functionPermissions,
+  type FunctionPermission,
+  type InsertFunctionPermission,
+  pushSubscriptions,
+  type PushSubscription,
+  type InsertPushSubscription,
+  pushNotificationLog,
+  type PushNotificationLog,
+  type InsertPushNotificationLog,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc, or, lt } from "drizzle-orm";
@@ -242,6 +254,7 @@ export interface IStorage {
   // Tenant operations
   getTenant(id: string): Promise<Tenant | undefined>;
   getTenantsByUserId(userId: string): Promise<Tenant[]>;
+  getAllTenants(): Promise<Tenant[]>;
   createTenant(tenant: InsertTenant): Promise<Tenant>;
   updateTenant(id: string, userId: string, tenant: Partial<InsertTenant>): Promise<Tenant>;
   isTenantMember(tenantId: string, userId: string): Promise<boolean>;
@@ -828,6 +841,58 @@ export interface IStorage {
   getComplianceTraining(tenantId: string, filters?: { userId?: string }): Promise<ComplianceTraining[]>;
   updateComplianceTraining(id: string, tenantId: string, data: Partial<InsertComplianceTraining>): Promise<ComplianceTraining>;
   getBankConnections(tenantId: string): Promise<any[]>;
+
+  // ====================================
+  // AUTHORITY MATRIX & FUNCTION PERMISSIONS (AI Copilot RBAC)
+  // ====================================
+  
+  // Authority Matrix operations
+  getAuthorityMatrixByRole(tenantId: string, roleId: string): Promise<AuthorityMatrix[]>;
+  getAuthorityMatrixByModule(tenantId: string, module: string): Promise<AuthorityMatrix[]>;
+  createAuthorityMatrix(data: InsertAuthorityMatrix): Promise<AuthorityMatrix>;
+  updateAuthorityMatrix(id: string, tenantId: string, data: Partial<InsertAuthorityMatrix>): Promise<AuthorityMatrix>;
+  deleteAuthorityMatrix(id: string, tenantId: string): Promise<void>;
+  seedDefaultAuthorityMatrix(tenantId: string): Promise<void>;
+  
+  // Function Permissions operations
+  getFunctionPermissions(tenantId: string): Promise<FunctionPermission[]>;
+  getFunctionPermissionByName(tenantId: string, functionName: string): Promise<FunctionPermission | null>;
+  createFunctionPermission(data: InsertFunctionPermission): Promise<FunctionPermission>;
+  updateFunctionPermission(id: string, tenantId: string, data: Partial<InsertFunctionPermission>): Promise<FunctionPermission>;
+  deleteFunctionPermission(id: string, tenantId: string): Promise<void>;
+  seedDefaultFunctionPermissions(tenantId?: string): Promise<void>;
+  
+  // Permission checking utilities
+  checkUserCanExecuteFunction(tenantId: string, userId: string, functionName: string): Promise<{ allowed: boolean; reason?: string }>;
+  getUserAuthorityContext(tenantId: string, userId: string): Promise<{
+    roles: string[];
+    maxImpactLevel: string;
+    availableFunctions: string[];
+    restrictedFunctions: Record<string, string>;
+  }>;
+
+  // ====================================
+  // PUSH NOTIFICATIONS
+  // ====================================
+  
+  // Push Subscription operations
+  getPushSubscriptionsByTenant(tenantId: string): Promise<PushSubscription[]>;
+  getPushSubscriptionsByUser(userId: string): Promise<PushSubscription[]>;
+  getPushSubscriptionByEndpoint(endpoint: string): Promise<PushSubscription | null>;
+  createPushSubscription(data: InsertPushSubscription): Promise<PushSubscription>;
+  updatePushSubscriptionLastUsed(id: string): Promise<void>;
+  deletePushSubscription(id: string): Promise<void>;
+  deleteInactivePushSubscriptions(cutoffDate: Date): Promise<number>;
+  
+  // Push Notification Log operations
+  createPushNotificationLog(data: InsertPushNotificationLog): Promise<PushNotificationLog>;
+  getPushNotificationLogs(tenantId: string, filters?: {
+    userId?: string;
+    notificationType?: string;
+    wasSent?: boolean;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<PushNotificationLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -883,6 +948,10 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tenants.ownerId, userId));
     
     return userTenants.map(t => t.tenant);
+  }
+
+  async getAllTenants(): Promise<Tenant[]> {
+    return await db.select().from(tenants).orderBy(asc(tenants.createdAt));
   }
 
   async createTenant(tenantData: InsertTenant): Promise<Tenant> {
@@ -9638,6 +9707,491 @@ export class DatabaseStorage implements IStorage {
       .where(eq(openBankingConnections.tenantId, tenantId))
       .orderBy(desc(openBankingConnections.createdAt));
   }
+
+  // ====================================
+  // AUTHORITY MATRIX & FUNCTION PERMISSIONS IMPLEMENTATIONS
+  // ====================================
+
+  // Authority Matrix operations
+  async getAuthorityMatrixByRole(tenantId: string, roleId: string): Promise<AuthorityMatrix[]> {
+    return await db
+      .select()
+      .from(authorityMatrix)
+      .where(and(
+        eq(authorityMatrix.tenantId, tenantId),
+        eq(authorityMatrix.roleId, roleId)
+      ))
+      .orderBy(authorityMatrix.module);
+  }
+
+  async getAuthorityMatrixByModule(tenantId: string, module: string): Promise<AuthorityMatrix[]> {
+    return await db
+      .select()
+      .from(authorityMatrix)
+      .where(and(
+        eq(authorityMatrix.tenantId, tenantId),
+        eq(authorityMatrix.module, module)
+      ))
+      .orderBy(authorityMatrix.permissionLevel);
+  }
+
+  async createAuthorityMatrix(data: InsertAuthorityMatrix): Promise<AuthorityMatrix> {
+    const [matrix] = await db
+      .insert(authorityMatrix)
+      .values(data)
+      .returning();
+    
+    if (!matrix) {
+      throw new Error('Failed to create authority matrix entry');
+    }
+    
+    return matrix;
+  }
+
+  async updateAuthorityMatrix(id: string, tenantId: string, data: Partial<InsertAuthorityMatrix>): Promise<AuthorityMatrix> {
+    const [matrix] = await db
+      .update(authorityMatrix)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(
+        eq(authorityMatrix.id, id),
+        eq(authorityMatrix.tenantId, tenantId)
+      ))
+      .returning();
+    
+    if (!matrix) {
+      throw new Error('Authority matrix entry not found');
+    }
+    
+    return matrix;
+  }
+
+  async deleteAuthorityMatrix(id: string, tenantId: string): Promise<void> {
+    await db
+      .delete(authorityMatrix)
+      .where(and(
+        eq(authorityMatrix.id, id),
+        eq(authorityMatrix.tenantId, tenantId)
+      ));
+  }
+
+  async seedDefaultAuthorityMatrix(tenantId: string): Promise<void> {
+    const {
+      DEFAULT_AUTHORITY_MATRIX,
+      AccountingRole,
+    } = await import('@shared/authority-matrix');
+
+    // Get all roles for this tenant
+    const tenantRoles = await db
+      .select()
+      .from(roles)
+      .where(eq(roles.tenantId, tenantId));
+
+    // For each role, seed the authority matrix based on DEFAULT_AUTHORITY_MATRIX
+    for (const role of tenantRoles) {
+      // Match role name to AccountingRole enum
+      const roleKey = Object.keys(AccountingRole).find(
+        key => AccountingRole[key as keyof typeof AccountingRole] === role.name
+      ) as keyof typeof AccountingRole | undefined;
+
+      if (!roleKey) continue;
+
+      const permissions = DEFAULT_AUTHORITY_MATRIX[AccountingRole[roleKey]];
+
+      // Insert authority matrix entries for this role
+      for (const perm of permissions) {
+        await db
+          .insert(authorityMatrix)
+          .values({
+            tenantId,
+            roleId: role.id,
+            module: perm.module,
+            permissionLevel: perm.level,
+            canDelete: perm.constraints?.canDelete ?? false,
+            canApprove: perm.constraints?.canApprove ?? false,
+            canPost: perm.constraints?.canPost ?? false,
+            canReverse: perm.constraints?.canReverse ?? false,
+            canExecute: perm.constraints?.canExecute ?? false,
+            canAuthorize: perm.constraints?.canAuthorize ?? false,
+            readOnly: perm.constraints?.readOnly ?? false,
+          })
+          .onConflictDoNothing();
+      }
+    }
+  }
+
+  // Function Permissions operations
+  async getFunctionPermissions(tenantId: string): Promise<FunctionPermission[]> {
+    return await db
+      .select()
+      .from(functionPermissions)
+      .where(
+        or(
+          eq(functionPermissions.tenantId, tenantId),
+          isNull(functionPermissions.tenantId) // Global functions
+        )
+      )
+      .orderBy(functionPermissions.category, functionPermissions.functionName);
+  }
+
+  async getFunctionPermissionByName(tenantId: string, functionName: string): Promise<FunctionPermission | null> {
+    // Try tenant-specific first, then global
+    const [tenantSpecific] = await db
+      .select()
+      .from(functionPermissions)
+      .where(and(
+        eq(functionPermissions.tenantId, tenantId),
+        eq(functionPermissions.functionName, functionName)
+      ))
+      .limit(1);
+
+    if (tenantSpecific) {
+      return tenantSpecific;
+    }
+
+    // Fall back to global function permission
+    const [global] = await db
+      .select()
+      .from(functionPermissions)
+      .where(and(
+        isNull(functionPermissions.tenantId),
+        eq(functionPermissions.functionName, functionName)
+      ))
+      .limit(1);
+
+    return global || null;
+  }
+
+  async createFunctionPermission(data: InsertFunctionPermission): Promise<FunctionPermission> {
+    const [permission] = await db
+      .insert(functionPermissions)
+      .values(data)
+      .returning();
+    
+    if (!permission) {
+      throw new Error('Failed to create function permission');
+    }
+    
+    return permission;
+  }
+
+  async updateFunctionPermission(id: string, tenantId: string, data: Partial<InsertFunctionPermission>): Promise<FunctionPermission> {
+    const [permission] = await db
+      .update(functionPermissions)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(
+        eq(functionPermissions.id, id),
+        or(
+          eq(functionPermissions.tenantId, tenantId),
+          isNull(functionPermissions.tenantId)
+        )
+      ))
+      .returning();
+    
+    if (!permission) {
+      throw new Error('Function permission not found');
+    }
+    
+    return permission;
+  }
+
+  async deleteFunctionPermission(id: string, tenantId: string): Promise<void> {
+    await db
+      .delete(functionPermissions)
+      .where(and(
+        eq(functionPermissions.id, id),
+        or(
+          eq(functionPermissions.tenantId, tenantId),
+          isNull(functionPermissions.tenantId)
+        )
+      ));
+  }
+
+  async seedDefaultFunctionPermissions(tenantId?: string): Promise<void> {
+    const { AI_FUNCTION_PERMISSIONS } = await import('@shared/authority-matrix');
+
+    // Insert all default AI function permissions
+    for (const [functionName, funcDef] of Object.entries(AI_FUNCTION_PERMISSIONS)) {
+      await db
+        .insert(functionPermissions)
+        .values({
+          tenantId: tenantId || null,
+          functionName: funcDef.functionName,
+          displayName: funcDef.displayName,
+          category: funcDef.category,
+          module: funcDef.module,
+          requiredPermissionLevel: funcDef.requiredPermissionLevel,
+          requiredImpactLevel: funcDef.requiredImpactLevel,
+          requiresApproval: funcDef.requiresApproval,
+          requiresSecondaryApproval: funcDef.requiresSecondaryApproval,
+          requiresReversalAuthority: funcDef.specialConstraints?.requiresReversalAuthority ?? false,
+          requiresPaymentExecutionAuthority: funcDef.specialConstraints?.requiresPaymentExecutionAuthority ?? false,
+          requiresDeleteAuthority: funcDef.specialConstraints?.requiresDeleteAuthority ?? false,
+          description: funcDef.description,
+          examples: funcDef.examples || [],
+          isActive: true,
+        })
+        .onConflictDoNothing();
+    }
+  }
+
+  // Permission checking utilities
+  async checkUserCanExecuteFunction(
+    tenantId: string,
+    userId: string,
+    functionName: string
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    const { canExecuteFunction } = await import('@shared/authority-matrix');
+
+    // Get user's roles in this tenant
+    const member = await db
+      .select()
+      .from(tenantMembers)
+      .where(and(
+        eq(tenantMembers.tenantId, tenantId),
+        eq(tenantMembers.userId, userId)
+      ))
+      .limit(1);
+
+    if (!member || member.length === 0) {
+      return { allowed: false, reason: 'User is not a member of this tenant' };
+    }
+
+    // Get user's role assignments
+    const roleAssignments = await db
+      .select({ role: roles })
+      .from(tenantMemberRoles)
+      .leftJoin(roles, eq(roles.id, tenantMemberRoles.roleId))
+      .where(eq(tenantMemberRoles.tenantMemberId, member[0].id));
+
+    if (roleAssignments.length === 0) {
+      return { allowed: false, reason: 'User has no roles assigned' };
+    }
+
+    // Check if any of the user's roles can execute this function
+    for (const { role } of roleAssignments) {
+      if (!role) continue;
+
+      const check = canExecuteFunction(role.name as any, functionName);
+      if (check.allowed) {
+        return { allowed: true };
+      }
+    }
+
+    // If none of the roles allow it, return the reason from the highest role
+    const highestRole = roleAssignments[0].role;
+    if (highestRole) {
+      return canExecuteFunction(highestRole.name as any, functionName);
+    }
+
+    return { allowed: false, reason: 'No role has permission for this function' };
+  }
+
+  async getUserAuthorityContext(
+    tenantId: string,
+    userId: string
+  ): Promise<{
+    roles: string[];
+    maxImpactLevel: string;
+    availableFunctions: string[];
+    restrictedFunctions: Record<string, string>;
+  }> {
+    const {
+      getMaxImpactLevelForRole,
+      getAvailableFunctions,
+      getRestrictedFunctions,
+      AccountingRole,
+      IMPACT_LEVEL_HIERARCHY,
+    } = await import('@shared/authority-matrix');
+
+    // Get user's roles
+    const member = await db
+      .select()
+      .from(tenantMembers)
+      .where(and(
+        eq(tenantMembers.tenantId, tenantId),
+        eq(tenantMembers.userId, userId)
+      ))
+      .limit(1);
+
+    if (!member || member.length === 0) {
+      return {
+        roles: [],
+        maxImpactLevel: 'READ_ONLY',
+        availableFunctions: [],
+        restrictedFunctions: {},
+      };
+    }
+
+    const roleAssignments = await db
+      .select({ role: roles })
+      .from(tenantMemberRoles)
+      .leftJoin(roles, eq(roles.id, tenantMemberRoles.roleId))
+      .where(eq(tenantMemberRoles.tenantMemberId, member[0].id));
+
+    const userRoles = roleAssignments
+      .map(r => r.role?.name)
+      .filter(Boolean) as string[];
+
+    if (userRoles.length === 0) {
+      return {
+        roles: [],
+        maxImpactLevel: 'READ_ONLY',
+        availableFunctions: [],
+        restrictedFunctions: {},
+      };
+    }
+
+    // Find the highest impact level across all roles
+    let maxImpactLevel = 'READ_ONLY';
+    let maxImpactIndex = 0;
+    const allAvailableFunctions = new Set<string>();
+    const allRestrictedFunctions: Record<string, string> = {};
+
+    for (const roleName of userRoles) {
+      const role = roleName as any;
+      const impactLevel = getMaxImpactLevelForRole(role);
+      const impactIndex = IMPACT_LEVEL_HIERARCHY.indexOf(impactLevel as any);
+
+      if (impactIndex > maxImpactIndex) {
+        maxImpactLevel = impactLevel;
+        maxImpactIndex = impactIndex;
+      }
+
+      // Collect available functions
+      const available = getAvailableFunctions(role);
+      available.forEach(f => allAvailableFunctions.add(f));
+
+      // Collect restricted functions (only if not available in any role)
+      const restricted = getRestrictedFunctions(role);
+      Object.entries(restricted).forEach(([func, reason]) => {
+        if (!allAvailableFunctions.has(func)) {
+          allRestrictedFunctions[func] = reason;
+        }
+      });
+    }
+
+    return {
+      roles: userRoles,
+      maxImpactLevel,
+      availableFunctions: Array.from(allAvailableFunctions),
+      restrictedFunctions: allRestrictedFunctions,
+    };
+  }
+
+  // ====================================
+  // PUSH NOTIFICATIONS
+  // ====================================
+
+  async getPushSubscriptionsByTenant(tenantId: string): Promise<PushSubscription[]> {
+    return await db
+      .select()
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.tenantId, tenantId))
+      .orderBy(desc(pushSubscriptions.createdAt));
+  }
+
+  async getPushSubscriptionsByUser(userId: string): Promise<PushSubscription[]> {
+    return await db
+      .select()
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.userId, userId))
+      .orderBy(desc(pushSubscriptions.lastUsedAt));
+  }
+
+  async getPushSubscriptionByEndpoint(endpoint: string): Promise<PushSubscription | null> {
+    const [subscription] = await db
+      .select()
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.endpoint, endpoint))
+      .limit(1);
+    
+    return subscription || null;
+  }
+
+  async createPushSubscription(data: InsertPushSubscription): Promise<PushSubscription> {
+    const [subscription] = await db
+      .insert(pushSubscriptions)
+      .values(data)
+      .returning();
+    
+    return subscription;
+  }
+
+  async updatePushSubscriptionLastUsed(id: string): Promise<void> {
+    await db
+      .update(pushSubscriptions)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(pushSubscriptions.id, id));
+  }
+
+  async deletePushSubscription(id: string): Promise<void> {
+    await db
+      .delete(pushSubscriptions)
+      .where(eq(pushSubscriptions.id, id));
+  }
+
+  async deleteInactivePushSubscriptions(cutoffDate: Date): Promise<number> {
+    const result = await db
+      .delete(pushSubscriptions)
+      .where(
+        or(
+          lt(pushSubscriptions.lastUsedAt, cutoffDate),
+          and(
+            isNull(pushSubscriptions.lastUsedAt),
+            lt(pushSubscriptions.createdAt, cutoffDate)
+          )
+        )
+      );
+    
+    return 0; // drizzle doesn't return count, but operation succeeded
+  }
+
+  async createPushNotificationLog(data: InsertPushNotificationLog): Promise<PushNotificationLog> {
+    const [log] = await db
+      .insert(pushNotificationLog)
+      .values(data)
+      .returning();
+    
+    return log;
+  }
+
+  async getPushNotificationLogs(
+    tenantId: string,
+    filters?: {
+      userId?: string;
+      notificationType?: string;
+      wasSent?: boolean;
+      startDate?: Date;
+      endDate?: Date;
+    }
+  ): Promise<PushNotificationLog[]> {
+    let query = db
+      .select()
+      .from(pushNotificationLog)
+      .where(eq(pushNotificationLog.tenantId, tenantId));
+
+    if (filters?.userId) {
+      query = query.where(eq(pushNotificationLog.userId, filters.userId));
+    }
+
+    if (filters?.notificationType) {
+      query = query.where(eq(pushNotificationLog.notificationType, filters.notificationType));
+    }
+
+    if (filters?.wasSent !== undefined) {
+      query = query.where(eq(pushNotificationLog.wasSent, filters.wasSent));
+    }
+
+    if (filters?.startDate) {
+      query = query.where(gte(pushNotificationLog.createdAt, filters.startDate));
+    }
+
+    if (filters?.endDate) {
+      query = query.where(lte(pushNotificationLog.createdAt, filters.endDate));
+    }
+
+    return await query.orderBy(desc(pushNotificationLog.createdAt));
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -9693,6 +10247,10 @@ export class MemStorage implements IStorage {
 
   async getTenantsByUserId(userId: string): Promise<Tenant[]> {
     return this.tenants.filter(t => t.ownerId === userId);
+  }
+
+  async getAllTenants(): Promise<Tenant[]> {
+    return [...this.tenants];
   }
 
   async createTenant(tenant: InsertTenant): Promise<Tenant> {
@@ -11665,6 +12223,83 @@ export class MemStorage implements IStorage {
   async getBankConnections(tenantId: string): Promise<any[]> {
     // For MemStorage, return empty array (bank connections are typically in database)
     return [];
+  }
+
+  // ====================================
+  // AUTHORITY MATRIX & FUNCTION PERMISSIONS IMPLEMENTATIONS (Stubs)
+  // ====================================
+
+  async getAuthorityMatrixByRole(tenantId: string, roleId: string): Promise<AuthorityMatrix[]> {
+    return [];
+  }
+
+  async getAuthorityMatrixByModule(tenantId: string, module: string): Promise<AuthorityMatrix[]> {
+    return [];
+  }
+
+  async createAuthorityMatrix(data: InsertAuthorityMatrix): Promise<AuthorityMatrix> {
+    throw new Error('Authority matrix not implemented in MemStorage');
+  }
+
+  async updateAuthorityMatrix(id: string, tenantId: string, data: Partial<InsertAuthorityMatrix>): Promise<AuthorityMatrix> {
+    throw new Error('Authority matrix not implemented in MemStorage');
+  }
+
+  async deleteAuthorityMatrix(id: string, tenantId: string): Promise<void> {
+    throw new Error('Authority matrix not implemented in MemStorage');
+  }
+
+  async seedDefaultAuthorityMatrix(tenantId: string): Promise<void> {
+    // No-op for MemStorage
+  }
+
+  async getFunctionPermissions(tenantId: string): Promise<FunctionPermission[]> {
+    return [];
+  }
+
+  async getFunctionPermissionByName(tenantId: string, functionName: string): Promise<FunctionPermission | null> {
+    return null;
+  }
+
+  async createFunctionPermission(data: InsertFunctionPermission): Promise<FunctionPermission> {
+    throw new Error('Function permissions not implemented in MemStorage');
+  }
+
+  async updateFunctionPermission(id: string, tenantId: string, data: Partial<InsertFunctionPermission>): Promise<FunctionPermission> {
+    throw new Error('Function permissions not implemented in MemStorage');
+  }
+
+  async deleteFunctionPermission(id: string, tenantId: string): Promise<void> {
+    throw new Error('Function permissions not implemented in MemStorage');
+  }
+
+  async seedDefaultFunctionPermissions(tenantId?: string): Promise<void> {
+    // No-op for MemStorage
+  }
+
+  async checkUserCanExecuteFunction(
+    tenantId: string,
+    userId: string,
+    functionName: string
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    return { allowed: false, reason: 'Permission checking not implemented in MemStorage' };
+  }
+
+  async getUserAuthorityContext(
+    tenantId: string,
+    userId: string
+  ): Promise<{
+    roles: string[];
+    maxImpactLevel: string;
+    availableFunctions: string[];
+    restrictedFunctions: Record<string, string>;
+  }> {
+    return {
+      roles: [],
+      maxImpactLevel: 'READ_ONLY',
+      availableFunctions: [],
+      restrictedFunctions: {},
+    };
   }
 }
 

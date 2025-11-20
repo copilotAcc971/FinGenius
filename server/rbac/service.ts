@@ -1,19 +1,22 @@
 import { db } from '../db';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, or, isNull, gt } from 'drizzle-orm';
 import {
   permissions,
   roles,
   rolePermissions,
   tenantMembers,
   tenantMemberRoles,
+  rolePermissionOverrides,
   tenants,
   type Role,
   type Permission,
   type InsertRole,
   type InsertRolePermission,
   type InsertTenantMemberRole,
+  type InsertRolePermissionOverride,
 } from '@shared/schema';
 import { expandPermissions, matchesPermissionPattern, resolveWildcardPermissions } from './permissions';
+import { RBAC_BYPASS_ENABLED } from './dev-bypass';
 
 export class RBACService {
   constructor(private tenantId: string) {}
@@ -23,6 +26,11 @@ export class RBACService {
    * Owner role bypasses all permission checks
    */
   async hasPermission(userId: string, permission: string): Promise<boolean> {
+    // Development bypass
+    if (RBAC_BYPASS_ENABLED) {
+      return true;
+    }
+    
     try {
       // Get user's permissions
       const userPermissions = await this.getUserPermissions(userId);
@@ -40,6 +48,7 @@ export class RBACService {
   /**
    * Get all permissions for a user (with inheritance expanded)
    * Returns expanded permission list including inherited permissions
+   * Includes rolePermissionOverrides (per-user customizations)
    */
   async getUserPermissions(userId: string): Promise<string[]> {
     try {
@@ -55,24 +64,59 @@ export class RBACService {
       // 3. Get all role IDs
       const roleIds = userRoles.map(role => role.id);
       
-      if (roleIds.length === 0) {
-        return [];
+      // 4. Get base permissions from roles
+      let permissionNames: string[] = [];
+      
+      if (roleIds.length > 0) {
+        const rolePermsResult = await db
+          .select({
+            permissionName: permissions.name,
+          })
+          .from(rolePermissions)
+          .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
+          .where(inArray(rolePermissions.roleId, roleIds));
+        
+        permissionNames = rolePermsResult.map(rp => rp.permissionName);
       }
       
-      // 4. Get permissions for these roles
-      const rolePermsResult = await db
+      // 5. Get permission overrides for this user (excluding expired overrides)
+      const now = new Date();
+      const overridesResult = await db
         .select({
           permissionName: permissions.name,
+          granted: rolePermissionOverrides.granted,
         })
-        .from(rolePermissions)
-        .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-        .where(inArray(rolePermissions.roleId, roleIds));
+        .from(rolePermissionOverrides)
+        .innerJoin(permissions, eq(rolePermissionOverrides.permissionId, permissions.id))
+        .where(
+          and(
+            eq(rolePermissionOverrides.tenantId, this.tenantId),
+            eq(rolePermissionOverrides.userId, userId),
+            // Include only non-expired overrides (expiresAt is null OR expiresAt > now)
+            or(
+              isNull(rolePermissionOverrides.expiresAt),
+              gt(rolePermissionOverrides.expiresAt, now)
+            )
+          )
+        );
       
-      // 5. Extract permission names
-      const permissionNames = rolePermsResult.map(rp => rp.permissionName);
+      // 6. Apply overrides to base permissions
+      const overridesToGrant = overridesResult
+        .filter(o => o.granted)
+        .map(o => o.permissionName);
       
-      // 6. Expand with inheritance (delete includes update and read, etc.)
-      const expanded = expandPermissions(permissionNames);
+      const overridesToRevoke = new Set(
+        overridesResult
+          .filter(o => !o.granted)
+          .map(o => o.permissionName)
+      );
+      
+      // Start with base permissions, remove revoked, add granted
+      let finalPermissions = permissionNames.filter(perm => !overridesToRevoke.has(perm));
+      finalPermissions = [...new Set([...finalPermissions, ...overridesToGrant])];
+      
+      // 7. Expand with inheritance (delete includes update and read, etc.)
+      const expanded = expandPermissions(finalPermissions);
       
       return expanded;
     } catch (error) {
@@ -425,5 +469,142 @@ export async function getAllPermissions(): Promise<Permission[]> {
   } catch (error) {
     console.error('Error getting all permissions:', error);
     return [];
+  }
+}
+
+/**
+ * Standalone utility: Get all permissions for a user in a specific tenant
+ * Includes role-based permissions and per-user overrides
+ * 
+ * @param userId - The user ID to check permissions for
+ * @param tenantId - The tenant context
+ * @returns Array of permission strings (with inheritance expanded)
+ */
+export async function getUserPermissions(
+  userId: string,
+  tenantId: string
+): Promise<string[]> {
+  const rbacService = new RBACService(tenantId);
+  return await rbacService.getUserPermissions(userId);
+}
+
+/**
+ * Standalone utility: Check if a user has a specific permission in a tenant
+ * Supports wildcard matching (e.g., 'invoices.*' matches 'invoices.create')
+ * 
+ * @param userId - The user ID to check
+ * @param tenantId - The tenant context
+ * @param permission - The permission to check (e.g., 'invoices.create')
+ * @returns true if user has the permission, false otherwise
+ */
+export async function hasPermission(
+  userId: string,
+  tenantId: string,
+  permission: string
+): Promise<boolean> {
+  const rbacService = new RBACService(tenantId);
+  return await rbacService.hasPermission(userId, permission);
+}
+
+/**
+ * Standalone utility: Grant or revoke a specific permission for a user
+ * Creates a permission override in the rolePermissionOverrides table
+ * 
+ * @param userId - The user ID
+ * @param tenantId - The tenant context
+ * @param permissionName - The permission name (e.g., 'invoices.delete')
+ * @param granted - true to grant, false to revoke
+ * @param grantedBy - The user ID who is creating this override
+ * @param reason - Optional reason for the override (audit trail)
+ * @param expiresAt - Optional expiration date for the override
+ */
+export async function setPermissionOverride(
+  userId: string,
+  tenantId: string,
+  permissionName: string,
+  granted: boolean,
+  grantedBy: string,
+  reason?: string,
+  expiresAt?: Date
+): Promise<void> {
+  try {
+    // Find the permission by name
+    const [permission] = await db
+      .select()
+      .from(permissions)
+      .where(eq(permissions.name, permissionName));
+    
+    if (!permission) {
+      throw new Error(`Permission '${permissionName}' not found`);
+    }
+    
+    // Upsert the override (insert or update if exists)
+    await db
+      .insert(rolePermissionOverrides)
+      .values({
+        tenantId,
+        userId,
+        permissionId: permission.id,
+        granted,
+        reason,
+        grantedBy,
+        expiresAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          rolePermissionOverrides.tenantId,
+          rolePermissionOverrides.userId,
+          rolePermissionOverrides.permissionId,
+        ],
+        set: {
+          granted,
+          reason,
+          grantedBy,
+          expiresAt,
+          updatedAt: new Date(),
+        },
+      });
+  } catch (error) {
+    console.error('Error setting permission override:', error);
+    throw error;
+  }
+}
+
+/**
+ * Standalone utility: Remove a permission override for a user
+ * 
+ * @param userId - The user ID
+ * @param tenantId - The tenant context
+ * @param permissionName - The permission name to remove override for
+ */
+export async function removePermissionOverride(
+  userId: string,
+  tenantId: string,
+  permissionName: string
+): Promise<void> {
+  try {
+    // Find the permission by name
+    const [permission] = await db
+      .select()
+      .from(permissions)
+      .where(eq(permissions.name, permissionName));
+    
+    if (!permission) {
+      throw new Error(`Permission '${permissionName}' not found`);
+    }
+    
+    // Delete the override
+    await db
+      .delete(rolePermissionOverrides)
+      .where(
+        and(
+          eq(rolePermissionOverrides.tenantId, tenantId),
+          eq(rolePermissionOverrides.userId, userId),
+          eq(rolePermissionOverrides.permissionId, permission.id)
+        )
+      );
+  } catch (error) {
+    console.error('Error removing permission override:', error);
+    throw error;
   }
 }

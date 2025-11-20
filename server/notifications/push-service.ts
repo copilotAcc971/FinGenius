@@ -1,0 +1,475 @@
+import webpush from 'web-push';
+import { storage } from '../storage';
+import type { InsertPushSubscription, InsertPushNotificationLog } from '@shared/schema';
+
+/**
+ * Push Notification Service
+ * 
+ * Manages web push notifications for PWA using the Web Push API.
+ * Supports notification triggers for:
+ * - Overdue invoices
+ * - Payment received
+ * - Approval requests
+ * - Compliance deadlines
+ */
+
+// Generate VAPID keys once and store them as environment variables
+// To generate keys: node -e "const webpush = require('web-push'); const keys = webpush.generateVAPIDKeys(); console.log('VAPID_PUBLIC_KEY=' + keys.publicKey); console.log('VAPID_PRIVATE_KEY=' + keys.privateKey);"
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@copilotaccountant.com';
+
+// Initialize web-push with VAPID keys
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(
+    VAPID_SUBJECT,
+    VAPID_PUBLIC_KEY,
+    VAPID_PRIVATE_KEY
+  );
+} else {
+  console.warn('VAPID keys not configured. Push notifications will not work. Generate keys using: npx web-push generate-vapid-keys');
+}
+
+export interface PushNotificationPayload {
+  title: string;
+  body: string;
+  icon?: string;
+  badge?: string;
+  data?: Record<string, any>;
+  tag?: string;
+  requireInteraction?: boolean;
+  actions?: Array<{
+    action: string;
+    title: string;
+    icon?: string;
+  }>;
+}
+
+export class PushNotificationService {
+  /**
+   * Get VAPID public key for client-side subscription
+   */
+  getVapidPublicKey(): string {
+    if (!VAPID_PUBLIC_KEY) {
+      throw new Error('VAPID public key not configured');
+    }
+    return VAPID_PUBLIC_KEY;
+  }
+
+  /**
+   * Subscribe a user to push notifications
+   */
+  async subscribe(params: {
+    tenantId: string;
+    userId: string;
+    subscription: {
+      endpoint: string;
+      keys: {
+        p256dh: string;
+        auth: string;
+      };
+    };
+    userAgent?: string;
+  }): Promise<void> {
+    const { tenantId, userId, subscription, userAgent } = params;
+
+    // Check if subscription already exists (update lastUsedAt)
+    const existing = await storage.getPushSubscriptionByEndpoint(subscription.endpoint);
+    
+    if (existing) {
+      await storage.updatePushSubscriptionLastUsed(existing.id);
+      return;
+    }
+
+    // Create new subscription
+    await storage.createPushSubscription({
+      tenantId,
+      userId,
+      endpoint: subscription.endpoint,
+      p256dh: subscription.keys.p256dh,
+      auth: subscription.keys.auth,
+      userAgent,
+    });
+
+    console.log(`[PushService] User ${userId} subscribed to push notifications`);
+  }
+
+  /**
+   * Unsubscribe a user from push notifications
+   */
+  async unsubscribe(params: {
+    endpoint: string;
+  }): Promise<void> {
+    const { endpoint } = params;
+
+    const subscription = await storage.getPushSubscriptionByEndpoint(endpoint);
+    
+    if (subscription) {
+      await storage.deletePushSubscription(subscription.id);
+      console.log(`[PushService] Subscription ${subscription.id} deleted`);
+    }
+  }
+
+  /**
+   * Send push notification to a specific user
+   */
+  async sendToUser(params: {
+    tenantId: string;
+    userId: string;
+    notificationType: string;
+    payload: PushNotificationPayload;
+  }): Promise<{
+    sent: number;
+    failed: number;
+    errors: string[];
+  }> {
+    const { tenantId, userId, notificationType, payload } = params;
+
+    // Get all subscriptions for this user
+    const subscriptions = await storage.getPushSubscriptionsByUser(userId);
+
+    if (subscriptions.length === 0) {
+      console.log(`[PushService] No subscriptions found for user ${userId}`);
+      return { sent: 0, failed: 0, errors: [] };
+    }
+
+    const results = {
+      sent: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    // Send to all user's subscriptions
+    for (const subscription of subscriptions) {
+      try {
+        await this.sendPushNotification(subscription.endpoint, {
+          p256dh: subscription.p256dh,
+          auth: subscription.auth,
+        }, payload);
+
+        // Log successful notification
+        await storage.createPushNotificationLog({
+          tenantId,
+          userId,
+          subscriptionId: subscription.id,
+          notificationType,
+          title: payload.title,
+          body: payload.body,
+          data: payload.data,
+          wasSent: true,
+          sentAt: new Date(),
+        });
+
+        // Update lastUsedAt
+        await storage.updatePushSubscriptionLastUsed(subscription.id);
+
+        results.sent++;
+      } catch (error: any) {
+        console.error(`[PushService] Failed to send to subscription ${subscription.id}:`, error);
+
+        // Log failed notification
+        await storage.createPushNotificationLog({
+          tenantId,
+          userId,
+          subscriptionId: subscription.id,
+          notificationType,
+          title: payload.title,
+          body: payload.body,
+          data: payload.data,
+          wasSent: false,
+          errorMessage: error.message || 'Unknown error',
+        });
+
+        results.failed++;
+        results.errors.push(error.message || 'Unknown error');
+
+        // If subscription is invalid (410 Gone), delete it
+        if (error.statusCode === 410) {
+          await storage.deletePushSubscription(subscription.id);
+          console.log(`[PushService] Deleted invalid subscription ${subscription.id}`);
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Send push notification to multiple users
+   */
+  async sendToUsers(params: {
+    tenantId: string;
+    userIds: string[];
+    notificationType: string;
+    payload: PushNotificationPayload;
+  }): Promise<{
+    sent: number;
+    failed: number;
+    errors: string[];
+  }> {
+    const { userIds, ...rest } = params;
+
+    const results = {
+      sent: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    for (const userId of userIds) {
+      const userResults = await this.sendToUser({
+        ...rest,
+        userId,
+      });
+
+      results.sent += userResults.sent;
+      results.failed += userResults.failed;
+      results.errors.push(...userResults.errors);
+    }
+
+    return results;
+  }
+
+  /**
+   * Send push notification to all users in a tenant
+   */
+  async sendToTenant(params: {
+    tenantId: string;
+    notificationType: string;
+    payload: PushNotificationPayload;
+  }): Promise<{
+    sent: number;
+    failed: number;
+    errors: string[];
+  }> {
+    const { tenantId, notificationType, payload } = params;
+
+    // Get all subscriptions for this tenant
+    const subscriptions = await storage.getPushSubscriptionsByTenant(tenantId);
+
+    if (subscriptions.length === 0) {
+      console.log(`[PushService] No subscriptions found for tenant ${tenantId}`);
+      return { sent: 0, failed: 0, errors: [] };
+    }
+
+    const results = {
+      sent: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    // Group by user to avoid duplicates
+    const uniqueUserIds = [...new Set(subscriptions.map(s => s.userId))];
+
+    for (const userId of uniqueUserIds) {
+      const userResults = await this.sendToUser({
+        tenantId,
+        userId,
+        notificationType,
+        payload,
+      });
+
+      results.sent += userResults.sent;
+      results.failed += userResults.failed;
+      results.errors.push(...userResults.errors);
+    }
+
+    return results;
+  }
+
+  /**
+   * Send raw push notification using Web Push API
+   */
+  private async sendPushNotification(
+    endpoint: string,
+    keys: { p256dh: string; auth: string },
+    payload: PushNotificationPayload
+  ): Promise<void> {
+    const subscription = {
+      endpoint,
+      keys,
+    };
+
+    const payloadString = JSON.stringify(payload);
+
+    await webpush.sendNotification(subscription, payloadString);
+  }
+
+  /**
+   * Clean up old/inactive subscriptions
+   */
+  async cleanupOldSubscriptions(daysInactive: number = 90): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysInactive);
+
+    return await storage.deleteInactivePushSubscriptions(cutoffDate);
+  }
+}
+
+// Singleton instance
+let pushServiceInstance: PushNotificationService | null = null;
+
+export function getPushService(): PushNotificationService {
+  if (!pushServiceInstance) {
+    pushServiceInstance = new PushNotificationService();
+  }
+  return pushServiceInstance;
+}
+
+// ============================================================================
+// NOTIFICATION HELPERS
+// ============================================================================
+
+/**
+ * Send overdue invoice notification
+ */
+export async function notifyOverdueInvoice(params: {
+  tenantId: string;
+  userId: string;
+  invoice: {
+    id: string;
+    invoiceNumber: string;
+    customerName: string;
+    total: string;
+    daysOverdue: number;
+  };
+}): Promise<void> {
+  const { tenantId, userId, invoice } = params;
+  const pushService = getPushService();
+
+  await pushService.sendToUser({
+    tenantId,
+    userId,
+    notificationType: 'overdue_invoice',
+    payload: {
+      title: '⚠️ Overdue Invoice',
+      body: `Invoice ${invoice.invoiceNumber} from ${invoice.customerName} is ${invoice.daysOverdue} days overdue (${invoice.total})`,
+      icon: '/icons/invoice-overdue.png',
+      tag: `invoice-overdue-${invoice.id}`,
+      data: {
+        type: 'overdue_invoice',
+        invoiceId: invoice.id,
+        url: `/invoices/${invoice.id}`,
+      },
+      actions: [
+        { action: 'view', title: 'View Invoice' },
+        { action: 'remind', title: 'Send Reminder' },
+      ],
+    },
+  });
+}
+
+/**
+ * Send payment received notification
+ */
+export async function notifyPaymentReceived(params: {
+  tenantId: string;
+  userId: string;
+  payment: {
+    id: string;
+    amount: string;
+    customerName: string;
+    invoiceNumber?: string;
+  };
+}): Promise<void> {
+  const { tenantId, userId, payment } = params;
+  const pushService = getPushService();
+
+  await pushService.sendToUser({
+    tenantId,
+    userId,
+    notificationType: 'payment_received',
+    payload: {
+      title: '💰 Payment Received',
+      body: `Received ${payment.amount} from ${payment.customerName}${payment.invoiceNumber ? ` for invoice ${payment.invoiceNumber}` : ''}`,
+      icon: '/icons/payment-received.png',
+      tag: `payment-${payment.id}`,
+      data: {
+        type: 'payment_received',
+        paymentId: payment.id,
+        url: `/payments/${payment.id}`,
+      },
+      actions: [
+        { action: 'view', title: 'View Payment' },
+      ],
+    },
+  });
+}
+
+/**
+ * Send approval request notification
+ */
+export async function notifyApprovalRequest(params: {
+  tenantId: string;
+  userId: string;
+  approval: {
+    id: string;
+    recordType: string;
+    recordNumber: string;
+    amount?: string;
+    requestedBy: string;
+  };
+}): Promise<void> {
+  const { tenantId, userId, approval } = params;
+  const pushService = getPushService();
+
+  await pushService.sendToUser({
+    tenantId,
+    userId,
+    notificationType: 'approval_request',
+    payload: {
+      title: '📋 Approval Required',
+      body: `${approval.requestedBy} requests approval for ${approval.recordType} ${approval.recordNumber}${approval.amount ? ` (${approval.amount})` : ''}`,
+      icon: '/icons/approval-pending.png',
+      tag: `approval-${approval.id}`,
+      requireInteraction: true,
+      data: {
+        type: 'approval_request',
+        approvalId: approval.id,
+        url: `/approvals/${approval.id}`,
+      },
+      actions: [
+        { action: 'approve', title: 'Approve' },
+        { action: 'view', title: 'Review' },
+      ],
+    },
+  });
+}
+
+/**
+ * Send compliance deadline notification
+ */
+export async function notifyComplianceDeadline(params: {
+  tenantId: string;
+  userIds: string[];
+  deadline: {
+    id: string;
+    title: string;
+    dueDate: string;
+    daysRemaining: number;
+  };
+}): Promise<void> {
+  const { tenantId, userIds, deadline } = params;
+  const pushService = getPushService();
+
+  await pushService.sendToUsers({
+    tenantId,
+    userIds,
+    notificationType: 'compliance_deadline',
+    payload: {
+      title: '⚖️ Compliance Deadline',
+      body: `${deadline.title} is due on ${deadline.dueDate} (${deadline.daysRemaining} days remaining)`,
+      icon: '/icons/compliance.png',
+      tag: `compliance-${deadline.id}`,
+      requireInteraction: deadline.daysRemaining <= 7,
+      data: {
+        type: 'compliance_deadline',
+        deadlineId: deadline.id,
+        url: `/compliance/deadlines/${deadline.id}`,
+      },
+      actions: [
+        { action: 'view', title: 'View Details' },
+      ],
+    },
+  });
+}
