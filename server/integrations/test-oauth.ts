@@ -187,10 +187,11 @@ describe('Credential Storage Service', () => {
     expect(connection.encryptedAccessToken).not.toBe('test_access_token_abc123');
     expect(connection.encryptedRefreshToken).not.toBe('test_refresh_token_xyz789');
     
-    // Verify encryption metadata exists
-    expect(connection.kmsKeyAlias).toBeTruthy();
-    expect(connection.encryptedDataKey).toBeTruthy();
-    expect(connection.tokenIntegrityHash).toBeTruthy();
+    // Verify encryption metadata exists (use correct prefixed column names)
+    expect(connection.accessTokenKmsKeyAlias).toBeTruthy();
+    expect(connection.accessTokenEncryptedDek).toBeTruthy();
+    expect(connection.accessTokenIv).toBeTruthy();
+    expect(connection.accessTokenAuthTag).toBeTruthy();
 
     createdConnectionId = connection.id;
   });
@@ -209,20 +210,18 @@ describe('Credential Storage Service', () => {
     expect(connection).not.toBeNull();
     if (!connection) return;
 
-    // Verify refresh token metadata exists
+    // Verify refresh token metadata exists (use correct prefixed column names)
     expect(connection.refreshTokenKmsKeyAlias).toBeTruthy();
-    expect(connection.refreshTokenEncryptedDataKey).toBeTruthy();
-    expect(connection.refreshTokenEncryptionIv).toBeTruthy();
-    expect(connection.refreshTokenEncryptionAuthTag).toBeTruthy();
-    expect(connection.refreshTokenIntegrityHash).toBeTruthy();
+    expect(connection.refreshTokenEncryptedDek).toBeTruthy();
+    expect(connection.refreshTokenIv).toBeTruthy();
+    expect(connection.refreshTokenAuthTag).toBeTruthy();
 
     // CRITICAL: Refresh token metadata MUST be DIFFERENT from access token metadata
     // If they're the same, decryption will fail with wrong DEK
-    expect(connection.refreshTokenKmsKeyAlias).not.toBe(connection.kmsKeyAlias);
-    expect(connection.refreshTokenEncryptedDataKey).not.toBe(connection.encryptedDataKey);
-    expect(connection.refreshTokenEncryptionIv).not.toBe(connection.encryptionIv);
-    expect(connection.refreshTokenEncryptionAuthTag).not.toBe(connection.encryptionAuthTag);
-    expect(connection.refreshTokenIntegrityHash).not.toBe(connection.tokenIntegrityHash);
+    expect(connection.refreshTokenKmsKeyAlias).not.toBe(connection.accessTokenKmsKeyAlias);
+    expect(connection.refreshTokenEncryptedDek).not.toBe(connection.accessTokenEncryptedDek);
+    expect(connection.refreshTokenIv).not.toBe(connection.accessTokenIv);
+    expect(connection.refreshTokenAuthTag).not.toBe(connection.accessTokenAuthTag);
 
     // Most importantly: Decrypt refresh token successfully
     // This will fail if metadata is wrong (wrong DEK, invalid auth tag)

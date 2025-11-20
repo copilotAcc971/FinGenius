@@ -93,23 +93,21 @@ export class CredentialStorageService {
         .set({
           // Access token encryption metadata
           encryptedAccessToken: encryptedAccess.encryptedToken,
-          kmsKeyAlias: encryptedAccess.kmsKeyAlias,
-          encryptedDataKey: encryptedAccess.encryptedDek,
-          encryptionIv: encryptedAccess.iv,
-          encryptionAuthTag: encryptedAccess.authTag,
-          tokenIntegrityHash: encryptedAccess.payloadIntegrityHash,
+          accessTokenKmsKeyAlias: encryptedAccess.kmsKeyAlias,
+          accessTokenEncryptedDek: encryptedAccess.encryptedDek,
+          accessTokenIv: encryptedAccess.iv,
+          accessTokenAuthTag: encryptedAccess.authTag,
           
           // Refresh token encryption metadata (if exists)
           encryptedRefreshToken: encryptedRefresh?.encryptedToken || null,
           refreshTokenKmsKeyAlias: encryptedRefresh?.kmsKeyAlias || null,
-          refreshTokenEncryptedDataKey: encryptedRefresh?.encryptedDek || null,
-          refreshTokenEncryptionIv: encryptedRefresh?.iv || null,
-          refreshTokenEncryptionAuthTag: encryptedRefresh?.authTag || null,
-          refreshTokenIntegrityHash: encryptedRefresh?.payloadIntegrityHash || null,
+          refreshTokenEncryptedDek: encryptedRefresh?.encryptedDek || null,
+          refreshTokenIv: encryptedRefresh?.iv || null,
+          refreshTokenAuthTag: encryptedRefresh?.authTag || null,
           
           // Token metadata
-          expiresAt: expiresAt,
-          scope: tokens.scope || null,
+          tokenExpiresAt: expiresAt,
+          scopes: tokens.scope ? [tokens.scope] : null,
           
           // Connection status
           status: 'connected',
@@ -139,23 +137,21 @@ export class CredentialStorageService {
         
         // Access token encryption metadata
         encryptedAccessToken: encryptedAccess.encryptedToken,
-        kmsKeyAlias: encryptedAccess.kmsKeyAlias,
-        encryptedDataKey: encryptedAccess.encryptedDek,
-        encryptionIv: encryptedAccess.iv,
-        encryptionAuthTag: encryptedAccess.authTag,
-        tokenIntegrityHash: encryptedAccess.payloadIntegrityHash,
+        accessTokenKmsKeyAlias: encryptedAccess.kmsKeyAlias,
+        accessTokenEncryptedDek: encryptedAccess.encryptedDek,
+        accessTokenIv: encryptedAccess.iv,
+        accessTokenAuthTag: encryptedAccess.authTag,
         
         // Refresh token encryption metadata (if exists)
         encryptedRefreshToken: encryptedRefresh?.encryptedToken || null,
         refreshTokenKmsKeyAlias: encryptedRefresh?.kmsKeyAlias || null,
-        refreshTokenEncryptedDataKey: encryptedRefresh?.encryptedDek || null,
-        refreshTokenEncryptionIv: encryptedRefresh?.iv || null,
-        refreshTokenEncryptionAuthTag: encryptedRefresh?.authTag || null,
-        refreshTokenIntegrityHash: encryptedRefresh?.payloadIntegrityHash || null,
+        refreshTokenEncryptedDek: encryptedRefresh?.encryptedDek || null,
+        refreshTokenIv: encryptedRefresh?.iv || null,
+        refreshTokenAuthTag: encryptedRefresh?.authTag || null,
         
         // Token metadata
-        expiresAt: expiresAt,
-        scope: tokens.scope || null,
+        tokenExpiresAt: expiresAt,
+        scopes: tokens.scope ? [tokens.scope] : null,
         
         // Connection status
         status: 'connected',
@@ -197,11 +193,10 @@ export class CredentialStorageService {
     const accessToken = await decryptOAuthToken(
       {
         encryptedToken: connection.encryptedAccessToken,
-        kmsKeyAlias: connection.kmsKeyAlias,
-        encryptedDek: connection.encryptedDataKey,
-        iv: connection.encryptionIv,
-        authTag: connection.encryptionAuthTag,
-        payloadIntegrityHash: connection.tokenIntegrityHash,
+        kmsKeyAlias: connection.accessTokenKmsKeyAlias,
+        encryptedDek: connection.accessTokenEncryptedDek,
+        iv: connection.accessTokenIv,
+        authTag: connection.accessTokenAuthTag,
       },
       tenantId
     );
@@ -211,19 +206,17 @@ export class CredentialStorageService {
     if (
       connection.encryptedRefreshToken &&
       connection.refreshTokenKmsKeyAlias &&
-      connection.refreshTokenEncryptedDataKey &&
-      connection.refreshTokenEncryptionIv &&
-      connection.refreshTokenEncryptionAuthTag &&
-      connection.refreshTokenIntegrityHash
+      connection.refreshTokenEncryptedDek &&
+      connection.refreshTokenIv &&
+      connection.refreshTokenAuthTag
     ) {
       refreshToken = await decryptOAuthToken(
         {
           encryptedToken: connection.encryptedRefreshToken,
           kmsKeyAlias: connection.refreshTokenKmsKeyAlias,
-          encryptedDek: connection.refreshTokenEncryptedDataKey,
-          iv: connection.refreshTokenEncryptionIv,
-          authTag: connection.refreshTokenEncryptionAuthTag,
-          payloadIntegrityHash: connection.refreshTokenIntegrityHash,
+          encryptedDek: connection.refreshTokenEncryptedDek,
+          iv: connection.refreshTokenIv,
+          authTag: connection.refreshTokenAuthTag,
         },
         tenantId
       );
@@ -232,8 +225,8 @@ export class CredentialStorageService {
     return {
       accessToken,
       refreshToken,
-      expiresAt: connection.expiresAt || undefined,
-      scope: connection.scope || undefined,
+      expiresAt: connection.tokenExpiresAt || undefined,
+      scope: Array.isArray(connection.scopes) ? connection.scopes.join(' ') : undefined,
       provider: connection.provider,
     };
   }
@@ -267,10 +260,9 @@ export class CredentialStorageService {
     if (
       !connection.encryptedRefreshToken ||
       !connection.refreshTokenKmsKeyAlias ||
-      !connection.refreshTokenEncryptedDataKey ||
-      !connection.refreshTokenEncryptionIv ||
-      !connection.refreshTokenEncryptionAuthTag ||
-      !connection.refreshTokenIntegrityHash
+      !connection.refreshTokenEncryptedDek ||
+      !connection.refreshTokenIv ||
+      !connection.refreshTokenAuthTag
     ) {
       throw new Error('No refresh token available. Re-authorization required.');
     }
@@ -279,10 +271,9 @@ export class CredentialStorageService {
       {
         encryptedToken: connection.encryptedRefreshToken,
         kmsKeyAlias: connection.refreshTokenKmsKeyAlias,
-        encryptedDek: connection.refreshTokenEncryptedDataKey,
-        iv: connection.refreshTokenEncryptionIv,
-        authTag: connection.refreshTokenEncryptionAuthTag,
-        payloadIntegrityHash: connection.refreshTokenIntegrityHash,
+        encryptedDek: connection.refreshTokenEncryptedDek,
+        iv: connection.refreshTokenIv,
+        authTag: connection.refreshTokenAuthTag,
       },
       tenantId
     );
@@ -345,11 +336,10 @@ export class CredentialStorageService {
       const accessToken = await decryptOAuthToken(
         {
           encryptedToken: connection.encryptedAccessToken,
-          kmsKeyAlias: connection.kmsKeyAlias,
-          encryptedDek: connection.encryptedDataKey,
-          iv: connection.encryptionIv,
-          authTag: connection.encryptionAuthTag,
-          payloadIntegrityHash: connection.tokenIntegrityHash,
+          kmsKeyAlias: connection.accessTokenKmsKeyAlias,
+          encryptedDek: connection.accessTokenEncryptedDek,
+          iv: connection.accessTokenIv,
+          authTag: connection.accessTokenAuthTag,
         },
         tenantId
       );
