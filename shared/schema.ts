@@ -14,6 +14,8 @@ import {
   uniqueIndex,
   date,
   customType,
+  serial,
+  numeric,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -6160,6 +6162,75 @@ export const insertProjectInvoiceMilestoneSchema = createInsertSchema(projectInv
 
 export type InsertProjectInvoiceMilestone = z.infer<typeof insertProjectInvoiceMilestoneSchema>;
 export type ProjectInvoiceMilestone = typeof projectInvoiceMilestones.$inferSelect;
+
+// ====================================
+// AI CONSENT & USAGE TRACKING (Task 8-3)
+// ====================================
+
+// AI Provider Consent table
+export const aiProviderConsents = pgTable('ai_provider_consents', {
+  id: serial('id').primaryKey(),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id),
+  userId: varchar('user_id').notNull().references(() => users.id),
+  provider: varchar('provider').notNull(), // 'openai', 'kimi', 'qwen', 'deepseek'
+  consentGiven: boolean('consent_given').default(false).notNull(),
+  consentDate: timestamp('consent_date'),
+  revokedDate: timestamp('revoked_date'),
+  // Cost tracking fields
+  totalTokensUsed: integer('total_tokens_used').default(0).notNull(),
+  totalCostUsd: numeric('total_cost_usd', { precision: 10, scale: 4 }).default('0').notNull(),
+  lastUsedAt: timestamp('last_used_at'),
+  // Metadata
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => {
+  return {
+    uniqueUserProvider: unique().on(table.tenantId, table.userId, table.provider),
+    idxProvider: index('idx_ai_provider').on(table.provider),
+    idxUserConsent: index('idx_user_consent').on(table.userId, table.consentGiven),
+  };
+});
+
+export const insertAiProviderConsentSchema = createInsertSchema(aiProviderConsents, {
+  totalCostUsd: decimalString,
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+export type AiProviderConsent = typeof aiProviderConsents.$inferSelect;
+export type InsertAiProviderConsent = z.infer<typeof insertAiProviderConsentSchema>;
+
+// AI Usage Logs table (for detailed tracking)
+export const aiUsageLogs = pgTable('ai_usage_logs', {
+  id: serial('id').primaryKey(),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id),
+  userId: varchar('user_id').notNull().references(() => users.id),
+  provider: varchar('provider').notNull(),
+  model: varchar('model').notNull(), // e.g., 'gpt-4o', 'kimi-v2', 'qwen-max', 'deepseek-chat'
+  feature: varchar('feature').notNull(), // e.g., 'document_extraction', 'chat', 'voice_notes'
+  // Usage metrics
+  inputTokens: integer('input_tokens').default(0).notNull(),
+  outputTokens: integer('output_tokens').default(0).notNull(),
+  totalTokens: integer('total_tokens').default(0).notNull(),
+  costUsd: numeric('cost_usd', { precision: 10, scale: 6 }).notNull(),
+  // Request details
+  requestId: varchar('request_id'),
+  duration: integer('duration_ms'),
+  success: boolean('success').default(true).notNull(),
+  errorMessage: text('error_message'),
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => {
+  return {
+    idxUserProvider: index('idx_usage_user_provider').on(table.userId, table.provider),
+    idxCreatedAt: index('idx_usage_created').on(table.createdAt),
+  };
+});
+
+export const insertAiUsageLogSchema = createInsertSchema(aiUsageLogs, {
+  costUsd: decimalString,
+}).omit({ id: true, createdAt: true });
+
+export type AiUsageLog = typeof aiUsageLogs.$inferSelect;
+export type InsertAiUsageLog = z.infer<typeof insertAiUsageLogSchema>;
 
 // ============================================================================
 // RELATIONS (for Drizzle ORM queries)
