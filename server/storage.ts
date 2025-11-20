@@ -241,6 +241,39 @@ import {
   pushNotificationLog,
   type PushNotificationLog,
   type InsertPushNotificationLog,
+  cloudStoragePreferences,
+  type CloudStoragePreference,
+  type InsertCloudStoragePreference,
+  inboundDocuments,
+  type InboundDocument,
+  type InsertInboundDocument,
+  webhookLogs,
+  type WebhookLog,
+  type InsertWebhookLog,
+  financialMetricsSnapshot,
+  type FinancialMetricsSnapshot,
+  type InsertFinancialMetricsSnapshot,
+  bankabilityScores,
+  type BankabilityScore,
+  type InsertBankabilityScore,
+  scoreHistory,
+  type ScoreHistory,
+  type InsertScoreHistory,
+  notificationRules,
+  type NotificationRule,
+  type InsertNotificationRule,
+  alertInstances,
+  type AlertInstance,
+  type InsertAlertInstance,
+  checklistTemplates,
+  type ChecklistTemplate,
+  type InsertChecklistTemplate,
+  checklistInstances,
+  type ChecklistInstance,
+  type InsertChecklistInstance,
+  anomalyDetection,
+  type AnomalyDetection,
+  type InsertAnomalyDetection,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc, or, lt } from "drizzle-orm";
@@ -893,6 +926,142 @@ export interface IStorage {
     startDate?: Date;
     endDate?: Date;
   }): Promise<PushNotificationLog[]>;
+
+  // ====================================
+  // TASK 7-1: CLOUD STORAGE & INBOUND DOCUMENTS
+  // ====================================
+  
+  // Cloud Storage Preferences operations
+  getCloudStoragePreference(tenantId: string, userId: string): Promise<CloudStoragePreference | null>;
+  createCloudStoragePreference(data: InsertCloudStoragePreference): Promise<CloudStoragePreference>;
+  updateCloudStoragePreference(id: string, tenantId: string, data: Partial<InsertCloudStoragePreference>): Promise<CloudStoragePreference>;
+  deleteCloudStoragePreference(id: string, tenantId: string): Promise<void>;
+  
+  // Inbound Documents operations
+  getInboundDocuments(tenantId: string, filters?: {
+    status?: string;
+    source?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<InboundDocument[]>;
+  getInboundDocument(id: string, tenantId: string): Promise<InboundDocument | null>;
+  createInboundDocument(data: InsertInboundDocument): Promise<InboundDocument>;
+  updateInboundDocument(id: string, tenantId: string, data: Partial<InsertInboundDocument>): Promise<InboundDocument>;
+  deleteInboundDocument(id: string, tenantId: string): Promise<void>;
+  markInboundDocumentProcessed(id: string, tenantId: string, processedBy: string, draftEntryId?: string, draftEntryType?: string): Promise<InboundDocument>;
+  
+  // Webhook Logs operations
+  getWebhookLogs(tenantId: string, filters?: {
+    source?: string;
+    processed?: boolean;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<WebhookLog[]>;
+  createWebhookLog(data: InsertWebhookLog): Promise<WebhookLog>;
+  markWebhookLogProcessed(id: string, inboundDocumentId?: string): Promise<WebhookLog>;
+
+  // ====================================
+  // TASK 7-2: CREDIT PASSPORT
+  // ====================================
+  
+  // Financial Metrics Snapshot operations
+  getFinancialMetricsSnapshots(tenantId: string, limit?: number): Promise<FinancialMetricsSnapshot[]>;
+  getFinancialMetricsSnapshot(id: string, tenantId: string): Promise<FinancialMetricsSnapshot | null>;
+  getLatestFinancialMetricsSnapshot(tenantId: string): Promise<FinancialMetricsSnapshot | null>;
+  createFinancialMetricsSnapshot(data: InsertFinancialMetricsSnapshot): Promise<FinancialMetricsSnapshot>;
+  
+  // Bankability Scores operations
+  getBankabilityScores(tenantId: string, limit?: number): Promise<BankabilityScore[]>;
+  getBankabilityScore(id: string, tenantId: string): Promise<BankabilityScore | null>;
+  getLatestBankabilityScore(tenantId: string): Promise<BankabilityScore | null>;
+  createBankabilityScore(data: InsertBankabilityScore): Promise<BankabilityScore>;
+  
+  // Score History operations
+  getScoreHistory(tenantId: string, limit?: number): Promise<ScoreHistory[]>;
+  getScoreHistoryByBankabilityScore(bankabilityScoreId: string, tenantId: string): Promise<ScoreHistory[]>;
+  createScoreHistory(data: InsertScoreHistory): Promise<ScoreHistory>;
+
+  // ====================================
+  // TASK 7-3: COMPREHENSIVE ALERTS SYSTEM
+  // ====================================
+  
+  // Notification Rules operations
+  getNotificationRules(tenantId: string, filters?: {
+    ruleType?: string;
+    enabled?: boolean;
+  }): Promise<NotificationRule[]>;
+  getNotificationRule(id: string, tenantId: string): Promise<NotificationRule | null>;
+  createNotificationRule(data: InsertNotificationRule): Promise<NotificationRule>;
+  updateNotificationRule(id: string, tenantId: string, data: Partial<InsertNotificationRule>): Promise<NotificationRule>;
+  deleteNotificationRule(id: string, tenantId: string): Promise<void>;
+  toggleNotificationRule(id: string, tenantId: string, enabled: boolean): Promise<NotificationRule>;
+  
+  // Alert Instances operations
+  getAlertInstances(tenantId: string, filters?: {
+    status?: string;
+    priority?: string;
+    alertType?: string;
+  }): Promise<AlertInstance[]>;
+  getAlertInstance(id: string, tenantId: string): Promise<AlertInstance | null>;
+  createAlertInstance(data: InsertAlertInstance): Promise<AlertInstance>;
+  updateAlertInstance(id: string, tenantId: string, data: Partial<InsertAlertInstance>): Promise<AlertInstance>;
+  markAlertViewed(id: string, tenantId: string, viewedBy: string): Promise<AlertInstance>;
+  markAlertActioned(id: string, tenantId: string, actionedBy: string, actionTaken: string): Promise<AlertInstance>;
+  dismissAlert(id: string, tenantId: string): Promise<AlertInstance>;
+  deleteAlertInstance(id: string, tenantId: string): Promise<void>;
+  
+  // Checklist Templates operations
+  getChecklistTemplates(tenantId: string, filters?: {
+    frequency?: string;
+  }): Promise<ChecklistTemplate[]>;
+  getChecklistTemplate(id: string, tenantId: string): Promise<ChecklistTemplate | null>;
+  createChecklistTemplate(data: InsertChecklistTemplate): Promise<ChecklistTemplate>;
+  updateChecklistTemplate(id: string, tenantId: string, data: Partial<InsertChecklistTemplate>): Promise<ChecklistTemplate>;
+  deleteChecklistTemplate(id: string, tenantId: string): Promise<void>;
+  
+  // Checklist Instances operations
+  getChecklistInstances(tenantId: string, filters?: {
+    status?: string;
+    period?: string;
+  }): Promise<ChecklistInstance[]>;
+  getChecklistInstance(id: string, tenantId: string): Promise<ChecklistInstance | null>;
+  createChecklistInstance(data: InsertChecklistInstance): Promise<ChecklistInstance>;
+  updateChecklistInstance(id: string, tenantId: string, data: Partial<InsertChecklistInstance>): Promise<ChecklistInstance>;
+  completeChecklistItem(instanceId: string, itemId: string, tenantId: string, completedBy: string): Promise<ChecklistInstance>;
+  deleteChecklistInstance(id: string, tenantId: string): Promise<void>;
+  
+  // Anomaly Detection operations
+  getAnomalyDetections(tenantId: string, filters?: {
+    status?: string;
+    detectionType?: string;
+    entityType?: string;
+  }): Promise<AnomalyDetection[]>;
+  getAnomalyDetection(id: string, tenantId: string): Promise<AnomalyDetection | null>;
+  createAnomalyDetection(data: InsertAnomalyDetection): Promise<AnomalyDetection>;
+  updateAnomalyDetection(id: string, tenantId: string, data: Partial<InsertAnomalyDetection>): Promise<AnomalyDetection>;
+  markAnomalyResolved(id: string, tenantId: string, reviewedBy: string, resolution: string): Promise<AnomalyDetection>;
+  markAnomalyFalsePositive(id: string, tenantId: string, reviewedBy: string): Promise<AnomalyDetection>;
+  deleteAnomalyDetection(id: string, tenantId: string): Promise<void>;
+  
+  // ====================================
+  // TASK 7-12, 7-13, 7-14: CREDIT PASSPORT
+  // ====================================
+  
+  // Financial Metrics Snapshot operations
+  getFinancialMetricsSnapshots(tenantId: string): Promise<FinancialMetricsSnapshot[]>;
+  getLatestFinancialMetricsSnapshot(tenantId: string): Promise<FinancialMetricsSnapshot | null>;
+  getFinancialMetricsSnapshot(id: string, tenantId: string): Promise<FinancialMetricsSnapshot | null>;
+  createFinancialMetricsSnapshot(data: InsertFinancialMetricsSnapshot): Promise<FinancialMetricsSnapshot>;
+  
+  // Bankability Scores operations
+  getBankabilityScores(tenantId: string): Promise<BankabilityScore[]>;
+  getLatestBankabilityScore(tenantId: string): Promise<BankabilityScore | null>;
+  getBankabilityScore(id: string, tenantId: string): Promise<BankabilityScore | null>;
+  createBankabilityScore(data: InsertBankabilityScore): Promise<BankabilityScore>;
+  
+  // Score History operations
+  getScoreHistory(tenantId: string, limit?: number): Promise<ScoreHistory[]>;
+  createScoreHistory(data: InsertScoreHistory): Promise<ScoreHistory>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -12300,6 +12469,115 @@ export class MemStorage implements IStorage {
       availableFunctions: [],
       restrictedFunctions: {},
     };
+  }
+  
+  // ====================================
+  // CREDIT PASSPORT IMPLEMENTATIONS
+  // ====================================
+  
+  // Financial Metrics Snapshot operations
+  async getFinancialMetricsSnapshots(tenantId: string): Promise<FinancialMetricsSnapshot[]> {
+    return await db
+      .select()
+      .from(financialMetricsSnapshot)
+      .where(eq(financialMetricsSnapshot.tenantId, tenantId))
+      .orderBy(desc(financialMetricsSnapshot.snapshotDate));
+  }
+  
+  async getLatestFinancialMetricsSnapshot(tenantId: string): Promise<FinancialMetricsSnapshot | null> {
+    const [snapshot] = await db
+      .select()
+      .from(financialMetricsSnapshot)
+      .where(eq(financialMetricsSnapshot.tenantId, tenantId))
+      .orderBy(desc(financialMetricsSnapshot.snapshotDate))
+      .limit(1);
+    
+    return snapshot || null;
+  }
+  
+  async getFinancialMetricsSnapshot(id: string, tenantId: string): Promise<FinancialMetricsSnapshot | null> {
+    const [snapshot] = await db
+      .select()
+      .from(financialMetricsSnapshot)
+      .where(
+        and(
+          eq(financialMetricsSnapshot.id, id),
+          eq(financialMetricsSnapshot.tenantId, tenantId)
+        )
+      );
+    
+    return snapshot || null;
+  }
+  
+  async createFinancialMetricsSnapshot(data: InsertFinancialMetricsSnapshot): Promise<FinancialMetricsSnapshot> {
+    const [snapshot] = await db
+      .insert(financialMetricsSnapshot)
+      .values(data)
+      .returning();
+    
+    return snapshot;
+  }
+  
+  // Bankability Scores operations
+  async getBankabilityScores(tenantId: string): Promise<BankabilityScore[]> {
+    return await db
+      .select()
+      .from(bankabilityScores)
+      .where(eq(bankabilityScores.tenantId, tenantId))
+      .orderBy(desc(bankabilityScores.scoreDate));
+  }
+  
+  async getLatestBankabilityScore(tenantId: string): Promise<BankabilityScore | null> {
+    const [score] = await db
+      .select()
+      .from(bankabilityScores)
+      .where(eq(bankabilityScores.tenantId, tenantId))
+      .orderBy(desc(bankabilityScores.scoreDate))
+      .limit(1);
+    
+    return score || null;
+  }
+  
+  async getBankabilityScore(id: string, tenantId: string): Promise<BankabilityScore | null> {
+    const [score] = await db
+      .select()
+      .from(bankabilityScores)
+      .where(
+        and(
+          eq(bankabilityScores.id, id),
+          eq(bankabilityScores.tenantId, tenantId)
+        )
+      );
+    
+    return score || null;
+  }
+  
+  async createBankabilityScore(data: InsertBankabilityScore): Promise<BankabilityScore> {
+    const [score] = await db
+      .insert(bankabilityScores)
+      .values(data)
+      .returning();
+    
+    return score;
+  }
+  
+  // Score History operations
+  async getScoreHistory(tenantId: string, limit: number = 12): Promise<ScoreHistory[]> {
+    return await db
+      .select()
+      .from(scoreHistory)
+      .where(eq(scoreHistory.tenantId, tenantId))
+      .orderBy(desc(scoreHistory.scoreDate))
+      .limit(limit);
+  }
+  
+  async createScoreHistory(data: InsertScoreHistory): Promise<ScoreHistory> {
+    const [history] = await db
+      .insert(scoreHistory)
+      .values(data)
+      .returning();
+    
+    return history;
   }
 }
 

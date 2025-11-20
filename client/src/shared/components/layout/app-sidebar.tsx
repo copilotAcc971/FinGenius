@@ -34,6 +34,8 @@ import {
   Calendar,
   FolderKanban,
   ChartBar,
+  Bell,
+  Inbox,
 } from "lucide-react";
 import logoImage from "@assets/generated_images/Copilot_Accountant_app_logo_0a4d944c.png";
 import {
@@ -109,6 +111,9 @@ const accountingItems = [
 ];
 
 const otherItems = [
+  { title: "Alert Center", url: "/alerts-center", icon: Bell },
+  { title: "Credit Passport", url: "/credit-passport", icon: TrendingUp },
+  { title: "Inbound Documents", url: "/inbound-documents", icon: Inbox },
   { title: "Documents", url: "/documents", icon: Upload },
   { title: "Reports", url: "/reports", icon: BarChart3 },
   { title: "Company Profile", url: "/company-profile", icon: Building },
@@ -154,6 +159,8 @@ function getIconName(IconComponent: any): string {
     [Calendar.name]: "Calendar",
     [FolderKanban.name]: "FolderKanban",
     [ChartBar.name]: "ChartBar",
+    [Bell.name]: "Bell",
+    [Inbox.name]: "Inbox",
   };
   return iconMap[IconComponent.name] || "FileText";
 }

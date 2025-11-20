@@ -10894,6 +10894,195 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ====================================
+  // CREDIT PASSPORT ROUTES (Tasks 7-12, 7-13, 7-14)
+  // ====================================
+
+  // Calculate and save financial metrics snapshot
+  app.post('/api/credit-passport/metrics/calculate', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { asOfDate } = req.body;
+      
+      const { calculateAndSaveMetrics } = await import('./services/financial-metrics');
+      const snapshot = await calculateAndSaveMetrics(
+        tenantId,
+        asOfDate ? new Date(asOfDate) : new Date()
+      );
+      
+      res.json(snapshot);
+    } catch (error: any) {
+      console.error('[Credit Passport] Calculate metrics error:', error);
+      res.status(500).json({ message: error.message || 'Failed to calculate financial metrics' });
+    }
+  });
+
+  // Get all financial metrics snapshots
+  app.get('/api/credit-passport/metrics', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const snapshots = await storage.getFinancialMetricsSnapshots(tenantId);
+      res.json(snapshots);
+    } catch (error: any) {
+      console.error('[Credit Passport] Get metrics error:', error);
+      res.status(500).json({ message: 'Failed to get financial metrics' });
+    }
+  });
+
+  // Get latest financial metrics snapshot
+  app.get('/api/credit-passport/metrics/latest', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const snapshot = await storage.getLatestFinancialMetricsSnapshot(tenantId);
+      
+      if (!snapshot) {
+        return res.status(404).json({ message: 'No financial metrics found' });
+      }
+      
+      res.json(snapshot);
+    } catch (error: any) {
+      console.error('[Credit Passport] Get latest metrics error:', error);
+      res.status(500).json({ message: 'Failed to get latest financial metrics' });
+    }
+  });
+
+  // Calculate and save bankability score
+  app.post('/api/credit-passport/score/calculate', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      
+      const latestSnapshot = await storage.getLatestFinancialMetricsSnapshot(tenantId);
+      if (!latestSnapshot) {
+        return res.status(404).json({ message: 'No financial metrics found. Please calculate metrics first.' });
+      }
+      
+      const { calculateAndSaveScore } = await import('./services/bankability-scoring');
+      const score = await calculateAndSaveScore(tenantId, latestSnapshot);
+      
+      res.json(score);
+    } catch (error: any) {
+      console.error('[Credit Passport] Calculate score error:', error);
+      res.status(500).json({ message: error.message || 'Failed to calculate bankability score' });
+    }
+  });
+
+  // Get all bankability scores
+  app.get('/api/credit-passport/scores', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const scores = await storage.getBankabilityScores(tenantId);
+      res.json(scores);
+    } catch (error: any) {
+      console.error('[Credit Passport] Get scores error:', error);
+      res.status(500).json({ message: 'Failed to get bankability scores' });
+    }
+  });
+
+  // Get latest bankability score
+  app.get('/api/credit-passport/score/latest', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const score = await storage.getLatestBankabilityScore(tenantId);
+      
+      if (!score) {
+        return res.status(404).json({ message: 'No bankability score found' });
+      }
+      
+      res.json(score);
+    } catch (error: any) {
+      console.error('[Credit Passport] Get latest score error:', error);
+      res.status(500).json({ message: 'Failed to get latest bankability score' });
+    }
+  });
+
+  // Get score history
+  app.get('/api/credit-passport/score/history', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 12;
+      
+      const history = await storage.getScoreHistory(tenantId, limit);
+      res.json(history);
+    } catch (error: any) {
+      console.error('[Credit Passport] Get score history error:', error);
+      res.status(500).json({ message: 'Failed to get score history' });
+    }
+  });
+
+  // Generate improvement plan and insights
+  app.get('/api/credit-passport/insights', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      
+      const latestSnapshot = await storage.getLatestFinancialMetricsSnapshot(tenantId);
+      const latestScore = await storage.getLatestBankabilityScore(tenantId);
+      
+      if (!latestSnapshot || !latestScore) {
+        return res.status(404).json({ 
+          message: 'Missing required data. Please calculate metrics and score first.' 
+        });
+      }
+      
+      const { generateImprovementPlan } = await import('./services/credit-insights');
+      const plan = generateImprovementPlan(latestSnapshot, latestScore);
+      
+      res.json(plan);
+    } catch (error: any) {
+      console.error('[Credit Passport] Get insights error:', error);
+      res.status(500).json({ message: error.message || 'Failed to generate insights' });
+    }
+  });
+
+  // Generate Credit Passport PDF (Task 7-15)
+  app.get('/api/credit-passport/pdf', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      
+      const { generateCreditPassportPDF } = await import('./services/credit-passport-pdf');
+      const pdfBuffer = await generateCreditPassportPDF(tenantId);
+      
+      const tenant = await storage.getTenant(tenantId);
+      const tenantName = tenant?.name || 'Tenant';
+      const filename = `Credit_Passport_${tenantName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+      
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', pdfBuffer.length);
+      
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error('[Credit Passport] Generate PDF error:', error);
+      res.status(500).json({ message: error.message || 'Failed to generate Credit Passport PDF' });
+    }
+  });
+
+  // Get complete credit passport (metrics + score + insights)
+  app.get('/api/credit-passport', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      
+      const metrics = await storage.getLatestFinancialMetricsSnapshot(tenantId);
+      const score = await storage.getLatestBankabilityScore(tenantId);
+      const history = await storage.getScoreHistory(tenantId, 12);
+      
+      let insights = null;
+      if (metrics && score) {
+        const { generateImprovementPlan } = await import('./services/credit-insights');
+        insights = generateImprovementPlan(metrics, score);
+      }
+      
+      res.json({
+        metrics,
+        score,
+        history,
+        insights,
+      });
+    } catch (error: any) {
+      console.error('[Credit Passport] Get credit passport error:', error);
+      res.status(500).json({ message: 'Failed to get credit passport' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

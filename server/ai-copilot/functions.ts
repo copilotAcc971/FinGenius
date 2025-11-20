@@ -451,6 +451,182 @@ export const accountingFunctions: ChatCompletionTool[] = [
         required: ["query"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_credit_passport",
+      description: "Get the company's current credit passport including bankability score, financial metrics, and creditworthiness assessment. Shows loan eligibility, score grade (A+ to F), and breakdown by category (liquidity, leverage, profitability, cash flow, operational, payment behavior). Also includes improvement insights and recommendations.",
+      parameters: {
+        type: "object",
+        properties: {}
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "improve_bankability_score",
+      description: "Analyze the company's financial metrics and generate actionable recommendations to improve the bankability score and creditworthiness. Provides prioritized improvement plan with quick wins (1-3 months) and long-term actions (6-12 months), including estimated impact on score for each recommendation.",
+      parameters: {
+        type: "object",
+        properties: {
+          focusArea: {
+            type: "string",
+            enum: ["liquidity", "leverage", "profitability", "cashFlow", "operational", "paymentBehavior", "all"],
+            description: "Optional: Focus on a specific area for improvement (default: 'all')"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "approve_draft_entry",
+      description: "Approve an AI-extracted accounting entry (bill, invoice, or journal entry) that was created from a document. This posts the entry to the ledger and marks the source document as approved. Requires appropriate permissions (bills.create, invoices.create, or journal_entries.create).",
+      parameters: {
+        type: "object",
+        properties: {
+          inboundDocumentId: {
+            type: "string",
+            description: "The ID of the inbound document containing the draft entry to approve"
+          }
+        },
+        required: ["inboundDocumentId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "reject_draft_entry",
+      description: "Reject an AI-extracted accounting entry (bill, invoice, or journal entry) that was created from a document. This deletes the draft entry and marks the source document as rejected. Requires appropriate permissions.",
+      parameters: {
+        type: "object",
+        properties: {
+          inboundDocumentId: {
+            type: "string",
+            description: "The ID of the inbound document containing the draft entry to reject"
+          },
+          reason: {
+            type: "string",
+            description: "Optional reason for rejecting the entry"
+          }
+        },
+        required: ["inboundDocumentId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "review_alert",
+      description: "Get detailed information about a specific alert or notification. Returns the alert's context, metadata, quick actions available, and related data. Use this when the user wants to know more about an alert before taking action.",
+      parameters: {
+        type: "object",
+        properties: {
+          alertId: {
+            type: "string",
+            description: "The ID of the alert to review"
+          }
+        },
+        required: ["alertId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "dismiss_alert",
+      description: "Dismiss an alert or notification. This marks the alert as dismissed so it no longer appears in the active alerts list. The dismissal is logged for audit purposes.",
+      parameters: {
+        type: "object",
+        properties: {
+          alertId: {
+            type: "string",
+            description: "The ID of the alert to dismiss"
+          },
+          reason: {
+            type: "string",
+            description: "Optional reason for dismissing the alert"
+          }
+        },
+        required: ["alertId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "action_alert",
+      description: "Take a quick action on an alert. Each alert may have predefined quick actions like 'Remind customer', 'Mark uncollectible', 'Approve all', etc. This executes the specified action and updates the alert status.",
+      parameters: {
+        type: "object",
+        properties: {
+          alertId: {
+            type: "string",
+            description: "The ID of the alert to act on"
+          },
+          actionType: {
+            type: "string",
+            description: "The type of action to take (must be one of the alert's quickActions)"
+          },
+          params: {
+            type: "object",
+            description: "Optional parameters for the action",
+            additionalProperties: true
+          }
+        },
+        required: ["alertId", "actionType"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_pending_documents",
+      description: "List all pending inbound documents that are waiting for AI extraction or approval. Shows documents that have been uploaded via email, WhatsApp, or API but haven't been processed yet.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: {
+            type: "string",
+            enum: ["pending", "processing", "extracted", "failed", "all"],
+            description: "Filter documents by status (default: 'all')"
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of documents to return (default: 10)"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_active_alerts",
+      description: "List all active alerts and notifications for the tenant. Shows high-priority items requiring attention, such as overdue invoices, pending approvals, compliance deadlines, and system notifications.",
+      parameters: {
+        type: "object",
+        properties: {
+          priority: {
+            type: "string",
+            enum: ["low", "medium", "high", "critical", "all"],
+            description: "Filter alerts by priority (default: 'all')"
+          },
+          alertType: {
+            type: "string",
+            description: "Optional: Filter by specific alert type (e.g., 'overdue_invoice', 'compliance_deadline')"
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of alerts to return (default: 10)"
+          }
+        }
+      }
+    }
   }
 ];
 
@@ -474,6 +650,8 @@ export const systemInstructions = `You are an AI accounting assistant for Copilo
 - Fetch and read detailed content from specific web pages
 - Process document images (receipts, invoices, bills, bank statements) to extract structured data using AI vision
 - Search the knowledge base using semantic search to find relevant documents across invoices, bills, journal entries, and memos
+- Get Credit Passport showing bankability score, financial metrics, and creditworthiness assessment
+- Analyze and provide recommendations to improve bankability score with actionable insights
 
 **Important Rules:**
 1. Draft functions (draft_journal_entry, draft_invoice, draft_bill) create records with no financial impact

@@ -68,6 +68,26 @@ export const DOCUMENT_TYPE = ['invoice', 'bill', 'journal_entry', 'memo', 'custo
 // Push Notification Type Enum
 export const PUSH_NOTIFICATION_TYPE = ['overdue_invoice', 'payment_received', 'approval_request', 'compliance_deadline', 'general'] as const;
 
+// Task 7-1: Inbound Documents Status Enums
+export const INBOUND_DOCUMENT_STATUS = ['pending', 'processing', 'extracted', 'failed', 'approved', 'rejected'] as const;
+export const WEBHOOK_SOURCE = ['email_forwarder', 'twilio_whatsapp', 'custom_api'] as const;
+export const DRAFT_ENTRY_TYPE = ['invoice', 'bill', 'journal_entry'] as const;
+
+// Task 7-2: Credit Passport Enums
+export const SCORE_GRADE = ['A+', 'A', 'B+', 'B', 'C+', 'C', 'D', 'F'] as const;
+export const LOAN_ELIGIBILITY = ['excellent', 'good', 'fair', 'poor', 'not_eligible'] as const;
+
+// Task 7-3: Alerts System Enums
+export const NOTIFICATION_RULE_TYPE = ['cash_deficiency', 'aged_ar', 'aged_ap', 'pending_approval', 'accrual_suggestion', 'month_end', 'compliance_deadline', 'anomaly'] as const;
+export const NOTIFICATION_PRIORITY = ['critical', 'high', 'medium', 'low'] as const;
+export const NOTIFICATION_CHANNEL = ['push', 'email', 'sms', 'websocket'] as const;
+export const ALERT_INSTANCE_STATUS = ['new', 'viewed', 'actioned', 'dismissed', 'expired'] as const;
+export const CHECKLIST_FREQUENCY = ['monthly', 'quarterly', 'yearly'] as const;
+export const CHECKLIST_STATUS = ['not_started', 'in_progress', 'completed'] as const;
+export const ANOMALY_DETECTION_TYPE = ['unusual_amount', 'duplicate_transaction', 'payment_pattern', 'vendor_fraud'] as const;
+export const ANOMALY_ENTITY_TYPE = ['invoice', 'bill', 'payment', 'journal_entry'] as const;
+export const ANOMALY_STATUS = ['new', 'investigating', 'resolved', 'false_positive'] as const;
+
 // Session storage table for Replit Auth
 export const sessions = pgTable(
   "sessions",
@@ -2179,6 +2199,442 @@ export const insertDocumentEmbeddingSchema = createInsertSchema(documentEmbeddin
 export type InsertDocumentEmbedding = z.infer<typeof insertDocumentEmbeddingSchema>;
 export type DocumentEmbedding = typeof documentEmbeddings.$inferSelect;
 
+// ====================================
+// TASK 7-1: DUAL CLOUD STORAGE + INBOUND DOCUMENTS
+// ====================================
+
+// Cloud storage preferences per user
+export const cloudStoragePreferences = pgTable("cloud_storage_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  googleDriveEnabled: boolean("google_drive_enabled").default(false).notNull(),
+  googleDriveFolderId: varchar("google_drive_folder_id"),
+  oneDriveEnabled: boolean("onedrive_enabled").default(false).notNull(),
+  oneDriveFolderId: varchar("onedrive_folder_id"),
+  localStorageEnabled: boolean("local_storage_enabled").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("cloud_storage_prefs_tenant_idx").on(table.tenantId),
+  index("cloud_storage_prefs_user_idx").on(table.userId),
+  unique("unique_cloud_storage_user").on(table.tenantId, table.userId),
+]);
+
+export const insertCloudStoragePreferenceSchema = createInsertSchema(cloudStoragePreferences).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCloudStoragePreference = z.infer<typeof insertCloudStoragePreferenceSchema>;
+export type CloudStoragePreference = typeof cloudStoragePreferences.$inferSelect;
+
+// Inbound documents from webhooks
+export const inboundDocuments = pgTable("inbound_documents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  source: varchar("source", { length: 50 }).notNull(), // 'email', 'whatsapp', 'sms', 'api'
+  sourceIdentifier: varchar("source_identifier", { length: 255 }), // email address, phone number, API key
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileSize: integer("file_size"),
+  mimeType: varchar("mime_type", { length: 100 }),
+  localPath: varchar("local_path", { length: 500 }),
+  googleDriveFileId: varchar("google_drive_file_id", { length: 255 }),
+  oneDriveFileId: varchar("onedrive_file_id", { length: 255 }),
+  status: varchar("status", { length: 50 }).notNull().default("pending"), // 'pending', 'processing', 'extracted', 'failed', 'approved', 'rejected'
+  extractedData: jsonb("extracted_data"), // AI extraction results
+  draftEntryId: varchar("draft_entry_id", { length: 255 }), // Link to created draft invoice/bill
+  draftEntryType: varchar("draft_entry_type", { length: 50 }), // 'invoice', 'bill', 'journal_entry'
+  processedAt: timestamp("processed_at"),
+  processedBy: varchar("processed_by").references(() => users.id), // user who approved/rejected
+  errorMessage: text("error_message"),
+  notificationSent: boolean("notification_sent").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("inbound_documents_tenant_idx").on(table.tenantId),
+  index("inbound_documents_status_idx").on(table.status),
+  index("inbound_documents_source_idx").on(table.source),
+  index("inbound_documents_created_at_idx").on(table.createdAt),
+]);
+
+export const insertInboundDocumentSchema = createInsertSchema(inboundDocuments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertInboundDocument = z.infer<typeof insertInboundDocumentSchema>;
+export type InboundDocument = typeof inboundDocuments.$inferSelect;
+
+// Webhook verification logs
+export const webhookLogs = pgTable("webhook_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").references(() => tenants.id),
+  source: varchar("source", { length: 50 }), // 'email_forwarder', 'twilio_whatsapp', 'custom_api'
+  endpoint: varchar("endpoint", { length: 255 }),
+  method: varchar("method", { length: 10 }),
+  headers: jsonb("headers"),
+  body: jsonb("body"),
+  hmacValid: boolean("hmac_valid"),
+  processed: boolean("processed").default(false).notNull(),
+  inboundDocumentId: varchar("inbound_document_id").references(() => inboundDocuments.id),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("webhook_logs_tenant_idx").on(table.tenantId),
+  index("webhook_logs_source_idx").on(table.source),
+  index("webhook_logs_processed_idx").on(table.processed),
+  index("webhook_logs_created_at_idx").on(table.createdAt),
+]);
+
+export const insertWebhookLogSchema = createInsertSchema(webhookLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertWebhookLog = z.infer<typeof insertWebhookLogSchema>;
+export type WebhookLog = typeof webhookLogs.$inferSelect;
+
+// ====================================
+// TASK 7-2: CREDIT PASSPORT TABLES
+// ====================================
+
+// Snapshot of financial metrics at a point in time
+export const financialMetricsSnapshot = pgTable("financial_metrics_snapshot", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  snapshotDate: timestamp("snapshot_date").defaultNow().notNull(),
+  // Liquidity metrics
+  currentRatio: decimal("current_ratio", { precision: 10, scale: 4 }),
+  quickRatio: decimal("quick_ratio", { precision: 10, scale: 4 }),
+  cashRatio: decimal("cash_ratio", { precision: 10, scale: 4 }),
+  workingCapital: decimal("working_capital", { precision: 15, scale: 2 }),
+  // Leverage metrics
+  debtToEquityRatio: decimal("debt_to_equity_ratio", { precision: 10, scale: 4 }),
+  debtToAssetsRatio: decimal("debt_to_assets_ratio", { precision: 10, scale: 4 }),
+  interestCoverageRatio: decimal("interest_coverage_ratio", { precision: 10, scale: 4 }),
+  // Profitability metrics
+  grossProfitMargin: decimal("gross_profit_margin", { precision: 10, scale: 4 }),
+  netProfitMargin: decimal("net_profit_margin", { precision: 10, scale: 4 }),
+  returnOnAssets: decimal("return_on_assets", { precision: 10, scale: 4 }),
+  returnOnEquity: decimal("return_on_equity", { precision: 10, scale: 4 }),
+  // Cash flow metrics
+  operatingCashFlow: decimal("operating_cash_flow", { precision: 15, scale: 2 }),
+  freeCashFlow: decimal("free_cash_flow", { precision: 15, scale: 2 }),
+  cashFlowVolatility: decimal("cash_flow_volatility", { precision: 10, scale: 4 }), // Std deviation
+  // Operational metrics
+  daysInReceivables: decimal("days_in_receivables", { precision: 10, scale: 2 }), // DSO
+  daysInPayables: decimal("days_in_payables", { precision: 10, scale: 2 }), // DPO
+  inventoryTurnover: decimal("inventory_turnover", { precision: 10, scale: 4 }),
+  revenueGrowthRate: decimal("revenue_growth_rate", { precision: 10, scale: 4 }), // YoY %
+  // Payment behavior
+  averagePaymentDelay: decimal("average_payment_delay", { precision: 10, scale: 2 }), // Days
+  latePaymentRate: decimal("late_payment_rate", { precision: 10, scale: 4 }), // %
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("financial_metrics_snapshot_tenant_idx").on(table.tenantId),
+  index("financial_metrics_snapshot_date_idx").on(table.snapshotDate),
+]);
+
+export const insertFinancialMetricsSnapshotSchema = createInsertSchema(financialMetricsSnapshot, {
+  currentRatio: decimalString.optional(),
+  quickRatio: decimalString.optional(),
+  cashRatio: decimalString.optional(),
+  workingCapital: decimalString.optional(),
+  debtToEquityRatio: decimalString.optional(),
+  debtToAssetsRatio: decimalString.optional(),
+  interestCoverageRatio: decimalString.optional(),
+  grossProfitMargin: decimalString.optional(),
+  netProfitMargin: decimalString.optional(),
+  returnOnAssets: decimalString.optional(),
+  returnOnEquity: decimalString.optional(),
+  operatingCashFlow: decimalString.optional(),
+  freeCashFlow: decimalString.optional(),
+  cashFlowVolatility: decimalString.optional(),
+  daysInReceivables: decimalString.optional(),
+  daysInPayables: decimalString.optional(),
+  inventoryTurnover: decimalString.optional(),
+  revenueGrowthRate: decimalString.optional(),
+  averagePaymentDelay: decimalString.optional(),
+  latePaymentRate: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertFinancialMetricsSnapshot = z.infer<typeof insertFinancialMetricsSnapshotSchema>;
+export type FinancialMetricsSnapshot = typeof financialMetricsSnapshot.$inferSelect;
+
+// Bankability scores
+export const bankabilityScores = pgTable("bankability_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  scoreDate: timestamp("score_date").defaultNow().notNull(),
+  overallScore: integer("overall_score"), // 0-100
+  liquidityScore: integer("liquidity_score"), // 0-100
+  leverageScore: integer("leverage_score"),
+  profitabilityScore: integer("profitability_score"),
+  cashFlowScore: integer("cash_flow_score"),
+  operationalScore: integer("operational_score"),
+  paymentBehaviorScore: integer("payment_behavior_score"),
+  // Blocking factors
+  blockingFactors: jsonb("blocking_factors"), // Array of {metric, threshold, current, impact}
+  recommendations: jsonb("recommendations"), // Array of actionable steps
+  scoreGrade: varchar("score_grade", { length: 3 }), // 'A+', 'A', 'B+', 'B', 'C+', 'C', 'D', 'F'
+  loanEligibility: varchar("loan_eligibility", { length: 50 }), // 'excellent', 'good', 'fair', 'poor', 'not_eligible'
+  metricsSnapshotId: varchar("metrics_snapshot_id").references(() => financialMetricsSnapshot.id),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("bankability_scores_tenant_idx").on(table.tenantId),
+  index("bankability_scores_date_idx").on(table.scoreDate),
+  index("bankability_scores_grade_idx").on(table.scoreGrade),
+]);
+
+export const insertBankabilityScoreSchema = createInsertSchema(bankabilityScores).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertBankabilityScore = z.infer<typeof insertBankabilityScoreSchema>;
+export type BankabilityScore = typeof bankabilityScores.$inferSelect;
+
+// Score history for trend analysis
+export const scoreHistory = pgTable("score_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  bankabilityScoreId: varchar("bankability_score_id").notNull().references(() => bankabilityScores.id),
+  scoreDate: timestamp("score_date").notNull(),
+  overallScore: integer("overall_score"),
+  scoreChange: integer("score_change"), // +/- from previous
+  significantChanges: jsonb("significant_changes"), // Array of metrics that changed >10%
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("score_history_tenant_idx").on(table.tenantId),
+  index("score_history_bankability_score_idx").on(table.bankabilityScoreId),
+  index("score_history_date_idx").on(table.scoreDate),
+]);
+
+export const insertScoreHistorySchema = createInsertSchema(scoreHistory).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertScoreHistory = z.infer<typeof insertScoreHistorySchema>;
+export type ScoreHistory = typeof scoreHistory.$inferSelect;
+
+// ====================================
+// TASK 7-3: COMPREHENSIVE ALERTS SYSTEM
+// ====================================
+
+// Alert rules configuration
+export const notificationRules = pgTable("notification_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  ruleType: varchar("rule_type", { length: 100 }).notNull(), // 'cash_deficiency', 'aged_ar', 'aged_ap', etc.
+  enabled: boolean("enabled").default(true).notNull(),
+  priority: varchar("priority", { length: 20 }).notNull(), // 'critical', 'high', 'medium', 'low'
+  conditions: jsonb("conditions"), // Threshold values, time periods, etc.
+  notificationChannels: jsonb("notification_channels"), // ['push', 'email', 'sms', 'websocket']
+  targetRoles: jsonb("target_roles"), // Array of role names to notify
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("notification_rules_tenant_idx").on(table.tenantId),
+  index("notification_rules_type_idx").on(table.ruleType),
+  index("notification_rules_enabled_idx").on(table.enabled),
+]);
+
+export const insertNotificationRuleSchema = createInsertSchema(notificationRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertNotificationRule = z.infer<typeof insertNotificationRuleSchema>;
+export type NotificationRule = typeof notificationRules.$inferSelect;
+
+// Alert instances
+export const alertInstances = pgTable("alert_instances", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  ruleId: varchar("rule_id").references(() => notificationRules.id),
+  alertType: varchar("alert_type", { length: 100 }).notNull(),
+  priority: varchar("priority", { length: 20 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  message: text("message").notNull(),
+  actionUrl: varchar("action_url", { length: 500 }), // Deep link to relevant page
+  quickActions: jsonb("quick_actions"), // Array of {label, action, params}
+  metadata: jsonb("metadata"), // Context data
+  status: varchar("status", { length: 50 }).default("new").notNull(), // 'new', 'viewed', 'actioned', 'dismissed', 'expired'
+  viewedAt: timestamp("viewed_at"),
+  viewedBy: varchar("viewed_by").references(() => users.id),
+  actionedAt: timestamp("actioned_at"),
+  actionedBy: varchar("actioned_by").references(() => users.id),
+  actionTaken: varchar("action_taken", { length: 255 }),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("alert_instances_tenant_idx").on(table.tenantId),
+  index("alert_instances_status_idx").on(table.status),
+  index("alert_instances_priority_idx").on(table.priority),
+  index("alert_instances_created_at_idx").on(table.createdAt),
+]);
+
+export const insertAlertInstanceSchema = createInsertSchema(alertInstances).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAlertInstance = z.infer<typeof insertAlertInstanceSchema>;
+export type AlertInstance = typeof alertInstances.$inferSelect;
+
+// Month-end closing checklist templates
+export const checklistTemplates = pgTable("checklist_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").references(() => tenants.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  frequency: varchar("frequency", { length: 50 }).notNull(), // 'monthly', 'quarterly', 'yearly'
+  items: jsonb("items").notNull(), // Array of {id, title, description, responsible_role, estimated_time}
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("checklist_templates_tenant_idx").on(table.tenantId),
+  index("checklist_templates_frequency_idx").on(table.frequency),
+]);
+
+export const insertChecklistTemplateSchema = createInsertSchema(checklistTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertChecklistTemplate = z.infer<typeof insertChecklistTemplateSchema>;
+export type ChecklistTemplate = typeof checklistTemplates.$inferSelect;
+
+// Checklist instances
+export const checklistInstances = pgTable("checklist_instances", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  templateId: varchar("template_id").references(() => checklistTemplates.id),
+  period: varchar("period", { length: 50 }).notNull(), // '2025-01', 'Q1-2025', etc.
+  status: varchar("status", { length: 50 }).default("not_started").notNull(), // 'not_started', 'in_progress', 'completed'
+  itemsCompleted: jsonb("items_completed"), // {item_id: {completed: boolean, completedBy, completedAt}}
+  progress: integer("progress").default(0).notNull(), // 0-100%
+  dueDate: timestamp("due_date"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("checklist_instances_tenant_idx").on(table.tenantId),
+  index("checklist_instances_status_idx").on(table.status),
+  index("checklist_instances_period_idx").on(table.period),
+  index("checklist_instances_due_date_idx").on(table.dueDate),
+]);
+
+export const insertChecklistInstanceSchema = createInsertSchema(checklistInstances).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertChecklistInstance = z.infer<typeof insertChecklistInstanceSchema>;
+export type ChecklistInstance = typeof checklistInstances.$inferSelect;
+
+// Anomaly detection results
+export const anomalyDetection = pgTable("anomaly_detection", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  detectionType: varchar("detection_type", { length: 100 }).notNull(), // 'unusual_amount', 'duplicate_transaction', etc.
+  entityType: varchar("entity_type", { length: 50 }).notNull(), // 'invoice', 'bill', 'payment', 'journal_entry'
+  entityId: varchar("entity_id", { length: 255 }).notNull(),
+  anomalyScore: decimal("anomaly_score", { precision: 5, scale: 4 }), // 0-1, higher = more suspicious
+  description: text("description").notNull(),
+  indicators: jsonb("indicators"), // Array of specific red flags
+  suggestedAction: varchar("suggested_action", { length: 255 }),
+  status: varchar("status", { length: 50 }).default("new").notNull(), // 'new', 'investigating', 'resolved', 'false_positive'
+  reviewedBy: varchar("reviewed_by").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at"),
+  resolution: text("resolution"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("anomaly_detection_tenant_idx").on(table.tenantId),
+  index("anomaly_detection_status_idx").on(table.status),
+  index("anomaly_detection_entity_idx").on(table.entityType, table.entityId),
+  index("anomaly_detection_created_at_idx").on(table.createdAt),
+]);
+
+export const insertAnomalyDetectionSchema = createInsertSchema(anomalyDetection, {
+  anomalyScore: decimalString.optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAnomalyDetection = z.infer<typeof insertAnomalyDetectionSchema>;
+export type AnomalyDetection = typeof anomalyDetection.$inferSelect;
+
+// User notification preferences (for DND schedules, opt-outs, channel preferences)
+export const userNotificationPreferences = pgTable("user_notification_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  
+  // Opt-out settings (by alert type)
+  optOutAlertTypes: jsonb("opt_out_alert_types"), // Array of alert types user has opted out of
+  
+  // Channel preferences
+  preferredChannels: jsonb("preferred_channels"), // ['push', 'email'] - only use these channels
+  
+  // Do-not-disturb schedule (per day of week)
+  dndSchedule: jsonb("dnd_schedule"), // {monday: {start: "22:00", end: "07:00"}, ...}
+  timezone: varchar("timezone", { length: 100 }).default("UTC").notNull(), // User's timezone for DND
+  
+  // Global opt-out
+  globallyOptedOut: boolean("globally_opted_out").default(false).notNull(),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("user_notification_prefs_tenant_idx").on(table.tenantId),
+  index("user_notification_prefs_user_idx").on(table.userId),
+  uniqueIndex("user_notification_prefs_tenant_user_idx").on(table.tenantId, table.userId),
+]);
+
+export const insertUserNotificationPreferencesSchema = createInsertSchema(userNotificationPreferences).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertUserNotificationPreferences = z.infer<typeof insertUserNotificationPreferencesSchema>;
+export type UserNotificationPreferences = typeof userNotificationPreferences.$inferSelect;
+
+// Alert rate limiting tracking
+export const alertRateLimits = pgTable("alert_rate_limits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  alertType: varchar("alert_type", { length: 100 }).notNull(),
+  channel: varchar("channel", { length: 20 }).notNull(), // 'push', 'email', 'sms', 'websocket'
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+}, (table) => [
+  index("alert_rate_limits_user_idx").on(table.userId),
+  index("alert_rate_limits_sent_at_idx").on(table.sentAt),
+  index("alert_rate_limits_tenant_user_type_idx").on(table.tenantId, table.userId, table.alertType),
+]);
+
+export const insertAlertRateLimitSchema = createInsertSchema(alertRateLimits).omit({
+  id: true,
+  sentAt: true,
+});
+
+export type InsertAlertRateLimit = z.infer<typeof insertAlertRateLimitSchema>;
+export type AlertRateLimit = typeof alertRateLimits.$inferSelect;
+
 // Relations
 export const tenantsRelations = relations(tenants, ({ one, many }) => ({
   owner: one(users, {
@@ -3787,10 +4243,10 @@ export type InsertPaymentIntent = z.infer<typeof insertPaymentIntentSchema>;
 export type PaymentIntent = typeof paymentIntents.$inferSelect;
 
 // ============================================================================
-// WEBHOOK LOGS
+// OPEN BANKING WEBHOOK LOGS
 // ============================================================================
 
-export const webhookLogs = pgTable("webhook_logs", {
+export const openBankingWebhookLogs = pgTable("open_banking_webhook_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").references(() => tenants.id), // null until tenant identified
   
@@ -3822,14 +4278,14 @@ export const webhookLogs = pgTable("webhook_logs", {
   // Processing duration (milliseconds)
   processingDuration: integer("processing_duration"),
 }, (table) => [
-  index("idx_webhook_logs_tenant").on(table.tenantId),
-  index("idx_webhook_logs_provider").on(table.provider),
-  index("idx_webhook_logs_status").on(table.status),
-  index("idx_webhook_logs_received").on(table.receivedAt),
-  index("idx_webhook_logs_type").on(table.webhookType),
+  index("idx_ob_webhook_logs_tenant").on(table.tenantId),
+  index("idx_ob_webhook_logs_provider").on(table.provider),
+  index("idx_ob_webhook_logs_status").on(table.status),
+  index("idx_ob_webhook_logs_received").on(table.receivedAt),
+  index("idx_ob_webhook_logs_type").on(table.webhookType),
 ]);
 
-export const insertWebhookLogSchema = createInsertSchema(webhookLogs, {
+export const insertOpenBankingWebhookLogSchema = createInsertSchema(openBankingWebhookLogs, {
   status: z.enum(['received', 'processing', 'processed', 'failed', 'ignored', 'duplicate']),
 }).omit({
   id: true,
@@ -3837,8 +4293,8 @@ export const insertWebhookLogSchema = createInsertSchema(webhookLogs, {
   processedAt: true,
 });
 
-export type InsertWebhookLog = z.infer<typeof insertWebhookLogSchema>;
-export type WebhookLog = typeof webhookLogs.$inferSelect;
+export type InsertOpenBankingWebhookLog = z.infer<typeof insertOpenBankingWebhookLogSchema>;
+export type OpenBankingWebhookLog = typeof openBankingWebhookLogs.$inferSelect;
 
 // ============================================================================
 // AUDIT LOGS (Open Banking specific)

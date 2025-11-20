@@ -1,7 +1,7 @@
 # Multi-Tenant AI-Powered Accounting Application
 
 ## Overview
-This project is a multi-tenant AI-powered accounting application designed to achieve 100% feature parity with Zoho Books for customer and invoice management. Its core purpose is to provide robust accounting functionalities, including tax compliance, AI-driven document data extraction, secure payment processing, comprehensive financial reporting, and Open Banking integration, initially targeting the UAE market. The application is built with a strong emphasis on financial integrity, scalability, security, and multi-tenancy to support businesses effectively.
+This project is a multi-tenant AI-powered accounting application designed to achieve 100% feature parity with Zoho Books for customer and invoice management. Its core purpose is to provide robust accounting functionalities, including tax compliance, AI-driven document data extraction, secure payment processing, comprehensive financial reporting, and Open Banking integration, initially targeting the UAE market. The application emphasizes financial integrity, scalability, security, and multi-tenancy to support businesses effectively.
 
 ## User Preferences
 - Focus on matching Zoho Books 100% exactly for customer and invoice forms.
@@ -10,76 +10,51 @@ This project is a multi-tenant AI-powered accounting application designed to ach
 - Future-proof for other Open Banking platforms (Mastercard, card issuers, marketplace connectors).
 
 ## System Architecture
-The application features a multi-tenant architecture employing a "verified-tenant pattern" where the backend strictly enforces `tenantId` from middleware for all operations. All critical financial calculations are performed server-side to guarantee financial integrity and accuracy.
+The application employs a multi-tenant architecture with a "verified-tenant pattern," enforcing `tenantId` from middleware for all operations. All critical financial calculations are performed server-side to guarantee financial integrity and accuracy.
 
 ### UI/UX Decisions
-- **Brand Identity:** Monochrome design system inspired by Notion/Vercel/NYT, utilizing black, white, and various shades of gray with sophisticated typography.
-- **Typography:** WCAG AA compliant 8-tier typography system with semantic color tokens for seamless dark mode adaptation.
-- **Components:** Shadcn UI components integrated with React Hook Form + Zod for validation and TanStack Query for data fetching.
-- **Navigation:** Global Cmd/Ctrl+K command palette, contextual breadcrumbs, OrganizationSwitcher for multi-tenant management, and a collapsible sidebar with RBAC-based filtering.
-- **User Experience:** Features include comprehensive empty states, an advanced table skeleton loading system, StatusBadges, instant tenant initialization, toast notifications, reduced motion support, mobile responsiveness, and full accessibility compliance.
+- **Brand Identity:** Monochrome design system inspired by Notion/Vercel/NYT, using black, white, and gray shades with sophisticated typography.
+- **Typography:** WCAG AA compliant 8-tier typography system with semantic color tokens for dark mode adaptation.
+- **Components:** Shadcn UI components with React Hook Form + Zod for validation and TanStack Query for data fetching.
+- **Navigation:** Global Cmd/Ctrl+K command palette, contextual breadcrumbs, OrganizationSwitcher, and a collapsible sidebar with RBAC-based filtering.
+- **User Experience:** Comprehensive empty states, advanced table skeleton loading, StatusBadges, instant tenant initialization, toast notifications, reduced motion support, mobile responsiveness, and full accessibility.
 - **Advanced Tables:** Enterprise-grade data tables (TanStack Table v8) with sorting, global search, advanced filtering, column visibility, row selection, bulk actions, CSV/Excel export, pagination, and localStorage persistence.
-- **Forms:** Major accounting forms are enhanced with collapsible sections (Accordion UI), AttachmentManager, ApprovalStatusBanner, AuditTrailDisplay, and conditional e-invoicing fields (UAE Peppol/KSA ZATCA).
+- **Forms:** Enhanced accounting forms with collapsible sections (Accordion UI), AttachmentManager, ApprovalStatusBanner, AuditTrailDisplay, and conditional e-invoicing fields (UAE Peppol/KSA ZATCA).
 
 ### Technical Implementations & Feature Specifications
-- **Multi-tenancy:** Enforced at all application layers with server-side `tenantId` assignment for strict data isolation.
-- **Financial Integrity:** All financial calculations and validations are executed server-side.
-- **Core Accounting:** Modules cover Company Profile, Customers, Vendors, Items, Taxes, Invoices (with auto-numbering, audit trail, soft delete, tax compliance), Bills (AI extraction), Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices.
-- **AI-Powered Document Extraction:** Utilizes OpenAI GPT-5 (vision) for detailed line item extraction, classification, and account mapping from documents like bills.
-- **Email Integration:** Outlook integration via Microsoft Graph API for sending invoices and scheduled reports.
-- **Optimistic UI:** Production-ready optimistic UI system for instant user feedback on create, update, and delete operations across key modules (Invoices, Bills, Customers, Vendors, Customer Payments), with automatic rollback on errors.
-- **Advanced Accounting:** Includes Chart of Accounts, Journal Entries (double-entry validation, atomic transactions, historical balance tracking, cascade recalculation), Fixed Assets, Purchase Orders, Bank Reconciliation, Products/Inventory (FIFO/Weighted Average costing, IAS 2 compliance), Tax Management, and multi-currency support (IFRS IAS 21 compliant, automated exchange rates).
-- **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with 180 granular permissions, support for default/custom roles, multi-role assignments, and UI/route protection.
-- **Approval Workflow Engine:** Multi-stage routing system for journal entries with workflow matching, multi-approver support, and auto-posting. Includes a dedicated UI for managing approvals.
-- **Enhanced Financial Reporting:** Interactive reports (P&L, Balance Sheet, Cash Flow, Trial Balance), a custom report builder (General Ledger, Transaction List), and comprehensive CSV/Excel export for all reports. Scheduled reports with email delivery.
+- **Multi-tenancy & Financial Integrity:** Enforced at all application layers with server-side `tenantId` and server-side execution of all financial calculations.
+- **Core Accounting:** Modules for Company Profile, Customers, Vendors, Items, Taxes, Invoices (with auto-numbering, audit trail, soft delete, tax compliance), Bills (AI extraction), Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices.
+- **AI-Powered Document Extraction:** Utilizes OpenAI GPT-5 (vision) for line item extraction, classification, and account mapping from documents.
+- **Optimistic UI:** Production-ready optimistic UI for instant feedback on create, update, and delete operations across key modules, with automatic rollback.
+- **Advanced Accounting:** Includes Chart of Accounts, Journal Entries (double-entry validation, atomic transactions, historical balance tracking), Fixed Assets, Purchase Orders, Bank Reconciliation, Products/Inventory (FIFO/Weighted Average costing), Tax Management, and multi-currency support (IFRS IAS 21 compliant).
+- **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with 180 granular permissions, default/custom roles, multi-role assignments, and UI/route protection.
+- **Approval Workflow Engine:** Multi-stage routing for journal entries with workflow matching, multi-approver support, and auto-posting.
+- **Enhanced Financial Reporting:** Interactive reports (P&L, Balance Sheet, Cash Flow, Trial Balance), a custom report builder, and comprehensive CSV/Excel export. Scheduled reports with email delivery.
 - **IFRS Compliance:** Adherence to IAS 1, IAS 2, IAS 7, and IAS 21 standards.
-- **Employee Expense Management:** Features expense submission with receipt upload, approval workflows, reimbursement processing, and automatic journal entries.
+- **Employee Expense Management:** Expense submission with receipt upload, approval workflows, reimbursement, and automatic journal entries.
 - **Inventory Management:** Full module including stock adjustments, opening stock, composite items, inventory valuation reports, and automatic journal entries compliant with IAS 2.
-- **Open Banking Integration:** Provider-agnostic architecture, currently implemented with Lean Technologies (UAE). Includes OAuth2, bank connection management, daily transaction sync (with AI-powered reconciliation using OpenAI GPT-4o-mini), payment initiation, and secure webhook handling.
-- **UAE Peppol E-Invoicing:** PINT-AE compliant with UBL 2.1 XML generation, TLV QR codes (UAE FTA compliant), ASP integration foundation, 14-day transmission deadline tracking, complete audit trail.
-- **KSA ZATCA E-Invoicing (Phase 2):** ZATCA-compliant XML with UUID/hash/hash chaining, TLV QR codes, FATOORAH integration for B2B real-time clearance and B2C 24-hour reporting, SHA-256 cryptographic hashing, PKI digital signature support.
-- **AI Copilot:** An AI assistant with live voice conversation capabilities and strict authority-aware RBAC system.
-    - **Backend:** WebSocket server with session-based authentication, OpenAI Realtime API integration, 11 accounting functions, PCM16 audio streaming, server-side VAD, function call handling with confirmation, heartbeat monitoring.
-    - **Frontend:** AudioManager, AudioWorklet processor, CopilotWebSocketClient with auto-reconnection, real-time audio streaming/playback.
-    - **UI:** Floating widget, push-to-talk/always-listening modes, audio visualizer, conversation transcript, function call confirmation dialog, status indicators, keyboard shortcuts.
-    - **Security:** Session authentication, tenant isolation, RBAC integration, critical action confirmation.
-    - **Authority-Aware RBAC System (Phase 2):**
-        - **Dynamic Context Injection:** User role and permissions are injected into AI system prompt at runtime, making the AI aware of authority boundaries.
-        - **Entry-Level Employee Persona:** AI operates as a helpful colleague who respects chain of command and seeks approval for actions.
-        - **Plan & Confirm Protocol:** All mutating actions require numbered action plan presentation and explicit Yes/No confirmation before execution.
-        - **Permission Validation Layer:** RBAC permissions are validated before every function execution, with graceful denial responses.
-        - **Conversation State Machine:** Tracks conversation flow through states: Listening → Awaiting Confirmation → Executing → Listening.
-        - **Segregation of Duties:** Separate draft vs. post functions (draft_journal_entry/post_journal_entry, draft_invoice/post_invoice, draft_bill/post_bill) enforce accounting separation.
-        - **Authority Denial Responses:** When users lack permissions, AI provides professional explanations with escalation suggestions.
-        - **10 Accounting Roles:** Owner, CFO, Controller, Admin, Senior Accountant, Accountant, Junior Accountant, Bookkeeper, Sales, Purchase, Viewer with hierarchical authority levels.
-        - **Function Metadata Catalog:** Complete mapping of all accounting functions to their required permissions and impact levels (READ_ONLY, CREATE, MODIFY, DELETE, EXECUTE, CRITICAL).
-        - **Implementation Files:**
-            - `server/ai-copilot/authority-context.ts` - Dynamic context injection system
-            - `server/ai-copilot/conversation-state.ts` - State machine implementation
-            - `server/ai-copilot/plan-confirm-protocol.ts` - Protocol definitions and formatting
-            - `server/ai-copilot/websocket-server.ts` - Integrated WebSocket server with permission checks
-            - `shared/authority-matrix.ts` - Complete authority matrix with role definitions
-- **SOX Audit Logging:** Immutable audit trail system for SOX §802 compliance.
-    - **Implementation:** Centralized audit service with immutable storage, sensitive data redaction (PII/PCI), before/after state capture.
-    - **Coverage:** 20+ financial routes instrumented (invoices, bills, payments, journal entries, bank transactions, inventory).
-    - **Features:** Success/failure logging, RBAC enforcement tracking, pagination, export limits (10,000 records), search by entity/user/action.
-    - **Security:** Tenant-scoped access, role-based viewing permissions, tamper-proof storage.
-- **AML/KYC Compliance:** Comprehensive anti-money laundering and know-your-customer system.
-    - **Database:** 7 core tables (kycVerifications, transactionAlerts, sarReports, sanctionsScreening, customerRiskAssessment, kycDocuments, eddReviews) plus dedicated transaction_history table.
-    - **Risk Scoring:** Data-driven engine using actual customer payment data (transaction volume, frequency, velocity, cross-border patterns).
-    - **Sanctions Screening:** Structured multi-list system (OFAC SDN, UN, EU, UK HMT, DFAT) - mocked for development with clear production integration path.
-    - **Transaction Monitoring:** Real-time detection with dedicated history table (no commingling with alerts), velocity/structuring/round-amount detection.
-    - **Workflows:** CDD/EDD with 25% beneficial ownership validation, 3-tier PEP classification, SAR automatic creation and escalation.
-    - **UI:** 5 comprehensive pages (KYC Verifications, Transaction Alerts, SAR Reports, Sanctions Screening, Risk Assessment) with proper loading/empty/error states.
-- **Compliance Reporting Dashboard:** Centralized compliance monitoring and management.
-    - **Real-Time Status:** SOX, AML/KYC, PSD2, GDPR (placeholder), PCI-DSS (placeholder) with live data integration.
-    - **Charts:** Alerts by severity (bar chart), KYC status distribution (pie chart with defensive defaults ensuring zero-value visibility).
-    - **Dynamic Features:** 8-item audit checklist with real completion calculation (0-100%), deadlines table with CRUD operations, training requirements tracking.
-    - **Data Sources:** All metrics from real API responses, defensive defaults prevent empty states, zero-value segments always visible.
+- **Open Banking Integration:** Provider-agnostic architecture, currently with Lean Technologies (UAE), including OAuth2, bank connection management, daily transaction sync (with AI reconciliation), payment initiation, and secure webhook handling.
+- **E-Invoicing:**
+    - **UAE Peppol:** PINT-AE compliant UBL 2.1 XML generation, TLV QR codes, ASP integration foundation, 14-day transmission deadline tracking, audit trail.
+    - **KSA ZATCA (Phase 2):** ZATCA-compliant XML with UUID/hash/hash chaining, TLV QR codes, FATOORAH integration, SHA-256 cryptographic hashing, PKI digital signature support.
+- **AI Copilot:** An AI assistant with live voice conversation, chat, and voice notes, strictly authority-aware RBAC system, web search, document processing, RAG, and push notifications.
+    - **Authority-Aware RBAC System:** Dynamic context injection of user roles and permissions into AI prompts, "plan & confirm" protocol for mutating actions, permission validation before function execution, segregation of duties (draft vs. post functions), and authority-aware denial responses.
+- **SOX Audit Logging:** Immutable audit trail system for SOX §802 compliance, with centralized audit service, sensitive data redaction, before/after state capture, and comprehensive coverage of financial routes.
+- **AML/KYC Compliance:** Comprehensive anti-money laundering and know-your-customer system with database, risk scoring, sanctions screening, transaction monitoring, and CDD/EDD workflows.
+- **Compliance Reporting Dashboard:** Centralized monitoring for SOX, AML/KYC, PSD2, GDPR, PCI-DSS with real-time status, charts, dynamic audit checklists, deadlines tracking, and training requirements.
+- **Dual Cloud Storage:** Simultaneous document storage across local, Google Drive, and OneDrive with user preferences.
+- **Inbound Document Webhooks:** Direct document receipt via email, WhatsApp/SMS, and API endpoints with HMAC verification and an AI extraction pipeline using GPT-4o Vision.
+- **Credit Passport & Bankability Score:** Real-time financial health analysis for loan eligibility, including a financial metrics engine, weighted bankability scoring, blocking factor analysis, actionable recommendations, and professional PDF export.
+- **Comprehensive Alerts & Reminders System:** Proactive monitoring for financial events and deadlines, including cash deficiency forecasting, aged AR/AP alerts, pending approvals aggregator, month-end closing checklist, suggested accruals detector, compliance deadline tracker, and anomaly detection.
+- **Background Jobs & Automation:** Daily alert engine, weekly Credit Passport calculation, daily Open Banking transaction sync, daily FX rates update, nightly RAG indexing, and hourly upload cleanup.
 
 ## External Dependencies
--   **OpenAI GPT-5:** Used for AI-powered document data extraction, categorization, and AI-powered bank reconciliation.
--   **Microsoft Graph API:** Utilized for Outlook email integration, including sending invoices and scheduled report delivery.
--   **Stripe:** Integrated for secure payment processing functionalities.
--   **Lean Technologies:** Serves as the primary Open Banking provider for UAE, handling OAuth2, token management, bank connections, transaction retrieval, and payment initiation.
--   **UAE Central Bank FX Rates:** Currently sourced from a GitHub mirror for daily foreign exchange rates.
+-   **OpenAI:** GPT-5 for AI-powered document data extraction and bank reconciliation, GPT-4o for chat mode, OpenAI Realtime API for live voice, and TTS API for voice notes.
+-   **Microsoft Graph API:** Outlook email integration and OneDrive cloud storage.
+-   **Stripe:** Secure payment processing.
+-   **Lean Technologies:** Primary Open Banking provider for UAE.
+-   **UAE Central Bank FX Rates:** Source for daily foreign exchange rates (currently from a GitHub mirror).
+-   **Twilio:** WhatsApp and SMS webhook integration.
+-   **Google Drive:** Cloud storage integration via Replit connector.
+-   **DuckDuckGo:** Web search integration for AI Copilot.
+-   **pgvector:** Used for Retrieval-Augmented Generation (RAG).

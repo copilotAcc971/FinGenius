@@ -4,18 +4,23 @@ import { setupVite, serveStatic, log } from "./vite";
 import { startFXRatesUpdateJob } from "./jobs/fx-rates-update";
 import { initializeScheduledReports, initializeUploadCleanup } from "./cron";
 import { initializeTransactionSync } from "./jobs/transaction-sync";
+import { initializeAlertEngine } from "./jobs/alert-engine";
+import { initializeDailyAlerts } from "./jobs/daily-alerts";
+import { initializeWeeklyCreditPassport } from "./jobs/weekly-credit-passport";
 import { getBackgroundIndexer } from "./rag/background-indexer";
 import { seedPermissions } from './scripts/seed-rbac';
 import { initializeRBACForAllTenants } from './scripts/update-owner-permissions';
 import { webhookRouter } from './routes-webhook';
+import { inboundWebhooksRouter } from './routes-inbound-webhooks';
 import { createAICopilotWebSocketServer } from './ai-copilot/websocket-server';
 import { createDashboardMetricsWebSocketServer } from './dashboard/metrics-websocket-server';
 import { logBypassStatus, RBAC_BYPASS_ENABLED } from './rbac/dev-bypass';
 
 const app = express();
 
-// CRITICAL: Mount webhook router BEFORE express.json() to preserve raw body for HMAC
+// CRITICAL: Mount webhook routers BEFORE express.json() to preserve raw body for HMAC
 app.use('/api/open-banking/webhooks', webhookRouter);
+app.use('/api/webhooks', inboundWebhooksRouter);
 
 // Parse JSON for all other routes
 app.use(express.json());
@@ -116,6 +121,15 @@ app.use((req, res, next) => {
     
     // Initialize FX rates scheduled job
     startFXRatesUpdateJob();
+    
+    // Initialize Alert Engine (runs daily at 9 AM UTC)
+    initializeAlertEngine();
+    
+    // Initialize Daily Alerts Job (Task 7-28: runs daily at 9 AM UTC)
+    initializeDailyAlerts();
+    
+    // Initialize Weekly Credit Passport Job (Task 7-29: runs Monday at 8 AM UTC)
+    initializeWeeklyCreditPassport();
     
     // Initialize RAG background indexer (runs nightly at 2 AM UTC)
     const backgroundIndexer = getBackgroundIndexer();

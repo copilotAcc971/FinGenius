@@ -61,6 +61,9 @@ import TransactionAlertsPage from "@/features/compliance/pages/transaction-alert
 import SARReportsPage from "@/features/compliance/pages/sar-reports-page";
 import AlertRulesPage from "@/features/compliance/pages/alert-rules-page";
 import FinancialStatementNotesPage from "@/features/reports/pages/financial-statement-notes-page";
+import AlertsCenterPage from "@/pages/alerts-center";
+import CreditPassportPage from "@/pages/credit-passport";
+import InboundDocumentsPage from "@/pages/inbound-documents";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -112,6 +115,9 @@ function Router() {
           <Route path="/compliance/alerts" component={TransactionAlertsPage} />
           <Route path="/compliance/sar" component={SARReportsPage} />
           <Route path="/compliance/rules" component={AlertRulesPage} />
+          <Route path="/alerts-center" component={AlertsCenterPage} />
+          <Route path="/credit-passport" component={CreditPassportPage} />
+          <Route path="/inbound-documents" component={InboundDocumentsPage} />
           <Route path="/demo/advanced-table" component={AdvancedTableDemo} />
         </>
       )}
