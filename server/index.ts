@@ -15,6 +15,7 @@ import { inboundWebhooksRouter } from './routes-inbound-webhooks';
 import { createAICopilotWebSocketServer } from './ai-copilot/websocket-server';
 import { createDashboardMetricsWebSocketServer } from './dashboard/metrics-websocket-server';
 import { logBypassStatus, RBAC_BYPASS_ENABLED } from './rbac/dev-bypass';
+import { ensureVapidKeys } from './services/vapid-generator';
 
 const app = express();
 
@@ -96,6 +97,13 @@ app.use((req, res, next) => {
     
     // Log RBAC bypass status
     logBypassStatus();
+    
+    // Auto-generate VAPID keys if not configured
+    try {
+      await ensureVapidKeys();
+    } catch (error) {
+      console.error('[VAPID] Failed to initialize keys:', error);
+    }
     
     // Initialize RBAC and scheduled reports
     try {

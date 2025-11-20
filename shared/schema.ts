@@ -3016,6 +3016,35 @@ export const insertEncryptionKeySchema = createInsertSchema(encryptionKeys).omit
 export type InsertEncryptionKey = z.infer<typeof insertEncryptionKeySchema>;
 export type EncryptionKey = typeof encryptionKeys.$inferSelect;
 
+// ====================================
+// TASK 8-26: SYSTEM CONFIGURATION (VAPID KEYS, ETC.)
+// ====================================
+
+/**
+ * System Configuration - Simple key-value store for system-wide settings
+ * Used for storing VAPID keys, system preferences, and other configuration that needs persistence
+ * Not encrypted - suitable for public keys and non-sensitive configuration
+ */
+export const systemConfig = pgTable("system_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: varchar("key", { length: 100 }).notNull().unique(),
+  value: jsonb("value").notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("system_config_key_idx").on(table.key),
+]);
+
+export const insertSystemConfigSchema = createInsertSchema(systemConfig).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertSystemConfig = z.infer<typeof insertSystemConfigSchema>;
+export type SystemConfig = typeof systemConfig.$inferSelect;
+
 // Relations
 export const tenantsRelations = relations(tenants, ({ one, many }) => ({
   owner: one(users, {
