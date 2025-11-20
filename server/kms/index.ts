@@ -44,6 +44,7 @@ export interface TokenEncryptionMetadata {
   encryptedDek: string;
   iv: string;
   authTag: string;
+  payloadIntegrityHash: string;
 }
 
 /**
@@ -128,7 +129,8 @@ export async function encryptOAuthToken(
     kmsKeyAlias: metadata.kmsKeyAlias,
     encryptedDek: metadata.encryptedDataKey,
     iv: metadata.encryptionIv,
-    authTag: metadata.encryptionAuthTag
+    authTag: metadata.encryptionAuthTag,
+    payloadIntegrityHash: metadata.payloadIntegrityHash
   };
 }
 
@@ -149,7 +151,7 @@ export async function decryptOAuthToken(
     encryptedDataKey: encrypted.encryptedDek,
     encryptionIv: encrypted.iv,
     encryptionAuthTag: encrypted.authTag,
-    payloadIntegrityHash: '' // Not used for OAuth tokens
+    payloadIntegrityHash: encrypted.payloadIntegrityHash
   };
 
   const plaintext = await envelopeEncryption.decryptWithFallback(
