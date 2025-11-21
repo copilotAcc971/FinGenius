@@ -6778,57 +6778,6 @@ export const scheduledReports = pgTable('scheduled_reports', {
   index('idx_scheduled_reports_tenant').on(table.tenantId),
 ]);
 
-export const creditPassports = pgTable('credit_passports', {
-  id: serial('id').primaryKey(),
-  tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
-  customerId: varchar('customer_id').references(() => customers.id, { onDelete: 'cascade' }),
-  overallScore: decimal('overall_score', { precision: 5, scale: 2 }), // 0-100
-  bankabilityGrade: varchar('bankability_grade'), // A+, A, B+, B, C, D, F
-  loanEligibility: varchar('loan_eligibility'), // excellent, good, fair, poor, not_eligible
-  financialMetrics: jsonb('financial_metrics'), // Key ratios
-  blockingFactors: jsonb('blocking_factors'), // Issues preventing eligibility
-  recommendations: jsonb('recommendations'), // Actionable suggestions
-  generatedAt: timestamp('generated_at').default(sql`now()`).notNull(),
-  expiresAt: timestamp('expires_at'),
-  pdfUrl: varchar('pdf_url'),
-}, (table) => [
-  index('idx_credit_passports_tenant_customer').on(table.tenantId, table.customerId),
-]);
-
-export const reportExports = pgTable('report_exports', {
-  id: serial('id').primaryKey(),
-  tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
-  reportId: integer('report_id').references(() => financialReports.id, { onDelete: 'cascade' }),
-  exportFormat: varchar('export_format').notNull(), // csv, excel, pdf
-  fileUrl: varchar('file_url').notNull(),
-  fileName: varchar('file_name').notNull(),
-  fileSize: integer('file_size'),
-  createdAt: timestamp('created_at').default(sql`now()`).notNull(),
-}, (table) => [
-  index('idx_report_exports_tenant').on(table.tenantId),
-]);
-
-export const financialReportsRelations = relations(financialReports, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [financialReports.tenantId],
-    references: [tenants.id],
-  }),
-}));
-
-export const complianceDashboardsRelations = relations(complianceDashboards, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [complianceDashboards.tenantId],
-    references: [tenants.id],
-  }),
-}));
-
-export const scheduledReportsRelations = relations(scheduledReports, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [scheduledReports.tenantId],
-    references: [tenants.id],
-  }),
-}));
-
 export const creditPassportsRelations = relations(creditPassports, ({ one }) => ({
   tenant: one(tenants, {
     fields: [creditPassports.tenantId],
