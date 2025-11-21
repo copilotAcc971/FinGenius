@@ -8,6 +8,8 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { AuditLogger } from "./audit/audit-logger";
 import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
+import { TaxCalculator } from "./services/tax-calculator";
+import CurrencyConverter from "./services/currency-converter";
 import { registerCronJob, unregisterCronJob, validateCronExpression } from "./cron";
 import googleDriveRoutes from "./google-drive-routes";
 import aiCopilotUploadRoutes from "./routes/ai-copilot-uploads";
@@ -2019,7 +2021,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const invoice = await storage.createInvoiceWithItems(parsed);
+      // Calculate taxes using TaxCalculator service
+      const lineItemsForTax = parsed.lineItems.map(item => ({
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
+      }));
+      
+      const taxCalc = TaxCalculator.calculateInvoiceTax(
+        lineItemsForTax,
+        5, // Default UAE VAT rate
+        false // Tax-exclusive
+      );
+      
+      // Merge calculated taxes into parsed invoice
+      const invoiceWithTax = {
+        ...parsed,
+        invoice: {
+          ...parsed.invoice,
+          subtotal: taxCalc.subtotal.toString(),
+          totalTax: taxCalc.totalTax.toString(),
+          total: taxCalc.total.toString(),
+          taxInclusive: false
+        }
+      };
+      
+      const invoice = await storage.createInvoiceWithItems(invoiceWithTax);
       
       // SOX-compliant audit logging
       await auditLogger.logFinancialTransaction({
@@ -5637,12 +5664,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Parse body WITHOUT tenantId
       const validated = billPayloadSchema.parse(req.body);
       
+      // Calculate taxes using TaxCalculator service
+      const lineItemsForTax = validated.lineItems.map(item => ({
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
+      }));
+      
+      const taxCalc = TaxCalculator.calculateInvoiceTax(
+        lineItemsForTax,
+        5, // Default UAE VAT rate
+        false // Tax-exclusive
+      );
+      
       // Inject server tenantId into bill data (NEVER trust client)
       const billWithTenant = {
         ...validated,
         bill: {
           ...validated.bill,
           tenantId: tenantId,
+          subtotal: taxCalc.subtotal.toString(),
+          totalTax: taxCalc.totalTax.toString(),
+          total: taxCalc.total.toString(),
+          taxInclusive: false
         }
       };
       
@@ -6394,7 +6438,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const tenantId = req.tenantId!;
       const userId = req.user.claims.sub;
-      const validated = insertPaymentSchema.parse({ ...req.body, tenantId });
+      
+      // Handle multi-currency conversion if needed
+      let paymentData = { ...req.body, tenantId };
+      if (req.body.sourceCurrency && req.body.targetCurrency && 
+          req.body.sourceCurrency !== req.body.targetCurrency) {
+        try {
+          const conversion = CurrencyConverter.convert(
+            parseFloat(req.body.amount || '0'),
+            req.body.sourceCurrency,
+            req.body.targetCurrency
+          );
+          paymentData = {
+            ...paymentData,
+            amount: conversion.roundedTarget.toString(),
+            exchangeRate: conversion.exchangeRate.toString(),
+            convertedAmount: conversion.roundedTarget.toString(),
+            conversionDate: conversion.conversionDate
+          };
+        } catch (err) {
+          return res.status(400).json({ message: `Currency conversion failed: ${err}` });
+        }
+      }
+      
+      const validated = insertPaymentSchema.parse(paymentData);
 
       // Use atomic transaction to ensure payment and journal entry are created together
       const result = await withTransaction(async (tx) => {
