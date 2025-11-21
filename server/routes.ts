@@ -11496,10 +11496,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  const httpServer = createServer(app);
-  return httpServer;
-}
-
   // ====== FINANCIAL REPORTING ROUTES (Task 10-1 to 10-8) ======
   
   app.get('/api/reports', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
@@ -11604,3 +11600,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'Failed to schedule report' });
     }
   });
+
+  const httpServer = createServer(app);
+  return httpServer;
+}
