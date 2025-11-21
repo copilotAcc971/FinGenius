@@ -8324,11 +8324,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const openBankingService = new OpenBankingService(connection.tenantId);
       await openBankingService.refreshConnection(id);
 
-        connectionId: id,
-        tenantId: connection.tenantId,
-        provider: connection.provider,
-      });
-
       res.json({ success: true });
     } catch (error: any) {
       console.error('[Open Banking] Refresh error:', error);
@@ -8398,11 +8393,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const openBankingService = new OpenBankingService(connection.tenantId);
       await openBankingService.disconnectConnection(id);
 
-        connectionId: id,
-        tenantId: connection.tenantId,
-        provider: connection.provider,
-      });
-
       res.json({ success: true });
     } catch (error: any) {
       console.error('[Open Banking] Disconnect error:', error);
@@ -8455,12 +8445,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const provider = openBankingProviderFactory.createProvider(connection.provider as any);
       const capabilities = openBankingProviderFactory.getProviderCapabilities(provider);
 
-        connectionId: id,
-        tenantId: connection.tenantId,
-        provider: connection.provider,
-        capabilities,
-      });
-
       res.json({ capabilities });
     } catch (error: any) {
       console.error('[Open Banking] Get capabilities error:', error);
@@ -8487,13 +8471,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate request body
       const { startDate, endDate, limit } = syncParamsSchema.parse(req.body);
-
-        accountId,
-        tenantId,
-        startDate,
-        endDate,
-        limit,
-      });
 
       // Verify bank account exists and belongs to tenant
       const [account] = await db
@@ -8525,11 +8502,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parsedEndDate,
         limit
       );
-
-        accountId,
-        tenantId,
-        result,
-      });
 
       res.json(result);
     } catch (error: any) {
@@ -8574,14 +8546,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate query parameters
       const { startDate, endDate, limit, offset } = listParamsSchema.parse(req.query);
 
-        accountId,
-        tenantId,
-        startDate,
-        endDate,
-        limit,
-        offset,
-      });
-
       // Verify bank account exists and belongs to tenant
       const [account] = await db
         .select()
@@ -8607,12 +8571,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endDate: endDate ? new Date(endDate) : undefined,
         limit,
         offset,
-      });
-
-        accountId,
-        tenantId,
-        count: result.transactions.length,
-        total: result.total,
       });
 
       res.json({
@@ -8646,10 +8604,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!; // Secure - from middleware
-
-        id,
-        tenantId,
-      });
 
       // Fetch transaction
       const [transaction] = await db
