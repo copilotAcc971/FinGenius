@@ -6763,19 +6763,34 @@ export const complianceDashboards = pgTable('compliance_dashboards', {
   index('idx_compliance_dashboards_tenant_type').on(table.tenantId, table.complianceType),
 ]);
 
-export const scheduledReports = pgTable('scheduled_reports', {
+export const creditPassports = pgTable('credit_passports', {
   id: serial('id').primaryKey(),
   tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
-  reportType: varchar('report_type').notNull(), // p_and_l, balance_sheet, etc
-  schedule: varchar('schedule').notNull(), // daily, weekly, monthly, quarterly, yearly
-  recipientEmails: text('recipient_emails').array(), // Email recipients
-  isActive: boolean('is_active').default(true),
-  lastExecutedAt: timestamp('last_executed_at'),
-  nextExecutionAt: timestamp('next_execution_at'),
-  createdAt: timestamp('created_at').default(sql`now()`).notNull(),
-  updatedAt: timestamp('updated_at').default(sql`now()`).notNull(),
+  customerId: varchar('customer_id').references(() => customers.id, { onDelete: 'cascade' }),
+  overallScore: decimal('overall_score', { precision: 5, scale: 2 }),
+  bankabilityGrade: varchar('bankability_grade'),
+  loanEligibility: varchar('loan_eligibility'),
+  financialMetrics: jsonb('financial_metrics'),
+  blockingFactors: jsonb('blocking_factors'),
+  recommendations: jsonb('recommendations'),
+  generatedAt: timestamp('generated_at').default(sql`now()`).notNull(),
+  expiresAt: timestamp('expires_at'),
+  pdfUrl: varchar('pdf_url'),
 }, (table) => [
-  index('idx_scheduled_reports_tenant').on(table.tenantId),
+  index('idx_credit_passports_tenant_customer').on(table.tenantId, table.customerId),
+]);
+
+export const reportExports = pgTable('report_exports', {
+  id: serial('id').primaryKey(),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  reportId: integer('report_id').references(() => financialReports.id, { onDelete: 'cascade' }),
+  exportFormat: varchar('export_format').notNull(),
+  fileUrl: varchar('file_url').notNull(),
+  fileName: varchar('file_name').notNull(),
+  fileSize: integer('file_size'),
+  createdAt: timestamp('created_at').default(sql`now()`).notNull(),
+}, (table) => [
+  index('idx_report_exports_tenant').on(table.tenantId),
 ]);
 
 export const creditPassportsRelations = relations(creditPassports, ({ one }) => ({
