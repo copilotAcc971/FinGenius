@@ -246,6 +246,163 @@ This document outlines all features implemented in Phase 8 that require manual t
 
 ---
 
+### 6. MCP + OIDC Authentication System (Tasks 8-24, 8-25)
+
+#### OAuth 2.1 + PKCE Authorization Flow
+- **Feature**: Secure OAuth 2.1 with PKCE for provider authentication
+- **How to Test**:
+  1. Navigate to Settings → AI Providers (`/settings/ai-providers`)
+  2. Click "Click to Connect" button on Kimi AI (or any OAuth provider)
+  3. Verify browser redirects to provider's authorization page
+  4. Accept permissions on provider's login page
+  5. Verify redirect back to `/api/mcp/oidc/callback` with `code` and `state` params
+  6. Observe successful connection toast: "Connected! Kimi AI has been connected successfully"
+  7. Return to AI Providers page - should show "Connected" status badge
+  8. **Expected**: OAuth flow completes end-to-end with secure PKCE challenge validation
+
+- **Test Cases**:
+  - [ ] Authorization URL generated with correct `client_id`, `redirect_uri`, `scope`
+  - [ ] PKCE challenge and code verifier created
+  - [ ] State parameter validated on callback
+  - [ ] Authorization code exchanged for access token
+  - [ ] Token stored encrypted (AES-256-GCM) in database
+  - [ ] Redirect to provider works from different browsers/IPs
+  - [ ] Expired state parameters rejected (security check)
+  - [ ] User redirected back to app on success/error
+
+#### Manual API Key Input
+- **Feature**: Direct API key input for non-OAuth providers
+- **How to Test**:
+  1. Navigate to Settings → AI Providers
+  2. Find OpenAI, Qwen, or DeepSeek (API key providers)
+  3. Paste API key in the input field: `sk-...` for OpenAI
+  4. Click "Save" button
+  5. Observe success toast: "Success: API key saved securely"
+  6. Refresh page - credential status should show "Connected"
+  7. Verify API key is NOT visible in browser storage or network tab
+  8. **Expected**: Key stored encrypted, no plain text exposure
+
+- **Test Cases**:
+  - [ ] API key field accepts valid format strings
+  - [ ] Empty key rejected with validation error
+  - [ ] Credential encryption works (AES-256-GCM)
+  - [ ] Stored key cannot be retrieved in plain text
+  - [ ] Multiple users can have different API keys per provider
+  - [ ] Key rotation possible by re-saving
+  - [ ] Database audit log tracks credential saves (security event)
+  - [ ] Network requests never include plain-text keys
+
+#### Credential Status Checking
+- **Feature**: Display real-time connection status for all providers
+- **How to Test**:
+  1. On AI Providers page, check status for each provider
+  2. Providers with valid credentials show: `✓ Connected` (green badge)
+  3. Providers without credentials show: No status badge
+  4. Hover over provider cards to see metadata
+  5. Click provider and check:
+     - `isConfigured`: true/false
+     - `credentialType`: `oauth_token` or `api_key`
+     - `expiresAt`: For OAuth tokens (e.g., "2025-01-20T10:00:00Z")
+     - `lastUsedAt`: Timestamp of last API call
+  6. Make an AI request and verify `lastUsedAt` updates
+  7. **Expected**: Status always reflects actual credential state
+
+- **Test Cases**:
+  - [ ] Connected status displays immediately after OAuth/save
+  - [ ] Status persists on page reload
+  - [ ] Metadata includes token expiration date
+  - [ ] LastUsedAt updates after each AI call
+  - [ ] Disconnected providers show empty state
+  - [ ] Multi-tenant isolation: Only current tenant's credentials shown
+
+#### OAuth Callback Handling
+- **Feature**: Secure handling of OAuth provider redirects
+- **How to Test**:
+  1. Start OAuth flow (click "Connect" button)
+  2. Complete authentication on provider
+  3. Verify callback URL matches: `{APP_URL}/api/mcp/oidc/callback`
+  4. Check URL parameters include `code` and `state`
+  5. Observe automatic redirect to settings page with success message
+  6. Check URL includes: `?connected={provider}&success=true`
+  7. Test error scenario: Close browser during OAuth → callback with error
+  8. Verify error page shows: `?error={encoded error message}`
+  9. **Expected**: Callback always handled safely, no state leaks
+
+- **Test Cases**:
+  - [ ] Callback validates state parameter (prevents CSRF)
+  - [ ] Invalid state rejected with 400 error
+  - [ ] Code exchanged for token securely (HTTPS only)
+  - [ ] Error redirects don't expose sensitive data
+  - [ ] Redirect URI strictly matches registered value
+  - [ ] Callback works with special characters in tenant ID
+  - [ ] Rate limiting prevents repeated callbacks
+
+#### Provider Discovery
+- **Feature**: List available MCP providers with metadata
+- **How to Test**:
+  1. Call GET `/api/mcp/providers` (can add to Network tab)
+  2. Verify response includes:
+     ```json
+     {
+       "providers": [
+         {
+           "provider": "openai",
+           "name": "OpenAI",
+           "description": "...",
+           "authMethod": "api_key",
+           "requiresCredentials": true,
+           "isOfficial": true,
+           "metadata": {...}
+         }
+       ]
+     }
+     ```
+  3. Verify all 4 providers listed: openai, kimi, qwen, deepseek
+  4. Check `authMethod` matches provider type
+  5. Verify `enabled: true` in response
+  6. **Expected**: Provider list is complete, accurate, and cacheable
+
+- **Test Cases**:
+  - [ ] All 4 providers returned
+  - [ ] Provider metadata matches documentation
+  - [ ] Auth methods correctly specified
+  - [ ] Only enabled providers in response
+  - [ ] Response is cacheable (proper headers)
+  - [ ] Consistent across multiple calls
+
+#### Error Handling & Security
+- **Feature**: Graceful handling of OAuth and credential errors
+- **How to Test**:
+  1. **Invalid OAuth Client**: Use fake client ID in env, try OAuth flow
+     - Expected: Error message shown, no crash
+  2. **Expired OAuth Token**: Wait for token expiry (or simulate), make API call
+     - Expected: Auto-refresh triggered, or refresh error shown
+  3. **API Key Rejection**: Save invalid key, verify error on use
+     - Expected: Clear error message, no silent failures
+  4. **Network Failure During OAuth**: Disconnect internet during callback
+     - Expected: Graceful degradation, retry option shown
+  5. **Multiple Simultaneous Connections**: Rapidly click "Connect" on multiple providers
+     - Expected: Each flow isolated, no cross-contamination
+  6. **SQL Injection in Credentials**: Try `'; DROP TABLE credentials; --` as API key
+     - Expected: Stored safely (parameterized queries), no database corruption
+  7. **XSS in Callback**: Modify callback URL with `<script>alert('xss')</script>`
+     - Expected: Escaped/sanitized, no script execution
+  8. **CSRF Attack**: Try OAuth callback without state parameter
+     - Expected: 400 error, request rejected
+
+- **Test Cases**:
+  - [ ] Invalid OAuth client ID returns 401
+  - [ ] Missing redirect_uri parameter rejected
+  - [ ] CSRF token validation works
+  - [ ] Expired credentials trigger refresh
+  - [ ] API key format validation applied
+  - [ ] Rate limiting on credential attempts
+  - [ ] Audit log tracks failed authentication
+  - [ ] No sensitive data in error messages
+  - [ ] No plain-text keys in logs/console
+
+---
+
 ## 📋 Testing Checklist
 
 ### Phase 1: Cloud Storage
@@ -275,6 +432,16 @@ This document outlines all features implemented in Phase 8 that require manual t
 - [ ] Admin API Access Control
 - [ ] Process Auto-Restart
 - [ ] Health Checks Running
+
+### Phase 5: MCP + OIDC Authentication
+- [ ] OAuth 2.1 PKCE Flow (Kimi, Qwen, etc.)
+- [ ] Manual API Key Input (OpenAI, DeepSeek, etc.)
+- [ ] Credential Status Display
+- [ ] OAuth Callback Handling & CSRF Protection
+- [ ] Provider Discovery API
+- [ ] Error Handling (Invalid credentials, expired tokens)
+- [ ] Security (No plain-text keys, AES-256-GCM encryption)
+- [ ] Multi-tenant Isolation
 
 ---
 
