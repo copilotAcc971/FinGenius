@@ -11421,6 +11421,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Shorthand route for sending messages (requires conversationId in body)
+  app.post('/api/copilot/messages', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { conversationId, content } = req.body;
+
+      if (!conversationId || !content) {
+        return res.status(400).json({ message: 'conversationId and content required' });
+      }
+
+      const { copilotService } = await import('./services/copilot-service');
+      
+      // Get user permissions for authority-aware RBAC
+      const { RBACService } = await import('./rbac/service');
+      const rbac = new RBACService(db);
+      const userPermissions = await rbac.getUserPermissions(tenantId, userId);
+      
+      const result = await copilotService.chat(
+        tenantId,
+        userId,
+        conversationId,
+        content,
+        userPermissions
+      );
+      res.json(result);
+    } catch (error: any) {
+      console.error('[Copilot] Chat error:', error);
+      res.status(500).json({ message: 'Failed to process message' });
+    }
+  });
+
   // ====== CLOUD STORAGE RETRIEVAL ROUTES (Task 8-14) ======
   
   app.post('/api/cloud-storage/retrieve', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
