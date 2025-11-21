@@ -182,6 +182,26 @@ export class CopilotService {
       .orderBy(copilotConversations.updatedAt);
     return convs;
   }
+
+  async deleteConversation(tenantId: string, conversationId: string) {
+    // Delete all messages in conversation first (cascading delete would handle this)
+    await db
+      .delete(copilotMessages)
+      .where(eq(copilotMessages.conversationId, conversationId));
+
+    // Delete the conversation
+    const result = await db
+      .delete(copilotConversations)
+      .where(
+        and(
+          eq(copilotConversations.tenantId, tenantId),
+          eq(copilotConversations.id, conversationId)
+        )
+      )
+      .returning();
+
+    return result[0];
+  }
 }
 
 export const copilotService = new CopilotService();
