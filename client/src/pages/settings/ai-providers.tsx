@@ -3,10 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/sha
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Switch } from "@/shared/components/ui/switch";
-import { Loader2, AlertCircle, CheckCircle2, DollarSign } from "lucide-react";
+import { Input } from "@/shared/components/ui/input";
+import { Loader2, AlertCircle, CheckCircle2, DollarSign, Link as LinkIcon, Copy } from "lucide-react";
 import { useToast } from "@/shared/hooks/use-toast";
 import { queryClient, apiRequest } from "@/shared/lib/api/queryClient";
 import type { AiProviderConsent } from "@shared/schema";
+import { useState, useEffect } from "react";
 
 const PROVIDER_INFO = {
   openai: {
@@ -15,6 +17,7 @@ const PROVIDER_INFO = {
     models: ["gpt-4o", "gpt-4o-mini", "Whisper (voice)", "TTS (voice output)"],
     pricingModel: "Pay-as-you-go",
     estimatedCost: "Variable based on usage",
+    authMethod: "api_key",
   },
   kimi: {
     name: "Kimi AI",
@@ -22,6 +25,7 @@ const PROVIDER_INFO = {
     models: ["Kimi v2", "Kimi Plus"],
     pricingModel: "FREE tier available",
     estimatedCost: "$0/month (free tier)",
+    authMethod: "none",
   },
   qwen: {
     name: "Qwen (Alibaba)",
@@ -29,6 +33,7 @@ const PROVIDER_INFO = {
     models: ["Qwen Max", "Qwen Plus", "Qwen Turbo"],
     pricingModel: "FREE tier available",
     estimatedCost: "$0/month (free tier)",
+    authMethod: "api_key",
   },
   deepseek: {
     name: "DeepSeek",
@@ -36,11 +41,14 @@ const PROVIDER_INFO = {
     models: ["DeepSeek Chat", "DeepSeek Coder"],
     pricingModel: "FREE tier available",
     estimatedCost: "$0/month (free tier)",
+    authMethod: "api_key",
   },
 };
 
 export default function AIProvidersPage() {
   const { toast } = useToast();
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [credentialStatus, setCredentialStatus] = useState<Record<string, any>>({});
 
   const { data: consents = [], isLoading } = useQuery({
     queryKey: ["/api/ai-consent/all"],
@@ -59,6 +67,52 @@ export default function AIProvidersPage() {
       return response.json();
     },
   });
+
+  // Load credential status for all providers
+  useQuery({
+    queryKey: ["/api/mcp/credentials/status"],
+    queryFn: async () => {
+      const statuses: Record<string, any> = {};
+      for (const key of Object.keys(PROVIDER_INFO)) {
+        try {
+          const response = await fetch(`/api/mcp/credentials/status?provider=${key}`);
+          if (response.ok) {
+            statuses[key] = await response.json();
+          }
+        } catch (error) {
+          console.error(`Failed to fetch status for ${key}:`, error);
+        }
+      }
+      setCredentialStatus(statuses);
+      return statuses;
+    },
+  });
+
+  // Check for OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("connected");
+    const success = params.get("success");
+    const error = params.get("error");
+
+    if (connected && success) {
+      toast({
+        title: "Connected!",
+        description: `${PROVIDER_INFO[connected as keyof typeof PROVIDER_INFO]?.name} has been connected successfully`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/mcp/credentials/status"] });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    if (error) {
+      toast({
+        title: "Connection Failed",
+        description: decodeURIComponent(error),
+        variant: "destructive",
+      });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [toast]);
 
   const updateConsentMutation = useMutation({
     mutationFn: async ({
@@ -89,6 +143,49 @@ export default function AIProvidersPage() {
     },
   });
 
+  const connectOAuthMutation = useMutation({
+    mutationFn: async (provider: string) => {
+      const response = await fetch(`/api/mcp/oidc/authorize?provider=${provider}`);
+      const data = await response.json();
+      if (data.authorizationUrl) {
+        window.location.href = data.authorizationUrl;
+      } else {
+        throw new Error("Could not get authorization URL");
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to initiate OAuth",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const saveApiKeyMutation = useMutation({
+    mutationFn: async ({ provider, apiKey }: { provider: string; apiKey: string }) => {
+      return apiRequest("POST", "/api/mcp/credentials/save-api-key", {
+        provider,
+        apiKey,
+      });
+    },
+    onSuccess: (_, { provider }) => {
+      setApiKeys({ ...apiKeys, [provider]: "" });
+      queryClient.invalidateQueries({ queryKey: ["/api/mcp/credentials/status"] });
+      toast({
+        title: "Success",
+        description: "API key saved securely",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to save API key",
+        variant: "destructive",
+      });
+    },
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -106,7 +203,7 @@ export default function AIProvidersPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">AI Provider Settings</h1>
         <p className="text-muted-foreground mt-2">
-          Manage your AI providers and track usage for transparent, vendor-agnostic AI.
+          Connect to AI providers via OAuth or manual API keys. All credentials are encrypted and stored securely.
         </p>
       </div>
 
@@ -114,6 +211,9 @@ export default function AIProvidersPage() {
         {Object.entries(PROVIDER_INFO).map(([key, info]) => {
           const consent = consentMap[key];
           const providerStats = stats[key];
+          const status = credentialStatus[key];
+          const isApiKeyProvider = info.authMethod === "api_key";
+          const isConnected = status?.isConfigured;
 
           return (
             <Card key={key} data-testid={`card-provider-${key}`}>
@@ -159,6 +259,71 @@ export default function AIProvidersPage() {
                   </div>
                 </div>
 
+                {/* Authentication Section */}
+                <div className="pt-4 border-t space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium">Authentication</h4>
+                    {isConnected && (
+                      <div className="flex items-center gap-1 text-green-600">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span className="text-xs">Connected</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {isApiKeyProvider ? (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <Input
+                          type="password"
+                          placeholder="Enter API key..."
+                          value={apiKeys[key] || ""}
+                          onChange={(e) =>
+                            setApiKeys({ ...apiKeys, [key]: e.target.value })
+                          }
+                          data-testid={`input-api-key-${key}`}
+                        />
+                        <Button
+                          onClick={() =>
+                            saveApiKeyMutation.mutate({
+                              provider: key,
+                              apiKey: apiKeys[key] || "",
+                            })
+                          }
+                          disabled={
+                            !apiKeys[key] || saveApiKeyMutation.isPending
+                          }
+                          data-testid={`button-save-key-${key}`}
+                        >
+                          {saveApiKeyMutation.isPending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            "Save"
+                          )}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Your API key is encrypted and never stored in plain text.
+                      </p>
+                    </div>
+                  ) : (
+                    <Button
+                      onClick={() => connectOAuthMutation.mutate(key)}
+                      disabled={connectOAuthMutation.isPending}
+                      className="w-full"
+                      data-testid={`button-connect-oauth-${key}`}
+                    >
+                      {connectOAuthMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      ) : (
+                        <LinkIcon className="w-4 h-4 mr-2" />
+                      )}
+                      {isConnected ? "Reconnect" : "Click to Connect"}
+                    </Button>
+                  )}
+                </div>
+
+                {/* Stats Section */}
                 {consent && (
                   <div className="pt-4 border-t space-y-2">
                     <div className="flex items-center justify-between text-sm">
@@ -213,7 +378,7 @@ export default function AIProvidersPage() {
 
       <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
         <p className="text-sm text-blue-900 dark:text-blue-100">
-          <strong>Transparency First:</strong> All AI provider consents and usage are tracked for audit compliance. You control which AI providers your organization uses. Switching providers doesn't lose your data.
+          <strong>Vendor-Agnostic AI:</strong> All AI provider consents and credentials are tracked for audit compliance. You control which AI providers your organization uses. Switching providers doesn't lose your data. All credentials are encrypted with AES-256-GCM.
         </p>
       </div>
     </div>
