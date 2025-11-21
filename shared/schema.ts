@@ -6750,6 +6750,7 @@ export const complianceDashboards = pgTable('compliance_dashboards', {
   id: serial('id').primaryKey(),
   tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   complianceType: varchar('compliance_type').notNull(), // sox, aml_kyc, psd2, gdpr, pci_dss
+  category: varchar('category').notNull().default('general'), // Compliance category
   status: varchar('status').notNull(), // compliant, non_compliant, partial, pending
   score: decimal('score', { precision: 5, scale: 2 }), // 0-100
   auditItems: jsonb('audit_items'), // Checklist items

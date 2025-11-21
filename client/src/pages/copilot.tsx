@@ -3,16 +3,54 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
-import { Loader2, Send, Plus, MessageCircle } from 'lucide-react';
+import { Loader2, Send, Plus, MessageCircle, Wifi, WifiOff } from 'lucide-react';
 import { useToast } from '@/shared/hooks/use-toast';
 import { apiRequest, queryClient } from '@/shared/lib/api/queryClient';
 import type { CopilotConversation, CopilotMessage } from '@shared/schema';
+
+// WebSocket connection handler for real-time chat
+const useWebSocketChat = (conversationId: string | null) => {
+  const wsRef = useRef<WebSocket | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
+
+  useEffect(() => {
+    if (!conversationId) return;
+
+    try {
+      const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/ai-copilot`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        setWsConnected(true);
+        ws.send(JSON.stringify({ type: 'subscribe', conversationId }));
+      };
+
+      ws.onclose = () => {
+        setWsConnected(false);
+      };
+
+      wsRef.current = ws;
+
+      return () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      };
+    } catch (error) {
+      console.error('WebSocket connection failed:', error);
+      setWsConnected(false);
+    }
+  }, [conversationId]);
+
+  return { wsRef, wsConnected };
+};
 
 export default function CopilotPage() {
   const { toast } = useToast();
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { wsRef, wsConnected } = useWebSocketChat(selectedConversation);
 
   // List conversations
   const { data: conversations = [] } = useQuery({
@@ -91,10 +129,19 @@ export default function CopilotPage() {
     <div className="flex h-screen gap-4 p-4">
       {/* Sidebar */}
       <div className="w-64 flex flex-col gap-2 bg-sidebar border-r">
-        <Button onClick={handleNewConversation} className="w-full" size="sm">
-          <Plus className="w-4 h-4 mr-2" />
-          New Chat
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleNewConversation} className="flex-1" size="sm">
+            <Plus className="w-4 h-4 mr-2" />
+            New Chat
+          </Button>
+          <div className="flex items-center justify-center px-2 py-1 rounded text-xs" data-testid="websocket-status">
+            {wsConnected ? (
+              <Wifi className="w-4 h-4 text-green-600" title="Connected" />
+            ) : (
+              <WifiOff className="w-4 h-4 text-red-600" title="Disconnected" />
+            )}
+          </div>
+        </div>
 
         <div className="flex-1 overflow-y-auto space-y-1">
           {conversations.map((conv) => (
