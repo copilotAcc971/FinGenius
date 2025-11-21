@@ -123,6 +123,8 @@ import {
   approvalWorkflows,
   projectInvoices,
   mcpProviderTemplates,
+  copilotConversations,
+  copilotMessages,
   type Expense,
 } from "@shared/schema";
 import { insertFXConfigSchema } from "@shared/fx-types";

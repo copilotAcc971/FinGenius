@@ -6357,6 +6357,70 @@ export const insertMcpProviderTemplateSchema = createInsertSchema(mcpProviderTem
 export type InsertMcpProviderTemplate = z.infer<typeof insertMcpProviderTemplateSchema>;
 export type McpProviderTemplate = typeof mcpProviderTemplates.$inferSelect;
 
+// Task 9-1: AI Copilot Assistant Tables
+export const copilotConversations = pgTable('copilot_conversations', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id),
+  userId: varchar('user_id').notNull().references(() => users.id),
+  title: varchar('title').notNull(),
+  systemPrompt: text('system_prompt'),
+  model: varchar('model').notNull().default('openai'),
+  status: varchar('status').notNull().default('active'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  index('idx_copilot_conversations_tenant_user').on(table.tenantId, table.userId),
+]);
+
+export const copilotMessages = pgTable('copilot_messages', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id),
+  conversationId: varchar('conversation_id').notNull().references(() => copilotConversations.id),
+  role: varchar('role').notNull(),
+  content: text('content').notNull(),
+  toolCalls: jsonb('tool_calls'),
+  toolResults: jsonb('tool_results'),
+  tokenCount: integer('token_count'),
+  cost: decimal('cost', 10, 6),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => [
+  index('idx_copilot_messages_conversation').on(table.conversationId),
+]);
+
+export const copilotToolCalls = pgTable('copilot_tool_calls', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id),
+  conversationId: varchar('conversation_id').notNull().references(() => copilotConversations.id),
+  messageId: varchar('message_id').notNull().references(() => copilotMessages.id),
+  tool: varchar('tool').notNull(),
+  input: jsonb('input').notNull(),
+  result: jsonb('result'),
+  error: text('error'),
+  status: varchar('status').notNull().default('pending'),
+  executionTime: integer('execution_time'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => [
+  index('idx_copilot_tool_calls_conversation').on(table.conversationId),
+]);
+
+export const insertCopilotConversationSchema = createInsertSchema(copilotConversations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertCopilotMessageSchema = createInsertSchema(copilotMessages).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCopilotConversation = z.infer<typeof insertCopilotConversationSchema>;
+export type CopilotConversation = typeof copilotConversations.$inferSelect;
+export type InsertCopilotMessage = z.infer<typeof insertCopilotMessageSchema>;
+export type CopilotMessage = typeof copilotMessages.$inferSelect;
+export type CopilotToolCall = typeof copilotToolCalls.$inferSelect;
+
 // ============================================================================
 // RELATIONS (for Drizzle ORM queries)
 // ============================================================================
@@ -6617,5 +6681,44 @@ export const pushNotificationLogRelations = relations(pushNotificationLog, ({ on
   subscription: one(pushSubscriptions, {
     fields: [pushNotificationLog.subscriptionId],
     references: [pushSubscriptions.id],
+  }),
+}));
+
+export const copilotConversationsRelations = relations(copilotConversations, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [copilotConversations.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [copilotConversations.userId],
+    references: [users.id],
+  }),
+  messages: many(copilotMessages),
+}));
+
+export const copilotMessagesRelations = relations(copilotMessages, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [copilotMessages.tenantId],
+    references: [tenants.id],
+  }),
+  conversation: one(copilotConversations, {
+    fields: [copilotMessages.conversationId],
+    references: [copilotConversations.id],
+  }),
+  toolCalls: many(copilotToolCalls),
+}));
+
+export const copilotToolCallsRelations = relations(copilotToolCalls, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [copilotToolCalls.tenantId],
+    references: [tenants.id],
+  }),
+  conversation: one(copilotConversations, {
+    fields: [copilotToolCalls.conversationId],
+    references: [copilotConversations.id],
+  }),
+  message: one(copilotMessages, {
+    fields: [copilotToolCalls.messageId],
+    references: [copilotMessages.id],
   }),
 }));
