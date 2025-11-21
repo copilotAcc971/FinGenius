@@ -11087,6 +11087,137 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ====== AI CONSENT & PROVIDER ROUTES (Task 8-3, 8-4) ======
+  
+  app.get('/api/ai-consent/all', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { aiConsentService } = await import('./services/ai-consent');
+      
+      const consents = await aiConsentService.getAllUserConsents(tenantId, userId);
+      res.json(consents);
+    } catch (error: any) {
+      console.error('[AI Consent] Get all consents error:', error);
+      res.status(500).json({ message: 'Failed to get AI provider consents' });
+    }
+  });
+
+  app.patch('/api/ai-consent/update', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { provider, consentGiven } = req.body;
+      
+      const { aiConsentService } = await import('./services/ai-consent');
+      const result = await aiConsentService.updateConsent(tenantId, userId, provider, consentGiven);
+      
+      res.json(result[0]);
+    } catch (error: any) {
+      console.error('[AI Consent] Update consent error:', error);
+      res.status(500).json({ message: 'Failed to update consent' });
+    }
+  });
+
+  app.get('/api/ai-consent/stats', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { aiConsentService } = await import('./services/ai-consent');
+      
+      const stats = await aiConsentService.getUsageStats(tenantId, userId);
+      const statsMap: Record<string, any> = {};
+      
+      for (const stat of stats) {
+        statsMap[stat.provider] = {
+          totalTokens: stat.totalTokens || 0,
+          totalCost: stat.totalCost || 0,
+          requestCount: stat.requestCount || 0,
+        };
+      }
+      
+      res.json(statsMap);
+    } catch (error: any) {
+      console.error('[AI Consent] Get stats error:', error);
+      res.status(500).json({ message: 'Failed to get usage stats' });
+    }
+  });
+
+  // ====== CLOUD STORAGE RETRIEVAL ROUTES (Task 8-14) ======
+  
+  app.post('/api/cloud-storage/retrieve', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { localPath, googleDriveFileId, oneDriveFileId } = req.body;
+      
+      const { retrieveDocument } = await import('./cloud-storage/retrieval');
+      const result = await retrieveDocument(tenantId, userId, localPath, {
+        googleDriveFileId,
+        oneDriveFileId,
+      });
+      
+      res.set('Content-Type', 'application/octet-stream');
+      res.set('Content-Disposition', `attachment; filename="${localPath.split('/').pop()}"`);
+      res.send(result.buffer);
+    } catch (error: any) {
+      console.error('[Cloud Storage Retrieval] Error:', error);
+      res.status(500).json({ message: 'Failed to retrieve document' });
+    }
+  });
+
+  // ====== MCP ROUTES (Task 8-22, 8-23) ======
+  
+  app.get('/api/mcp/servers', isAuthenticated, loadAuthContext, requirePermission('admin.manage'), async (req: any, res) => {
+    try {
+      const { mcpServerManager } = await import('./mcp/manager');
+      const servers = mcpServerManager.getAllServers();
+      res.json(servers);
+    } catch (error: any) {
+      console.error('[MCP] Get servers error:', error);
+      res.status(500).json({ message: 'Failed to get MCP servers' });
+    }
+  });
+
+  app.post('/api/mcp/servers/:serverId/start', isAuthenticated, loadAuthContext, requirePermission('admin.manage'), async (req: any, res) => {
+    try {
+      const { serverId } = req.params;
+      const { mcpServerManager } = await import('./mcp/manager');
+      
+      const success = await mcpServerManager.startServer(serverId);
+      res.json({ success });
+    } catch (error: any) {
+      console.error('[MCP] Start server error:', error);
+      res.status(500).json({ message: 'Failed to start MCP server' });
+    }
+  });
+
+  app.post('/api/mcp/servers/:serverId/stop', isAuthenticated, loadAuthContext, requirePermission('admin.manage'), async (req: any, res) => {
+    try {
+      const { serverId } = req.params;
+      const { mcpServerManager } = await import('./mcp/manager');
+      
+      const success = await mcpServerManager.stopServer(serverId);
+      res.json({ success });
+    } catch (error: any) {
+      console.error('[MCP] Stop server error:', error);
+      res.status(500).json({ message: 'Failed to stop MCP server' });
+    }
+  });
+
+  app.post('/api/mcp/servers/:serverId/restart', isAuthenticated, loadAuthContext, requirePermission('admin.manage'), async (req: any, res) => {
+    try {
+      const { serverId } = req.params;
+      const { mcpServerManager } = await import('./mcp/manager');
+      
+      const success = await mcpServerManager.restartServer(serverId);
+      res.json({ success });
+    } catch (error: any) {
+      console.error('[MCP] Restart server error:', error);
+      res.status(500).json({ message: 'Failed to restart MCP server' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
