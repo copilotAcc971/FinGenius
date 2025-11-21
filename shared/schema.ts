@@ -6232,6 +6232,131 @@ export const insertAiUsageLogSchema = createInsertSchema(aiUsageLogs, {
 export type AiUsageLog = typeof aiUsageLogs.$inferSelect;
 export type InsertAiUsageLog = z.infer<typeof insertAiUsageLogSchema>;
 
+// ====================================
+// OIDC CONFIGURATIONS & MCP AUTH (Task 8-18+)
+// ====================================
+
+export const oidcConfigurations = pgTable('oidc_configurations', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id),
+  provider: varchar('provider', { length: 50 }).notNull(), // 'kimi', 'qwen', 'deepseek', 'openai', 'custom'
+  
+  // OAuth 2.1 / OIDC Configuration
+  clientId: text('client_id').notNull(), // Encrypted
+  clientSecret: text('client_secret').notNull(), // Encrypted
+  authorizationEndpoint: varchar('authorization_endpoint', { length: 500 }).notNull(),
+  tokenEndpoint: varchar('token_endpoint', { length: 500 }).notNull(),
+  userInfoEndpoint: varchar('user_info_endpoint', { length: 500 }),
+  redirectUri: varchar('redirect_uri', { length: 500 }).notNull(),
+  
+  // PKCE Support
+  usePKCE: boolean('use_pkce').default(true).notNull(),
+  
+  // Scopes & Configuration
+  scopes: text('scopes').notNull(), // Space-separated scopes
+  
+  // Status
+  enabled: boolean('enabled').default(true).notNull(),
+  isConfigured: boolean('is_configured').default(false).notNull(),
+  
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  unique('unique_oidc_tenant_provider').on(table.tenantId, table.provider),
+  index('oidc_configurations_tenant_idx').on(table.tenantId),
+  index('oidc_configurations_provider_idx').on(table.provider),
+]);
+
+export const insertOidcConfigurationSchema = createInsertSchema(oidcConfigurations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertOidcConfiguration = z.infer<typeof insertOidcConfigurationSchema>;
+export type OidcConfiguration = typeof oidcConfigurations.$inferSelect;
+
+// MCP Auth Credentials (encrypted API keys & tokens)
+export const mcpAuthCredentials = pgTable('mcp_auth_credentials', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id),
+  userId: varchar('user_id').notNull().references(() => users.id),
+  provider: varchar('provider', { length: 50 }).notNull(), // 'kimi', 'qwen', 'deepseek', 'openai'
+  credentialType: varchar('credential_type', { length: 50 }).notNull(), // 'api_key', 'oauth_token', 'refresh_token'
+  
+  // Encrypted credentials
+  encryptedValue: text('encrypted_value').notNull(), // AES-256-GCM encrypted
+  encryptionKeyVersion: integer('encryption_key_version').notNull(),
+  
+  // OAuth Token metadata
+  tokenType: varchar('token_type', { length: 50 }), // 'Bearer', 'Basic', etc.
+  expiresAt: timestamp('expires_at'),
+  refreshToken: text('refresh_token'), // For OAuth refresh
+  scope: text('scope'), // Granted scopes
+  
+  // Status
+  isValid: boolean('is_valid').default(true).notNull(),
+  lastUsedAt: timestamp('last_used_at'),
+  
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  unique('unique_mcp_credential').on(table.tenantId, table.userId, table.provider),
+  index('mcp_auth_credentials_tenant_idx').on(table.tenantId),
+  index('mcp_auth_credentials_provider_idx').on(table.provider),
+  index('mcp_auth_credentials_expires_idx').on(table.expiresAt),
+]);
+
+export const insertMcpAuthCredentialSchema = createInsertSchema(mcpAuthCredentials).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertMcpAuthCredential = z.infer<typeof insertMcpAuthCredentialSchema>;
+export type McpAuthCredential = typeof mcpAuthCredentials.$inferSelect;
+
+// MCP Provider Templates (pre-configured providers)
+export const mcpProviderTemplates = pgTable('mcp_provider_templates', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  provider: varchar('provider', { length: 50 }).primaryKey().unique(), // 'kimi', 'qwen', 'deepseek', 'openai'
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  
+  // Template Configuration
+  authMethod: varchar('auth_method', { length: 50 }).notNull(), // 'oidc', 'api_key', 'none'
+  requiresCredentials: boolean('requires_credentials').default(false).notNull(),
+  
+  // OIDC endpoints (if applicable)
+  authorizationEndpoint: varchar('authorization_endpoint', { length: 500 }),
+  tokenEndpoint: varchar('token_endpoint', { length: 500 }),
+  userInfoEndpoint: varchar('user_info_endpoint', { length: 500 }),
+  
+  // API endpoints
+  apiBaseUrl: varchar('api_base_url', { length: 500 }),
+  
+  // Pricing
+  costPerMilTokens: decimal('cost_per_mil_tokens', { precision: 10, scale: 6 }).default('0'),
+  
+  // Status
+  enabled: boolean('enabled').default(true).notNull(),
+  isOfficial: boolean('is_official').default(true).notNull(), // Pre-configured by Copilot
+  
+  metadata: jsonb('metadata'), // {models: [], features: []}
+  
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const insertMcpProviderTemplateSchema = createInsertSchema(mcpProviderTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertMcpProviderTemplate = z.infer<typeof insertMcpProviderTemplateSchema>;
+export type McpProviderTemplate = typeof mcpProviderTemplates.$inferSelect;
+
 // ============================================================================
 // RELATIONS (for Drizzle ORM queries)
 // ============================================================================
