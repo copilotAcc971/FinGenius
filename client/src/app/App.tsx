@@ -64,6 +64,7 @@ import FinancialStatementNotesPage from "@/features/reports/pages/financial-stat
 import AlertsCenterPage from "@/pages/alerts-center";
 import CreditPassportPage from "@/pages/credit-passport";
 import InboundDocumentsPage from "@/pages/inbound-documents";
+import AIProvidersPage from "@/pages/settings/ai-providers";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -108,6 +109,7 @@ function Router() {
           <Route path="/settings/roles" component={RoleManagement} />
           <Route path="/settings/users" component={UserManagement} />
           <Route path="/settings/currencies" component={CurrenciesPage} />
+          <Route path="/settings/ai-providers" component={AIProvidersPage} />
           <Route path="/audit-logs" component={AuditLogsPage} />
           <Route path="/compliance" component={ComplianceDashboardPage} />
           <Route path="/compliance/kyc" component={KYCVerificationsPage} />

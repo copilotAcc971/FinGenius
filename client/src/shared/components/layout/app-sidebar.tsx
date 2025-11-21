@@ -36,6 +36,7 @@ import {
   ChartBar,
   Bell,
   Inbox,
+  Sparkles,
 } from "lucide-react";
 import logoImage from "@assets/generated_images/Copilot_Accountant_app_logo_0a4d944c.png";
 import {
@@ -124,6 +125,7 @@ const adminItems = [
   { title: "Role Management", url: "/settings/roles", icon: Shield },
   { title: "User Management", url: "/settings/users", icon: UserCog },
   { title: "Currencies", url: "/settings/currencies", icon: Coins },
+  { title: "AI Providers", url: "/settings/ai-providers", icon: Sparkles },
   { title: "Audit Logs", url: "/audit-logs", icon: FileBarChart },
 ];
 
@@ -161,6 +163,7 @@ function getIconName(IconComponent: any): string {
     [ChartBar.name]: "ChartBar",
     [Bell.name]: "Bell",
     [Inbox.name]: "Inbox",
+    [Sparkles.name]: "Sparkles",
   };
   return iconMap[IconComponent.name] || "FileText";
 }
