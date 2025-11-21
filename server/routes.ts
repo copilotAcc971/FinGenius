@@ -5466,12 +5466,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(result);
       
+      // SOX-compliant audit logging
+      await auditLogger.logFinancialTransaction({
+        tenantId,
+        userId,
+        action: 'approve',
+        entityType: 'journal_entry',
+        entityId: id,
+        changes: { before: null, after: result.journalEntry },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log journal entry approval:', err));
+      
       // Broadcast real-time dashboard metrics update
       broadcastMetricsUpdate(tenantId).catch(err => 
         console.error('[Dashboard] Failed to broadcast metrics update:', err)
       );
     } catch (error: any) {
       console.error('Error approving journal entry:', error);
+      
+      // Log the failure
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId,
+        userId: req.user?.claims?.sub,
+        action: 'approve',
+        entityType: 'journal_entry',
+        entityId: req.params.id,
+        wasSuccessful: false,
+        errorMessage: error.message || 'Failed to approve journal entry',
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+      }).catch(err => console.error('[Audit] Failed to log failure:', err));
       
       if (error instanceof NotFoundError) {
         return res.status(404).json({ message: error.message });

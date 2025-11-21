@@ -18,7 +18,7 @@ declare global {
  * Attaches permissions, roles, and owner status to the request
  * Must be used after isAuthenticated and verifyTenantAccess middleware
  */
-export async function loadAuthContext(req: any, res: any, next: any) {
+export async function loadAuthContext(req: Express.Request & { user?: any; tenantId?: string; permissions?: string[]; roles?: Role[]; isOwner?: boolean }, res: any, next: any) {
   try {
     // Verify prerequisites
     if (!req.user || !req.user.claims || !req.user.claims.sub) {
@@ -53,7 +53,7 @@ export async function loadAuthContext(req: any, res: any, next: any) {
  * Owner role bypasses all permission checks
  */
 export function requirePermission(permission: string) {
-  return (req: any, res: any, next: any) => {
+  return (req: Express.Request & { permissions?: string[]; roles?: Role[]; isOwner?: boolean }, res: any, next: any) => {
     // Owner bypass
     if (req.isOwner) {
       return next();
@@ -92,7 +92,7 @@ export function requirePermission(permission: string) {
  * User needs at least one of the permissions
  */
 export function requireAnyPermission(requiredPermissions: string[]) {
-  return (req: any, res: any, next: any) => {
+  return (req: Express.Request & { permissions?: string[]; roles?: Role[]; isOwner?: boolean }, res: any, next: any) => {
     // Owner bypass
     if (req.isOwner) {
       return next();
@@ -133,7 +133,7 @@ export function requireAnyPermission(requiredPermissions: string[]) {
  * User needs every permission in the list
  */
 export function requireAllPermissions(requiredPermissions: string[]) {
-  return (req: any, res: any, next: any) => {
+  return (req: Express.Request & { permissions?: string[]; roles?: Role[]; isOwner?: boolean }, res: any, next: any) => {
     // Owner bypass
     if (req.isOwner) {
       return next();
