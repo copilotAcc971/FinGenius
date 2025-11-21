@@ -8623,6 +8623,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+        id,
+        tenantId,
+      });
+
       res.json(transaction);
     } catch (error: any) {
       console.error('[Open Banking] Get transaction error:', error);
