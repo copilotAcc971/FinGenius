@@ -43,7 +43,6 @@ export class PythonOCRService {
       python.stderr.on('data', (data) => {
         stderr += data.toString();
         // Log progress messages from Python script
-        console.log('Python OCR:', data.toString().trim());
       });
 
       python.on('close', (code) => {
@@ -68,7 +67,6 @@ export class PythonOCRService {
             rate: item.rate || item.value
           }));
 
-          console.log(`✓ Python OCR extracted ${rates.length} rates`);
           resolve(rates);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);

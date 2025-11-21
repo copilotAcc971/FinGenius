@@ -316,7 +316,6 @@ export async function approveDraftEntry(
     // Send confirmation notification
     await sendApprovalConfirmation(userId, tenantId, document, entryType);
 
-    console.log(`[Auto-Draft Service] Approved ${entryType} ${entryId} for document ${inboundDocumentId}`);
 
     return {
       success: true,
@@ -392,7 +391,6 @@ export async function rejectDraftEntry(
       errorMessage: reason || 'Rejected by user',
     });
 
-    console.log(`[Auto-Draft Service] Rejected ${entryType} ${entryId} for document ${inboundDocumentId}`);
 
     return {
       success: true,

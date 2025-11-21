@@ -37,7 +37,6 @@ async function retryWithBackoff<T>(
     } catch (error) {
       if (i === retries - 1) throw error;
       const delay = RETRY_DELAY_MS * Math.pow(2, i);
-      console.log(`Retry attempt ${i + 1}/${retries} after ${delay}ms`);
       await sleep(delay);
     }
   }
@@ -126,7 +125,6 @@ async function fetchUAECentralBankRates(provider: string = 'github'): Promise<Fe
       console.warn('CBUAE official API not available. Using GitHub mirror.');
       return fetchUAEFromGitHub();
     case 'manual':
-      console.log('CBUAE rates: manual mode enabled, skipping automated fetch');
       return { source: 'uae_central_bank', rates: [], success: true };
     default:
       console.warn(`Unknown provider: ${provider}, using GitHub mirror`);
@@ -141,7 +139,6 @@ async function fetchUAECentralBankRates(provider: string = 'github'): Promise<Fe
  */
 async function fetchUAEFromGitHub(): Promise<FetchResult> {
   try {
-    console.log('Fetching UAE Central Bank rates from GitHub mirror...');
     
     // Use current date to fetch today's rates
     const now = new Date();
@@ -169,7 +166,6 @@ async function fetchUAEFromGitHub(): Promise<FetchResult> {
       const yesterdayYear = yesterday.getFullYear();
       const fallbackUrl = `https://raw.githubusercontent.com/paulbares/centralbank-ae-fx-rates/main/rates/${yesterdayYear}/${yesterdayStr}.json`;
       
-      console.log('Today\'s rates not available, trying yesterday...');
       response = await retryWithBackoff(async () => {
         return await axios.get(fallbackUrl, {
           timeout: TIMEOUT_MS,
@@ -215,7 +211,6 @@ async function fetchUAEFromGitHub(): Promise<FetchResult> {
       }
     }
 
-    console.log(`Successfully fetched ${rates.length} UAE Central Bank exchange rates from GitHub mirror`);
     return { source: 'uae_central_bank', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
@@ -257,7 +252,6 @@ async function fetchUAEFromFluentax(): Promise<FetchResult> {
  */
 async function fetchUAEFromOCR(): Promise<FetchResult> {
   try {
-    console.log('Extracting CBUAE rates using Python Advanced OCR...');
     
     const ocrService = new PythonOCRService();
     
@@ -320,7 +314,6 @@ async function fetchUAEFromOCR(): Promise<FetchResult> {
       throw new Error('No valid rates after Python OCR processing');
     }
 
-    console.log(`✓ Python OCR extracted ${rates.length} UAE Central Bank exchange rates`);
     return { source: 'uae_central_bank_ocr', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -335,7 +328,6 @@ async function fetchUAEFromOCR(): Promise<FetchResult> {
  */
 async function fetchECBRates(): Promise<FetchResult> {
   try {
-    console.log('Fetching ECB rates from official XML endpoint...');
     
     const response = await retryWithBackoff(async () => {
       return await axios.get('https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml', {
@@ -392,7 +384,6 @@ async function fetchECBRates(): Promise<FetchResult> {
       });
     }
 
-    console.log(`Successfully fetched ${rates.length} ECB exchange rates from official source`);
     return { source: 'ecb', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
@@ -408,7 +399,6 @@ async function fetchECBRates(): Promise<FetchResult> {
  */
 async function fetchFedRates(): Promise<FetchResult> {
   try {
-    console.log('Fetching Federal Reserve rates from official FRED source...');
     
     const rates: ExchangeRateData[] = [];
     const effectiveDate = new Date();
@@ -471,7 +461,6 @@ async function fetchFedRates(): Promise<FetchResult> {
       throw new Error('No Federal Reserve rates could be fetched');
     }
 
-    console.log(`Successfully fetched ${rates.length} Federal Reserve exchange rates from official source`);
     return { source: 'fed', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
@@ -486,7 +475,6 @@ async function fetchFedRates(): Promise<FetchResult> {
  */
 async function fetchBOERates(): Promise<FetchResult> {
   try {
-    console.log('Fetching Bank of England rates from official API...');
     
     const rates: ExchangeRateData[] = [];
     
@@ -574,7 +562,6 @@ async function fetchBOERates(): Promise<FetchResult> {
       throw new Error('No valid rates found in Bank of England response');
     }
 
-    console.log(`Successfully fetched ${rates.length} Bank of England exchange rates from official source`);
     return { source: 'boe', rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
@@ -614,7 +601,6 @@ async function fetchSAMARates(provider: string = 'api'): Promise<FetchResult> {
  */
 async function fetchFromAggregator(baseCurrency: string, sourceName: string): Promise<FetchResult> {
   try {
-    console.log(`Fetching rates from fallback aggregator (${baseCurrency})...`);
     
     const response = await retryWithBackoff(async () => {
       return await axios.get(`https://api.exchangerate-api.com/v4/latest/${baseCurrency}`, {
@@ -654,7 +640,6 @@ async function fetchFromAggregator(baseCurrency: string, sourceName: string): Pr
       }
     }
 
-    console.log(`Successfully fetched ${rates.length} rates from fallback aggregator`);
     return { source: sourceName, rates, success: true };
   } catch (error) {
     const errorMsg = error instanceof AxiosError ? error.message : String(error);
@@ -801,7 +786,6 @@ async function fetchFromCentralBank(
     case 'sama':
       return fetchSAMARates(provider);
     case 'manual':
-      console.log('Manual rate source selected, skipping automated fetch');
       return { source: 'manual', rates: [], success: true };
     default:
       console.warn(`Unknown rate source: ${rateSource}`);
@@ -941,17 +925,14 @@ export async function fetchExchangeRates(
  */
 export async function updateExchangeRatesForTenant(tenantId: string): Promise<void> {
   try {
-    console.log(`Updating exchange rates for tenant ${tenantId}...`);
 
     const currencies = await storage.getCurrencies(tenantId);
     const activeCurrencies = currencies.filter(c => c.isActive);
 
     if (activeCurrencies.length === 0) {
-      console.log(`No active currencies for tenant ${tenantId}`);
       return;
     }
 
-    console.log(`Found ${activeCurrencies.length} active currencies for tenant ${tenantId}`);
 
     // Get FX configuration for this tenant
     const fxConfig = await storage.getFXConfig(tenantId);
@@ -964,9 +945,7 @@ export async function updateExchangeRatesForTenant(tenantId: string): Promise<vo
     const primaryProvider = fxConfig?.primarySourceProvider || 'github';
     const fallbackSource = fxConfig?.fallbackRateSource;
 
-    console.log(`Using primary source: ${primarySource} (provider: ${primaryProvider})`);
     if (fallbackSource) {
-      console.log(`Fallback source configured: ${fallbackSource}`);
     }
 
     const results: FetchResult[] = [];
@@ -977,7 +956,6 @@ export async function updateExchangeRatesForTenant(tenantId: string): Promise<vo
 
     // If primary failed and fallback is configured, try fallback
     if (!primaryResult.success && fallbackSource) {
-      console.log(`Primary source failed, attempting fallback: ${fallbackSource}`);
       const fallbackResult = await fetchFromCentralBank(fallbackSource, 'api');
       results.push(fallbackResult);
     }
@@ -985,7 +963,6 @@ export async function updateExchangeRatesForTenant(tenantId: string): Promise<vo
     const successfulSources = results.filter(r => r.success);
     const failedSources = results.filter(r => !r.success);
 
-    console.log(`Successfully updated rates from ${successfulSources.length} sources`);
     
     if (failedSources.length > 0) {
       console.warn(`Failed to update rates from ${failedSources.length} sources:`);
@@ -1013,7 +990,6 @@ export async function updateExchangeRatesForTenant(tenantId: string): Promise<vo
       }
     }
 
-    console.log(`Completed exchange rate update for tenant ${tenantId}`);
   } catch (error) {
     console.error(`Error updating exchange rates for tenant ${tenantId}:`, error);
     throw error;
@@ -1063,7 +1039,6 @@ export async function createManualExchangeRate(
       createdBy,
     });
 
-    console.log(`Manual exchange rate created: ${fromCurrency}→${toCurrency} = ${rate}`);
   } catch (error) {
     console.error('Error creating manual exchange rate:', error);
     throw error;

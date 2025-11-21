@@ -50,7 +50,6 @@ class AIExtractionQueue {
       attempts: 0,
     });
 
-    console.log(`[AI Extraction Queue] Enqueued document ${inboundDocumentId} (queue size: ${this.queue.length})`);
 
     // Start processing if not already running
     if (!this.processing) {
@@ -78,7 +77,6 @@ class AIExtractionQueue {
         // Retry logic
         if (job.attempts < this.maxRetries) {
           job.attempts++;
-          console.log(`[AI Extraction Queue] Retrying ${job.inboundDocumentId} (attempt ${job.attempts}/${this.maxRetries})`);
           this.queue.push(job); // Re-queue for retry
         } else {
           console.error(`[AI Extraction Queue] Max retries exceeded for ${job.inboundDocumentId}`);
@@ -106,7 +104,6 @@ class AIExtractionQueue {
       throw new Error('DocumentProcessor not initialized - OPENAI_API_KEY missing');
     }
 
-    console.log(`[AI Extraction Queue] Processing document ${inboundDocumentId}`);
 
     // Get document record
     const document = await storage.getInboundDocument(inboundDocumentId);
@@ -129,7 +126,6 @@ class AIExtractionQueue {
       const base64Image = fileBuffer.toString('base64');
 
       // Extract data using GPT-4o Vision
-      console.log(`[AI Extraction Queue] Extracting data from ${document.fileName}`);
       const extractionResult = await this.documentProcessor.extractDocumentData(base64Image);
 
       if (!extractionResult.success || !extractionResult.data) {
@@ -137,7 +133,6 @@ class AIExtractionQueue {
       }
 
       const extractedData = extractionResult.data;
-      console.log(`[AI Extraction Queue] Extracted ${extractedData.documentType} with confidence ${extractedData.confidence}`);
 
       // Store extracted data
       await storage.updateInboundDocument(inboundDocumentId, {
@@ -164,7 +159,6 @@ class AIExtractionQueue {
           notificationSent: true,
         });
 
-        console.log(`[AI Extraction Queue] Created draft ${draftEntry.type} ${draftEntry.id} for document ${inboundDocumentId}`);
       } catch (draftError: any) {
         console.error(`[AI Extraction Queue] Failed to create draft entry:`, draftError);
         
@@ -231,7 +225,6 @@ class AIExtractionQueue {
         });
       }
 
-      console.log(`[AI Extraction Queue] Sent notifications to ${userIds.length} users`);
     } catch (error) {
       console.error('[AI Extraction Queue] Failed to send notification:', error);
       // Don't fail the whole process if notification fails
@@ -325,7 +318,6 @@ export async function enqueueDocument(inboundDocumentId: string): Promise<void> 
     const queue = getExtractionQueue();
     await queue.enqueue(inboundDocumentId, document.tenantId);
 
-    console.log(`[AI Extraction Queue] Successfully enqueued document ${inboundDocumentId} for tenant ${document.tenantId}`);
   } catch (error: any) {
     console.error(`[AI Extraction Queue] Failed to enqueue document ${inboundDocumentId}:`, error);
     throw error; // Re-throw so webhook handlers can log it

@@ -218,15 +218,6 @@ async function verifyTenantAccess(req: any, res: any, next: any) {
     const userId = req.user.claims.sub;
     const tenantId = req.query.tenantId || req.headers['x-tenant-id'] || req.body.tenantId;
     
-    console.log('[verifyTenantAccess] Checking tenant access:', {
-      userId,
-      tenantId,
-      fromQuery: !!req.query.tenantId,
-      fromHeader: !!req.headers['x-tenant-id'],
-      fromBody: !!req.body.tenantId,
-      path: req.path
-    });
-    
     if (!tenantId) {
       console.error('[verifyTenantAccess] No tenant ID provided');
       return res.status(400).json({ message: "Tenant ID required" });
@@ -238,7 +229,6 @@ async function verifyTenantAccess(req: any, res: any, next: any) {
       console.error('[verifyTenantAccess] Tenant not found:', { tenantId, userId });
       return res.status(404).json({ message: "Tenant not found" });
     }
-    console.log('[verifyTenantAccess] Tenant found:', { tenantId, tenantName: tenant.name });
 
     // Check if user is owner
     if (tenant.ownerId === userId) {
@@ -327,9 +317,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Company Profile routes
   app.get('/api/company-profile', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
-      console.log('[GET /api/company-profile] Fetching profile for tenant:', req.tenantId);
       const profile = await storage.getCompanyProfile(req.tenantId);
-      console.log('[GET /api/company-profile] Profile found:', !!profile, profile ? `ID: ${profile.id}` : 'null');
       res.json(profile);
     } catch (error) {
       console.error("[GET /api/company-profile] Error fetching company profile:", error);
@@ -339,10 +327,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/company-profile', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
-      console.log('[POST /api/company-profile] Creating profile for tenant:', req.tenantId);
       const parsed = insertTenantCompanyProfileSchema.parse({ ...req.body, tenantId: req.tenantId });
       const profile = await storage.createCompanyProfile(parsed);
-      console.log('[POST /api/company-profile] Profile created successfully:', profile.id);
       res.json(profile);
     } catch (error: any) {
       console.error("[POST /api/company-profile] Error creating company profile:", error);
@@ -352,7 +338,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/company-profile', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('company_profile.update'), async (req: any, res) => {
     try {
-      console.log('[PATCH /api/company-profile] Updating profile for tenant:', req.tenantId);
       
       if (!req.tenantId) {
         console.error('[PATCH /api/company-profile] No tenant ID in request');
@@ -363,7 +348,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parsed = updateTenantCompanyProfileSchema.parse(req.body);
       
       const updated = await storage.updateCompanyProfile(req.tenantId, parsed);
-      console.log('[PATCH /api/company-profile] Profile updated successfully:', updated.id);
       res.json(updated);
     } catch (error: any) {
       console.error("[PATCH /api/company-profile] Error updating company profile:", error);
@@ -2388,7 +2372,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Generate PDF
         pdfBuffer = await generateInvoicePDF(pdfData);
         pdfAttached = true;
-        console.log(`[Invoice ${invoice.invoiceNumber}] PDF generated successfully`, {
           tenantId,
           invoiceId: invoice.id,
           lineItemCount: lineItems?.length || 0
@@ -5416,7 +5399,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } catch (autoPostError: any) {
             // Auto-posting not enabled or failed - this is acceptable
             // Entry remains in 'approved' status
-            console.log('Auto-posting not enabled or failed:', autoPostError.message);
           }
         }
 
@@ -8109,7 +8091,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Validate required parameters
       if (!entityType || !entityId) {
-        console.log('[Open Banking] Authorization attempt failed: Missing parameters', {
           tenantId,
           userId,
           clientIp,
@@ -8121,7 +8102,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Validate entityType
       if (!['customer', 'vendor'].includes(entityType as string)) {
-        console.log('[Open Banking] Authorization attempt failed: Invalid entityType', {
           tenantId,
           userId,
           entityType,
@@ -8138,7 +8118,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(and(eq(customers.id, entityId as string), eq(customers.tenantId, tenantId)))
           .limit(1);
         if (!customer[0]) {
-          console.log('[Open Banking] Authorization attempt failed: Customer not found or access denied', {
             tenantId,
             userId,
             entityType,
@@ -8152,7 +8131,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(and(eq(vendors.id, entityId as string), eq(vendors.tenantId, tenantId)))
           .limit(1);
         if (!vendor[0]) {
-          console.log('[Open Banking] Authorization attempt failed: Vendor not found or access denied', {
             tenantId,
             userId,
             entityType,
@@ -8184,7 +8162,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const provider = openBankingProviderFactory.createProvider('lean');
       const authorizationUrl = provider.getAuthorizationUrl(redirectUri, state);
 
-      console.log('[Open Banking] Authorization URL generated successfully', {
         tenantId,
         userId,
         entityType,
@@ -8213,7 +8190,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Validate required parameters
       if (!code || !state) {
-        console.log('[Open Banking] Callback failed: Missing parameters', {
           clientIp,
         });
         return res.status(400).json({ 
@@ -8239,7 +8215,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           exp: number;
         };
       } catch (error) {
-        console.log('[Open Banking] Callback failed: Invalid or expired state token', {
           clientIp,
           error: error instanceof Error ? error.message : 'Unknown error',
         });
@@ -8248,7 +8223,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // SECURITY: Check for nonce replay attack
       if (nonceStore.isNonceUsed(statePayload.nonce)) {
-        console.log('[Open Banking] Callback failed: Nonce replay detected', {
           nonce: statePayload.nonce,
           clientIp,
         });
@@ -8261,7 +8235,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate tenantId exists in database
       const tenant = await storage.getTenant(tenantId);
       if (!tenant) {
-        console.log('[Open Banking] Callback failed: Tenant not found', {
           tenantId,
           clientIp,
         });
@@ -8276,7 +8249,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(and(eq(customers.id, entityId), eq(customers.tenantId, tenantId)))
           .limit(1);
         if (!customer[0]) {
-          console.log('[Open Banking] Callback failed: Customer validation failed', {
             tenantId,
             entityType,
             entityId,
@@ -8289,7 +8261,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(and(eq(vendors.id, entityId), eq(vendors.tenantId, tenantId)))
           .limit(1);
         if (!vendor[0]) {
-          console.log('[Open Banking] Callback failed: Vendor validation failed', {
             tenantId,
             entityType,
             entityId,
@@ -8314,7 +8285,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const provider = openBankingProviderFactory.createProvider('lean');
       const tokens = await provider.exchangeCodeForTokens(code as string, redirectUri);
 
-      console.log('[Open Banking] Token exchange successful', {
         tenantId,
         entityType,
         entityId,
@@ -8340,7 +8310,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ['accounts', 'transactions', 'payments', 'identity'] // Default permissions
       );
 
-      console.log('[Open Banking] Connection created successfully', {
         connectionId: connection.id,
         tenantId,
         provider: 'lean',
@@ -8350,7 +8319,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch bank accounts from provider
       const accounts = await openBankingService.getAccounts(connection.id);
 
-      console.log('[Open Banking] Accounts fetched successfully', {
         connectionId: connection.id,
         accountCount: accounts.length,
         tenantId,
@@ -8372,7 +8340,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log('[Open Banking] Bank accounts stored successfully', {
         connectionId: connection.id,
         accountCount: accounts.length,
         tenantId,
@@ -8436,7 +8403,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const openBankingService = new OpenBankingService(connection.tenantId);
       await openBankingService.refreshConnection(id);
 
-      console.log('[Open Banking] Refreshed connection', {
         connectionId: id,
         tenantId: connection.tenantId,
         provider: connection.provider,
@@ -8511,7 +8477,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const openBankingService = new OpenBankingService(connection.tenantId);
       await openBankingService.disconnectConnection(id);
 
-      console.log('[Open Banking] Disconnected connection', {
         connectionId: id,
         tenantId: connection.tenantId,
         provider: connection.provider,
@@ -8569,7 +8534,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const provider = openBankingProviderFactory.createProvider(connection.provider as any);
       const capabilities = openBankingProviderFactory.getProviderCapabilities(provider);
 
-      console.log('[Open Banking] Retrieved capabilities', {
         connectionId: id,
         tenantId: connection.tenantId,
         provider: connection.provider,
@@ -8603,7 +8567,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate request body
       const { startDate, endDate, limit } = syncParamsSchema.parse(req.body);
 
-      console.log('[Open Banking] Sync transactions request', {
         accountId,
         tenantId,
         startDate,
@@ -8642,7 +8605,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         limit
       );
 
-      console.log('[Open Banking] Sync complete', {
         accountId,
         tenantId,
         result,
@@ -8691,7 +8653,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate query parameters
       const { startDate, endDate, limit, offset } = listParamsSchema.parse(req.query);
 
-      console.log('[Open Banking] List transactions request', {
         accountId,
         tenantId,
         startDate,
@@ -8727,7 +8688,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         offset,
       });
 
-      console.log('[Open Banking] Transactions retrieved', {
         accountId,
         tenantId,
         count: result.transactions.length,
@@ -8766,7 +8726,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const tenantId = req.tenantId!; // Secure - from middleware
 
-      console.log('[Open Banking] Get transaction detail request', {
         id,
         tenantId,
       });
@@ -8789,7 +8748,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log('[Open Banking] Transaction retrieved', {
         id,
         tenantId,
       });
@@ -9073,7 +9031,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validSources = ['uae_central_bank', 'ecb', 'fed', 'boe', 'all'];
       const selectedSource = source && validSources.includes(source) ? source : 'all';
       
-      console.log(`Manually fetching exchange rates for tenant ${req.tenantId} from ${selectedSource}...`);
       
       // Fetch from specific source or all sources using official APIs
       const results = await fetchExchangeRates(req.tenantId, selectedSource as any);
@@ -9283,7 +9240,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      console.log('Manually triggering global FX rates update for all tenants...');
       
       const result = await triggerManualFXRatesUpdate();
       

@@ -86,7 +86,6 @@ export class AlertDispatcherService {
     alertInstance: AlertInstance,
     retryConfig: RetryConfig = this.DEFAULT_RETRY_CONFIG
   ): Promise<DispatchResult> {
-    console.log(`[Alert Dispatcher] Starting dispatch for alert ${alertInstance.id} - ${alertInstance.title}`);
 
     // STEP 1: Check notification rules
     const rules = await this.getEnabledNotificationRules(
@@ -96,7 +95,6 @@ export class AlertDispatcherService {
     );
 
     if (rules.length === 0) {
-      console.log(`[Alert Dispatcher] No enabled notification rules found for ${alertInstance.alertType}`);
       return {
         alertId: alertInstance.id,
         totalEligibleUsers: 0,
@@ -114,10 +112,8 @@ export class AlertDispatcherService {
     const targetRoles = this.getTargetRoles(rules);
     const eligibleUsers = await this.getUsersByRoles(alertInstance.tenantId, targetRoles);
     
-    console.log(`[Alert Dispatcher] Found ${eligibleUsers.length} users with target roles`);
 
     if (eligibleUsers.length === 0) {
-      console.log(`[Alert Dispatcher] No users found with target roles`);
       return {
         alertId: alertInstance.id,
         totalEligibleUsers: 0,
@@ -139,7 +135,6 @@ export class AlertDispatcherService {
     );
     
     const filteredByRBAC = eligibleUsers.length - usersWithPermission.length;
-    console.log(`[Alert Dispatcher] ${usersWithPermission.length} users have required permissions (${filteredByRBAC} filtered by RBAC)`);
 
     if (usersWithPermission.length === 0) {
       return {
@@ -163,7 +158,6 @@ export class AlertDispatcherService {
     );
     
     const filteredByPreferences = usersWithPermission.length - usersPassingPreferences.length;
-    console.log(`[Alert Dispatcher] ${usersPassingPreferences.length} users passed preference check (${filteredByPreferences} filtered by preferences)`);
 
     if (usersPassingPreferences.length === 0) {
       return {
@@ -187,7 +181,6 @@ export class AlertDispatcherService {
     );
     
     const filteredByRateLimit = usersPassingPreferences.length - usersPassingRateLimit.length;
-    console.log(`[Alert Dispatcher] ${usersPassingRateLimit.length} users passed rate limit check (${filteredByRateLimit} filtered by rate limit)`);
 
     if (usersPassingRateLimit.length === 0) {
       return {
@@ -220,7 +213,6 @@ export class AlertDispatcherService {
       const channelRecipients = recipients.filter(r => r.allowedChannels.includes(channel));
       
       if (channelRecipients.length === 0) {
-        console.log(`[Alert Dispatcher] No recipients for channel ${channel}`);
         continue;
       }
 
@@ -250,8 +242,6 @@ export class AlertDispatcherService {
     // Log dispatch results
     await this.logDispatchResults(alertInstance.id, deliveryResults);
 
-    console.log(`[Alert Dispatcher] Alert ${alertInstance.id} delivered to ${totalDelivered}/${deliveryResults.length} channels`);
-    console.log(`[Alert Dispatcher] Filtering summary: Total eligible: ${eligibleUsers.length}, RBAC filtered: ${filteredByRBAC}, Preferences filtered: ${filteredByPreferences}, Rate limit filtered: ${filteredByRateLimit}`);
 
     return {
       alertId: alertInstance.id,
@@ -361,7 +351,6 @@ export class AlertDispatcherService {
     
     // If no specific permission required, allow all users
     if (!requiredPermission) {
-      console.log(`[Alert Dispatcher] No specific permission required for ${alertType}`);
       return userIds;
     }
 
@@ -373,7 +362,6 @@ export class AlertDispatcherService {
       if (hasPermission) {
         usersWithPermission.push(userId);
       } else {
-        console.log(`[Alert Dispatcher] User ${userId} does not have ${requiredPermission}`);
       }
     }
 
@@ -422,14 +410,12 @@ export class AlertDispatcherService {
 
       // Check global opt-out
       if (userPrefs.globallyOptedOut) {
-        console.log(`[Alert Dispatcher] User ${userId} globally opted out`);
         continue;
       }
 
       // Check alert type opt-out
       const optOutTypes = userPrefs.optOutAlertTypes as string[] | null;
       if (optOutTypes && Array.isArray(optOutTypes) && optOutTypes.includes(alertType)) {
-        console.log(`[Alert Dispatcher] User ${userId} opted out of ${alertType}`);
         continue;
       }
 
@@ -448,7 +434,6 @@ export class AlertDispatcherService {
           });
 
           if (this.isInDNDWindow(userTime, daySchedule.start, daySchedule.end)) {
-            console.log(`[Alert Dispatcher] User ${userId} in DND window (${daySchedule.start}-${daySchedule.end})`);
             continue;
           }
         }
@@ -527,7 +512,6 @@ export class AlertDispatcherService {
       if (count < RATE_LIMIT_MAX_ALERTS) {
         usersPassingRateLimit.push(userId);
       } else {
-        console.log(`[Alert Dispatcher] User ${userId} exceeded rate limit (${count}/${RATE_LIMIT_MAX_ALERTS} in last hour)`);
       }
     }
 
@@ -657,7 +641,6 @@ export class AlertDispatcherService {
         const result = await this.dispatchToChannel(channel, alertInstance, recipients);
         
         if (result.success) {
-          console.log(`[Alert Dispatcher] ${channel} delivery succeeded on attempt ${attempt}`);
           return result;
         }
         
@@ -910,7 +893,6 @@ export class AlertDispatcherService {
     }
 
     try {
-      console.log('[Alert Dispatcher] SMS dispatch not yet implemented (Twilio integration required)');
       
       return {
         channel: 'sms',

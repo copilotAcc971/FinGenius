@@ -25,7 +25,6 @@ export class ComplianceAlertService {
    * Track compliance deadlines and create reminder alerts
    */
   async trackDeadlines(tenantId: string): Promise<void> {
-    console.log(`[Compliance Alert] Tracking compliance deadlines for tenant ${tenantId}`);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -81,7 +80,6 @@ export class ComplianceAlertService {
       }
     }
 
-    console.log(`[Compliance Alert] Processed ${upcomingDeadlines.length} compliance deadlines`);
   }
 
   /**
@@ -284,7 +282,6 @@ export class ComplianceAlertService {
 
     await db.insert(alertInstances).values(alertData);
 
-    console.log(`[Compliance Alert] Created ${reminderType} reminder for: ${deadline.title}`);
   }
 
   /**
@@ -334,7 +331,6 @@ export class ComplianceAlertService {
         )
       );
 
-    console.log(`[Compliance Alert] Deadline ${deadlineId} marked as complete`);
   }
 
   /**
@@ -423,7 +419,6 @@ export class ComplianceAlertService {
       }
     }
 
-    console.log(`[Compliance Alert] Initialized ${standardDeadlines.length} standard deadlines for tenant ${tenantId}`);
   }
 }
 

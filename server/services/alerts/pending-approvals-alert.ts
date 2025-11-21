@@ -380,7 +380,6 @@ export class PendingApprovalsAlertService {
     const summary = await this.aggregatePendingApprovals(tenantId);
     
     // Alert is already created in aggregatePendingApprovals if there are pending items
-    console.log(`Daily digest created for tenant ${tenantId}: ${summary.totalCount} pending approvals`);
   }
 }
 

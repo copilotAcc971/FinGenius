@@ -22,7 +22,6 @@ export interface CBUAERate {
  */
 export async function extractCBUAERates(): Promise<CBUAERate[]> {
   try {
-    console.log('Extracting CBUAE rates using Advanced OCR processor...');
     
     // Fetch the CBUAE rates page
     const response = await axios.get('https://www.centralbank.ae/en/forex-eibor/exchange-rates/', {
@@ -65,7 +64,6 @@ export async function extractCBUAERates(): Promise<CBUAERate[]> {
       throw new Error('No rates could be extracted from CBUAE website. Website structure may have changed.');
     }
 
-    console.log(`Successfully extracted ${rates.length} rates via OCR processor`);
     return rates;
 
   } catch (error) {

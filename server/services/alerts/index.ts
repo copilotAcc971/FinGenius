@@ -69,7 +69,6 @@ export async function runAllAlerts(tenantId: string): Promise<void> {
     // Dispatch all new alerts
     await alertDispatcherService.dispatchNewAlerts(tenantId);
 
-    console.log(`[Alert Engine] All alerts processed successfully for tenant ${tenantId}`);
   } catch (error) {
     console.error(`[Alert Engine] Error running alerts for tenant ${tenantId}:`, error);
     throw error;

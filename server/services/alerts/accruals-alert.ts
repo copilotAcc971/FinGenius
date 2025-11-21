@@ -86,7 +86,6 @@ export class AccrualsAlertService {
     tenantId: string,
     periodEndDate: Date = new Date()
   ): Promise<void> {
-    console.log(`[Accruals Alert] Analyzing accrual opportunities for tenant ${tenantId} at ${periodEndDate.toISOString()}`);
 
     const suggestions: AccrualSuggestion[] = [];
 
@@ -125,7 +124,6 @@ export class AccrualsAlertService {
       await this.createAccrualsAlert(tenantId, suggestions, periodEndDate);
     }
 
-    console.log(`[Accruals Alert] Found ${suggestions.length} accrual suggestions`);
   }
 
   /**

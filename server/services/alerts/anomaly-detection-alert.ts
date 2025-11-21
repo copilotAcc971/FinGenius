@@ -42,7 +42,6 @@ export class AnomalyDetectionAlertService {
     tenantId: string,
     lookbackDays: number = 90
   ): Promise<AnomalyAnalysisResult> {
-    console.log(`[Anomaly Detection] Analyzing transactions for tenant ${tenantId} (lookback: ${lookbackDays} days)`);
 
     const lookbackDate = new Date();
     lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);

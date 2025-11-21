@@ -147,7 +147,6 @@ export async function storeDocument(
   const localPath = join(uploadDir, uniqueFilename);
 
   await writeFile(localPath, buffer);
-  console.log(`[Document Ingestion] ✓ Saved to local: ${localPath}`);
 
   // Step 2: Parallel cloud uploads with Promise.allSettled
   // Tag promises with provider names
@@ -190,10 +189,8 @@ export async function storeDocument(
       if (fileId) {
         if (provider === 'google_drive') {
           finalResult.googleDriveFileId = fileId;
-          console.log(`[Document Ingestion] ✓ Uploaded to Google Drive: ${fileId}`);
         } else if (provider === 'onedrive') {
           finalResult.oneDriveFileId = fileId;
-          console.log(`[Document Ingestion] ✓ Uploaded to OneDrive: ${fileId}`);
         }
       } else if (error) {
         errors.push({
@@ -227,7 +224,6 @@ export async function createInboundDocumentRecord(
     })
     .returning();
 
-  console.log(`[Document Ingestion] Created inbound document record: ${record.id}`);
   return record.id;
 }
 
@@ -237,7 +233,6 @@ export async function createInboundDocumentRecord(
 export async function cleanupLocalFile(localPath: string): Promise<void> {
   try {
     await unlink(localPath);
-    console.log(`[Document Ingestion] Cleaned up file: ${localPath}`);
   } catch (error) {
     console.error(`[Document Ingestion] Failed to cleanup file ${localPath}:`, error);
   }

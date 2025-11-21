@@ -120,7 +120,6 @@ export function verifyHMAC(options: {
         return res.status(401).json({ error: 'Invalid webhook signature' });
       }
 
-      console.log(`[Webhook HMAC] Signature verified successfully for ${signatureHeader}`);
       next();
     } catch (error) {
       console.error('[Webhook HMAC] Verification error:', error);
@@ -168,7 +167,6 @@ export function verifyTwilioSignature(authToken: string) {
         return res.status(401).json({ error: 'Invalid Twilio signature' });
       }
 
-      console.log('[Twilio Webhook] Signature verified successfully');
       next();
     } catch (error) {
       console.error('[Twilio Webhook] Verification error:', error);
@@ -195,7 +193,6 @@ export async function resolveTenantFromWebhook(
     //   with: { tenant: true }
     // });
     // return tenant?.tenantId || null;
-    console.log('[Webhook] API key-based tenant resolution not yet implemented');
   }
 
   if (emailDomain) {
@@ -204,7 +201,6 @@ export async function resolveTenantFromWebhook(
     //   where: eq(tenants.emailDomain, emailDomain)
     // });
     // return tenant?.id || null;
-    console.log('[Webhook] Email domain-based tenant resolution not yet implemented');
   }
 
   return null;
@@ -239,7 +235,6 @@ export async function logWebhookAttempt(data: {
       errorMessage: data.errorMessage || null,
     });
 
-    console.log(`[Webhook Log] Logged ${data.source} webhook attempt`);
   } catch (error) {
     console.error('[Webhook Log] Failed to log webhook attempt:', error);
     // Don't throw - logging failure shouldn't break the webhook

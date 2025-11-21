@@ -19,7 +19,6 @@ export async function ensureVapidKeys(): Promise<{
 
   // Check if keys already exist in environment (user-provided override)
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    console.log('[VAPID] ✓ Using keys from environment variables');
     return {
       publicKey: process.env.VAPID_PUBLIC_KEY,
       privateKey: process.env.VAPID_PRIVATE_KEY,
@@ -34,7 +33,6 @@ export async function ensureVapidKeys(): Promise<{
 
   if (existingConfig?.value) {
     const keys = existingConfig.value as { publicKey: string; privateKey: string };
-    console.log('[VAPID] ✓ Loaded existing keys from database');
     
     // Set in environment for this session
     process.env.VAPID_PUBLIC_KEY = keys.publicKey;
@@ -44,7 +42,6 @@ export async function ensureVapidKeys(): Promise<{
   }
 
   // Generate new keys
-  console.log('[VAPID] Generating new VAPID keys...');
   const vapidKeys = webpush.generateVAPIDKeys();
 
   // Store in database for persistence
@@ -62,8 +59,6 @@ export async function ensureVapidKeys(): Promise<{
   process.env.VAPID_PUBLIC_KEY = vapidKeys.publicKey;
   process.env.VAPID_PRIVATE_KEY = vapidKeys.privateKey;
 
-  console.log('[VAPID] ✓ Generated and stored new VAPID keys');
-  console.log('[VAPID] Public Key:', vapidKeys.publicKey);
 
   return {
     publicKey: vapidKeys.publicKey,
