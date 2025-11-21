@@ -11,6 +11,7 @@ This project is a multi-tenant AI-powered accounting application designed to ach
 - **AI Architecture**: MCP (Model Context Protocol) based with OIDC authentication
 - **MCP Philosophy**: Pre-configured MCPs built-in, users just insert API keys or click OIDC connect
 - **No OpenAI Lock-in**: Vendor-agnostic MCP system for maximum portability
+- **RBAC Strategy**: Tag first, apply uniformly at end to avoid friction with ongoing fixes
 
 ## System Architecture
 The application employs a multi-tenant architecture with a "verified-tenant pattern," enforcing `tenantId` from middleware for all operations. All critical financial calculations are performed server-side to guarantee financial integrity and accuracy.
@@ -39,10 +40,14 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 ### Technical Implementations & Feature Specifications
 - **Multi-tenancy & Financial Integrity:** Enforced at all application layers with server-side `tenantId` and server-side execution of all financial calculations.
 - **Core Accounting:** Modules for Company Profile, Customers, Vendors, Items, Taxes, Invoices (with auto-numbering, audit trail, soft delete, tax compliance), Bills (AI extraction), Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices.
+- **Tax Calculation Service** (NEW): Real tax calculation logic supporting VAT, GST, Sales Tax with IFRS compliance and audit validation.
+- **Currency Conversion Service** (NEW): Multi-currency support with IAS 21 compliance, FX gain/loss calculation, and proper decimal precision handling.
 - **AI-Powered Document Extraction:** MCP-based model calling with vision support for line item extraction, classification, and account mapping from documents.
 - **Optimistic UI:** Production-ready optimistic UI for instant feedback on create, update, and delete operations across key modules, with automatic rollback.
 - **Advanced Accounting:** Includes Chart of Accounts, Journal Entries (double-entry validation, atomic transactions, historical balance tracking), Fixed Assets, Purchase Orders, Bank Reconciliation, Products/Inventory (FIFO/Weighted Average costing), Tax Management, and multi-currency support (IFRS IAS 21 compliant).
 - **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with 180 granular permissions, default/custom roles, multi-role assignments, and UI/route protection.
+  - **Tagging Strategy**: 49 endpoints tagged for RBAC application (documented in RBAC_TAGGING_REPORT.md)
+  - **Route Factory Template**: Standardized middleware for uniform RBAC enforcement (server/middleware/route-factory.ts)
 - **Approval Workflow Engine:** Multi-stage routing for journal entries with workflow matching, multi-approver support, and auto-posting.
 - **Enhanced Financial Reporting:** Interactive reports (P&L, Balance Sheet, Cash Flow, Trial Balance), a custom report builder, and comprehensive CSV/Excel export. Scheduled reports with email delivery.
 - **IFRS Compliance:** Adherence to IAS 1, IAS 2, IAS 7, and IAS 21 standards.
@@ -79,42 +84,29 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - **DuckDuckGo:** Web search integration for AI Copilot.
 - **pgvector:** Used for Retrieval-Augmented Generation (RAG).
 
-## Phase 8 - Testing Status
+## Phase 1 - Remediation Status (Active)
 
-### ✅ Tested Features (6/25)
-1. AI Consent API - List All Consents
-2. AI Consent Stats Endpoint
-3. AI Consent Toggle Update
-4. MCP Server Status (Admin API)
-5. Frontend Application Load
-6. Server Health Check
+### ✅ Completed in This Session (Foundation)
+1. **RBAC Tagging System** - 49 endpoints documented for systematic RBAC application
+2. **Tax Calculator Service** - Real tax logic with VAT/GST/Sales Tax support
+3. **Currency Converter Service** - Multi-currency with IFRS IAS 21 compliance
+4. **Route Factory Template** - Standardized middleware pattern for uniform endpoint protection
 
-### ❌ Untested Features (19/25) - To Complete Later
-**Cloud Storage (5 features)**:
-- OneDrive OAuth Flow & Connection
-- Google Drive OAuth Flow & Connection
-- Document Upload to OneDrive
-- Document Upload to Google Drive
-- Parallel Upload (Local + OneDrive + Google Drive)
+### 🔄 In Progress (Phase 2: Integration)
+1. Integrate TaxCalculator into invoice/bill creation
+2. Integrate CurrencyConverter into payment operations
+3. Test all new business logic
+4. Comprehensive verification
 
-**Cloud Retrieval (2 features)**:
-- File Retrieval with Fallback (Local → Google → OneDrive)
-- Cloud Storage Error Handling & Graceful Degradation
+### ⏳ Planned (Phase 3: Security)
+1. Apply route factory to all 49 tagged endpoints
+2. Add audit logging to critical financial operations
+3. Remove debug statements systematically
+4. Verify RBAC enforcement
 
-**AI Usage Tracking (1 feature)**:
-- AI Usage Tracking & Cost Calculation
+### 📊 Audit Summary
+- **Total Issues Found**: 305 critical findings
+- **Current Focus**: Core business logic (tax, currency) before security layer
+- **Strategy**: Low-friction tagging-first approach to minimize disruption
+- **Reference**: See RBAC_TAGGING_REPORT.md for complete endpoint list
 
-**Multi-LLM Integration (4 features)**:
-- Kimi AI Integration (Free Tier)
-- Qwen AI Integration (Alibaba, Free Tier)
-- DeepSeek Reasoning Mode
-- Provider Preference/Fallback Chain
-
-**MCP Infrastructure (3 features)**:
-- MCP Server Lifecycle Management
-- MCP Client Retry Logic
-- MCP Admin API Access Control
-
-**Testing Blockers**: OAuth credentials needed (OneDrive, Google Drive), API access (Kimi, Qwen, DeepSeek)
-
-**Full Details**: See `UNTESTED_FEATURES_SUMMARY.md` for 8-16 hour testing roadmap
