@@ -2039,10 +2039,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...parsed,
         invoice: {
           ...parsed.invoice,
-          subtotal: taxCalc.subtotal.toString(),
-          totalTax: taxCalc.totalTax.toString(),
-          total: taxCalc.total.toString(),
-          taxInclusive: false
+          subtotal: taxCalc.subtotal.toFixed(2),
+          taxAmount: taxCalc.totalTax.toFixed(2),
+          total: taxCalc.total.toFixed(2)
         }
       };
       
@@ -5683,10 +5682,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bill: {
           ...validated.bill,
           tenantId: tenantId,
-          subtotal: taxCalc.subtotal.toString(),
-          totalTax: taxCalc.totalTax.toString(),
-          total: taxCalc.total.toString(),
-          taxInclusive: false
+          subtotal: taxCalc.subtotal.toFixed(2),
+          taxAmount: taxCalc.totalTax.toFixed(2),
+          total: taxCalc.total.toFixed(2)
         }
       };
       
@@ -6439,29 +6437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tenantId = req.tenantId!;
       const userId = req.user.claims.sub;
       
-      // Handle multi-currency conversion if needed
-      let paymentData = { ...req.body, tenantId };
-      if (req.body.sourceCurrency && req.body.targetCurrency && 
-          req.body.sourceCurrency !== req.body.targetCurrency) {
-        try {
-          const conversion = CurrencyConverter.convert(
-            parseFloat(req.body.amount || '0'),
-            req.body.sourceCurrency,
-            req.body.targetCurrency
-          );
-          paymentData = {
-            ...paymentData,
-            amount: conversion.roundedTarget.toString(),
-            exchangeRate: conversion.exchangeRate.toString(),
-            convertedAmount: conversion.roundedTarget.toString(),
-            conversionDate: conversion.conversionDate
-          };
-        } catch (err) {
-          return res.status(400).json({ message: `Currency conversion failed: ${err}` });
-        }
-      }
-      
-      const validated = insertPaymentSchema.parse(paymentData);
+      const validated = insertPaymentSchema.parse({ ...req.body, tenantId });
 
       // Use atomic transaction to ensure payment and journal entry are created together
       const result = await withTransaction(async (tx) => {
