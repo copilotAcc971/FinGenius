@@ -11340,6 +11340,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ====== COPILOT ROUTES (Task 9-1) ======
+  
+  app.post('/api/copilot/conversations', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { title } = req.body;
+
+      if (!title) {
+        return res.status(400).json({ message: 'Title required' });
+      }
+
+      const { copilotService } = await import('./services/copilot-service');
+      const conversation = await copilotService.createConversation(tenantId, userId, title);
+      res.json(conversation);
+    } catch (error: any) {
+      console.error('[Copilot] Create conversation error:', error);
+      res.status(500).json({ message: 'Failed to create conversation' });
+    }
+  });
+
+  app.get('/api/copilot/conversations', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+
+      const { copilotService } = await import('./services/copilot-service');
+      const conversations = await copilotService.listConversations(tenantId, userId);
+      res.json(conversations);
+    } catch (error: any) {
+      console.error('[Copilot] List conversations error:', error);
+      res.status(500).json({ message: 'Failed to list conversations' });
+    }
+  });
+
+  app.get('/api/copilot/conversations/:id/messages', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { id } = req.params;
+
+      const { copilotService } = await import('./services/copilot-service');
+      const messages = await copilotService.getMessages(tenantId, id);
+      res.json(messages);
+    } catch (error: any) {
+      console.error('[Copilot] Get messages error:', error);
+      res.status(500).json({ message: 'Failed to get messages' });
+    }
+  });
+
+  app.post('/api/copilot/conversations/:id/messages', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+      const { content } = req.body;
+
+      if (!content) {
+        return res.status(400).json({ message: 'Content required' });
+      }
+
+      const { copilotService } = await import('./services/copilot-service');
+      
+      // Get user permissions for authority-aware RBAC
+      const { RBACService } = await import('./rbac/service');
+      const rbac = new RBACService(db);
+      const userPermissions = await rbac.getUserPermissions(tenantId, userId);
+      
+      const result = await copilotService.chat(
+        tenantId,
+        userId,
+        id,
+        content,
+        userPermissions
+      );
+      res.json(result);
+    } catch (error: any) {
+      console.error('[Copilot] Chat error:', error);
+      res.status(500).json({ message: 'Failed to process message' });
+    }
+  });
+
   // ====== CLOUD STORAGE RETRIEVAL ROUTES (Task 8-14) ======
   
   app.post('/api/cloud-storage/retrieve', isAuthenticated, verifyTenantAccess, async (req: any, res) => {

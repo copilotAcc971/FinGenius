@@ -65,6 +65,7 @@ import AlertsCenterPage from "@/pages/alerts-center";
 import CreditPassportPage from "@/pages/credit-passport";
 import InboundDocumentsPage from "@/pages/inbound-documents";
 import AIProvidersPage from "@/pages/settings/ai-providers";
+import CopilotPage from "@/pages/copilot";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -120,6 +121,7 @@ function Router() {
           <Route path="/alerts-center" component={AlertsCenterPage} />
           <Route path="/credit-passport" component={CreditPassportPage} />
           <Route path="/inbound-documents" component={InboundDocumentsPage} />
+          <Route path="/copilot" component={CopilotPage} />
           <Route path="/demo/advanced-table" component={AdvancedTableDemo} />
         </>
       )}
