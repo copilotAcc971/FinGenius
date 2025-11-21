@@ -1,0 +1,48 @@
+To replicate the "click connect" experience (where users log in via a popup rather than pasting API keys), you cannot use a simple local script. You must build a Remote MCP Server.
+The "Official" integrations you see in Claude (Google Drive, Slack) are just Remote MCP servers that Anthropic has pre-configured in the menu. To do the same for your app, you need to build a server that speaks the MCP OAuth 2.1 standard.
+Here is the architectural blueprint for building that integration.
+1. The Architecture: Remote vs. Local
+ * Local Extension (What you likely have now): A script running on the user's computer. It uses API keys because it can't easily handle secure login callbacks.
+ * Remote Connector (What you need): A web server (hosted on AWS, Vercel, Cloudflare, etc.) that acts as a bridge.
+   * User's Claude App \leftrightarrow Your Remote MCP Server \leftrightarrow Your App's API
+2. The "Click Connect" Recipe (OAuth 2.1)
+To trigger that "Connect" button in Claude, your remote server must implement a specific authentication flow defined by the Model Context Protocol.
+The Flow:
+ * Handshake: The user adds your server URL to Claude. Claude pings your server.
+ * The Challenge: Your server replies: "I exist, but I don't know this user yet" (HTTP 401 Error).
+ * The Instructions: In that reply, you send a special header (WWW-Authenticate) telling Claude exactly where to send the user to log in.
+ * The Login: Claude reads that header, opens a browser window to your login page, and the user signs in.
+ * Token Exchange: Your server gives Claude a secure token. Claude stores it and uses it for all future requests.
+3. Implementation Steps
+Step A: Build the Endpoints
+Your server needs to expose these specific routes:
+ * GET /sse: The main entry point.
+   * If a request comes without a token, return 401 Unauthorized.
+   * Crucial: The 401 response must contain a header like this:
+     WWW-Authenticate: MCP uri="https://your-server.com/authorize", scope="read:data"
+
+ * GET /authorize: The login page.
+   * Claude sends the user here. You show them your "Login with [MyApp]" screen.
+   * Requirement: You must support PKCE (Proof Key for Code Exchange). This is a security standard that prevents code interception.
+ * POST /token: The trade.
+   * After the user logs in, Claude will send the "authorization code" to this endpoint.
+   * You verify it and return an access_token.
+Step B: Distribution (How users get it)
+Currently, you cannot self-publish directly into the main "Official" list (that is reserved for partners). However, you can distribute your app as a Custom Connector.
+ * Host your server publicly (e.g., https://mcp.myapp.com).
+ * Give users the URL.
+ * User Instructions:
+   * Go to Settings > Connectors.
+   * Click "Add Custom Connector".
+   * Paste your URL (https://mcp.myapp.com).
+   * Result: The user sees your App Name and a "Connect" button. When they click it, your OAuth flow triggers immediately.
+Summary of Differences
+| Feature | Local Extension (.mcpb) | Remote Connector (Your Goal) |
+|---|---|---|
+| Installation | User downloads file & installs | User pastes URL |
+| Auth | Manual API Key Copy/Paste | "Click Connect" (OAuth) |
+| Hosting | Runs on user's laptop | Hosted on your cloud |
+| Best For | Local files, developer tools | SaaS apps, Multi-user platforms |
+Immediate Next Step
+If you want to build this, you should start by setting up a basic Remote MCP Server locally that implements the 401 challenge.
+Would you like me to generate the Python or Node.js boilerplate code for a Remote MCP server that handles this OAuth handshake?
