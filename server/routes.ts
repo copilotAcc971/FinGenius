@@ -122,6 +122,7 @@ import {
   approvalSteps,
   approvalWorkflows,
   projectInvoices,
+  mcpProviderTemplates,
   type Expense,
 } from "@shared/schema";
 import { insertFXConfigSchema } from "@shared/fx-types";
@@ -11140,6 +11141,200 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('[AI Consent] Get stats error:', error);
       res.status(500).json({ message: 'Failed to get usage stats' });
+    }
+  });
+
+  // ====== MCP OIDC ROUTES (OAuth 2.1 + PKCE) ======
+  
+  app.get('/api/mcp/providers', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { ProviderService } = await import('./mcp/provider-service');
+      const templates = await db.select().from(mcpProviderTemplates).where(eq(mcpProviderTemplates.enabled, true));
+      
+      res.json({
+        providers: templates.map(t => ({
+          provider: t.provider,
+          name: t.name,
+          description: t.description,
+          authMethod: t.authMethod,
+          requiresCredentials: t.requiresCredentials,
+          isOfficial: t.isOfficial,
+          metadata: t.metadata,
+        })),
+      });
+    } catch (error: any) {
+      console.error('[MCP] Get providers error:', error);
+      res.status(500).json({ message: 'Failed to fetch providers' });
+    }
+  });
+
+  app.get('/api/mcp/oidc/authorize', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { provider } = req.query;
+
+      if (!provider) {
+        return res.status(400).json({ message: 'Provider required' });
+      }
+
+      // Check if provider requires OAuth
+      const template = await db
+        .select()
+        .from(mcpProviderTemplates)
+        .where(eq(mcpProviderTemplates.provider, provider))
+        .limit(1);
+
+      if (!template[0]) {
+        return res.status(404).json({ message: 'Provider not found' });
+      }
+
+      if (template[0].authMethod === 'api_key') {
+        // For API key providers, just return error - frontend should show manual input
+        return res.status(400).json({ 
+          message: 'This provider uses API key authentication',
+          requiresApiKey: true 
+        });
+      }
+
+      const { OAuthHandler } = await import('./mcp/oauth-handler');
+      
+      // Generate authorization URL
+      const redirectUri = `${process.env.APP_URL || 'http://localhost:5000'}/api/mcp/oidc/callback`;
+      const { url, state } = OAuthHandler.getAuthorizationUrl(
+        provider,
+        process.env[`${provider.toUpperCase()}_CLIENT_ID`] || 'test-client',
+        template[0].authorizationEndpoint || 'https://oauth.example.com/authorize',
+        redirectUri,
+        'openid profile email',
+        tenantId,
+        userId
+      );
+
+      // Return 401 with WWW-Authenticate header per OAuth 2.1 spec
+      res.status(401);
+      res.set('WWW-Authenticate', `MCP uri="${url}", scope="read:data"`);
+      res.json({
+        authorizationUrl: url,
+        state,
+        message: 'Please authenticate via OAuth',
+      });
+    } catch (error: any) {
+      console.error('[MCP OIDC] Authorize error:', error);
+      res.status(500).json({ message: 'Failed to generate authorization URL' });
+    }
+  });
+
+  app.get('/api/mcp/oidc/callback', async (req: any, res) => {
+    try {
+      const { code, state } = req.query;
+
+      if (!code || !state) {
+        return res.status(400).json({ message: 'Missing code or state' });
+      }
+
+      const { OAuthHandler } = await import('./mcp/oauth-handler');
+      const oauthState = OAuthHandler.validateState(state);
+
+      if (!oauthState) {
+        return res.status(400).json({ message: 'Invalid or expired state' });
+      }
+
+      const { provider, tenantId, userId } = oauthState;
+      const template = await db
+        .select()
+        .from(mcpProviderTemplates)
+        .where(eq(mcpProviderTemplates.provider, provider))
+        .limit(1);
+
+      if (!template[0]) {
+        return res.status(404).json({ message: 'Provider not found' });
+      }
+
+      // Exchange code for token
+      const redirectUri = `${process.env.APP_URL || 'http://localhost:5000'}/api/mcp/oidc/callback`;
+      const tokenData = await OAuthHandler.exchangeCodeForToken(
+        state,
+        code,
+        process.env[`${provider.toUpperCase()}_CLIENT_ID`] || 'test-client',
+        process.env[`${provider.toUpperCase()}_CLIENT_SECRET`] || 'test-secret',
+        template[0].tokenEndpoint || 'https://oauth.example.com/token',
+        redirectUri
+      );
+
+      // Save credentials encrypted
+      const { ProviderService } = await import('./mcp/provider-service');
+      await ProviderService.saveCredential(
+        tenantId,
+        userId,
+        provider,
+        'oauth_token',
+        tokenData.accessToken,
+        {
+          tokenType: tokenData.tokenType,
+          expiresAt: tokenData.expiresIn ? new Date(Date.now() + tokenData.expiresIn * 1000) : undefined,
+          refreshToken: tokenData.refreshToken,
+        }
+      );
+
+      // Redirect back to frontend with success
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5000';
+      res.redirect(`${frontendUrl}/settings/ai-providers?connected=${provider}&success=true`);
+    } catch (error: any) {
+      console.error('[MCP OIDC] Callback error:', error);
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5000';
+      res.redirect(`${frontendUrl}/settings/ai-providers?error=${encodeURIComponent(error.message)}`);
+    }
+  });
+
+  app.post('/api/mcp/credentials/save-api-key', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { provider, apiKey } = req.body;
+
+      if (!provider || !apiKey) {
+        return res.status(400).json({ message: 'Provider and API key required' });
+      }
+
+      const { ProviderService } = await import('./mcp/provider-service');
+      await ProviderService.saveCredential(
+        tenantId,
+        userId,
+        provider,
+        'api_key',
+        apiKey
+      );
+
+      res.json({ success: true, message: 'Credentials saved' });
+    } catch (error: any) {
+      console.error('[MCP] Save API key error:', error);
+      res.status(500).json({ message: 'Failed to save credentials' });
+    }
+  });
+
+  app.get('/api/mcp/credentials/status', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user.claims.sub;
+      const { provider } = req.query;
+
+      if (!provider) {
+        return res.status(400).json({ message: 'Provider required' });
+      }
+
+      const { ProviderService } = await import('./mcp/provider-service');
+      const credential = await ProviderService.getCredential(tenantId, userId, provider);
+
+      res.json({
+        isConfigured: !!credential,
+        credentialType: credential?.credentialType,
+        expiresAt: credential?.expiresAt,
+        lastUsedAt: credential?.lastUsedAt,
+      });
+    } catch (error: any) {
+      console.error('[MCP] Get credential status error:', error);
+      res.status(500).json({ message: 'Failed to check credential status' });
     }
   });
 
