@@ -8,9 +8,24 @@ This project is a multi-tenant AI-powered accounting application designed to ach
 - Tax compliance is a critical requirement.
 - Open Banking integration for the UAE market with Lean Technologies.
 - Future-proof for other Open Banking platforms (Mastercard, card issuers, marketplace connectors).
+- **AI Architecture**: MCP (Model Context Protocol) based with OIDC authentication
+- **MCP Philosophy**: Pre-configured MCPs built-in, users just insert API keys or click OIDC connect
+- **No OpenAI Lock-in**: Vendor-agnostic MCP system for maximum portability
 
 ## System Architecture
 The application employs a multi-tenant architecture with a "verified-tenant pattern," enforcing `tenantId` from middleware for all operations. All critical financial calculations are performed server-side to guarantee financial integrity and accuracy.
+
+### AI/MCP Architecture (Phase 8+)
+- **Model Context Protocol (MCP)**: Vendor-agnostic protocol for AI provider integration
+- **Pre-configured MCPs**:
+  - Kimi AI (free tier, vision)
+  - Qwen (Alibaba, free tier, multimodal)
+  - DeepSeek (reasoning, free tier)
+  - OpenAI (optional, if API key provided)
+  - Custom MCPs via API key input
+- **OIDC Integration**: One-click authentication for providers supporting OIDC
+- **Cost Tracking**: Per-provider token counting and cost calculation
+- **Authority-Aware RBAC**: AI prompts dynamically inject user permissions
 
 ### UI/UX Decisions
 - **Brand Identity:** Monochrome design system inspired by Notion/Vercel/NYT, using black, white, and gray shades with sophisticated typography.
@@ -24,7 +39,7 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 ### Technical Implementations & Feature Specifications
 - **Multi-tenancy & Financial Integrity:** Enforced at all application layers with server-side `tenantId` and server-side execution of all financial calculations.
 - **Core Accounting:** Modules for Company Profile, Customers, Vendors, Items, Taxes, Invoices (with auto-numbering, audit trail, soft delete, tax compliance), Bills (AI extraction), Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices.
-- **AI-Powered Document Extraction:** Utilizes OpenAI GPT-5 (vision) for line item extraction, classification, and account mapping from documents.
+- **AI-Powered Document Extraction:** MCP-based model calling with vision support for line item extraction, classification, and account mapping from documents.
 - **Optimistic UI:** Production-ready optimistic UI for instant feedback on create, update, and delete operations across key modules, with automatic rollback.
 - **Advanced Accounting:** Includes Chart of Accounts, Journal Entries (double-entry validation, atomic transactions, historical balance tracking), Fixed Assets, Purchase Orders, Bank Reconciliation, Products/Inventory (FIFO/Weighted Average costing), Tax Management, and multi-currency support (IFRS IAS 21 compliant).
 - **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with 180 granular permissions, default/custom roles, multi-role assignments, and UI/route protection.
@@ -37,24 +52,69 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - **E-Invoicing:**
     - **UAE Peppol:** PINT-AE compliant UBL 2.1 XML generation, TLV QR codes, ASP integration foundation, 14-day transmission deadline tracking, audit trail.
     - **KSA ZATCA (Phase 2):** ZATCA-compliant XML with UUID/hash/hash chaining, TLV QR codes, FATOORAH integration, SHA-256 cryptographic hashing, PKI digital signature support.
-- **AI Copilot:** An AI assistant with live voice conversation, chat, and voice notes, strictly authority-aware RBAC system, web search, document processing, RAG, and push notifications.
+- **AI Copilot:** MCP-based AI assistant with live voice conversation, chat, and voice notes, strictly authority-aware RBAC system, web search, document processing, RAG, and push notifications.
     - **Authority-Aware RBAC System:** Dynamic context injection of user roles and permissions into AI prompts, "plan & confirm" protocol for mutating actions, permission validation before function execution, segregation of duties (draft vs. post functions), and authority-aware denial responses.
 - **SOX Audit Logging:** Immutable audit trail system for SOX §802 compliance, with centralized audit service, sensitive data redaction, before/after state capture, and comprehensive coverage of financial routes.
 - **AML/KYC Compliance:** Comprehensive anti-money laundering and know-your-customer system with database, risk scoring, sanctions screening, transaction monitoring, and CDD/EDD workflows.
 - **Compliance Reporting Dashboard:** Centralized monitoring for SOX, AML/KYC, PSD2, GDPR, PCI-DSS with real-time status, charts, dynamic audit checklists, deadlines tracking, and training requirements.
 - **Dual Cloud Storage:** Simultaneous document storage across local, Google Drive, and OneDrive with user preferences.
-- **Inbound Document Webhooks:** Direct document receipt via email, WhatsApp/SMS, and API endpoints with HMAC verification and an AI extraction pipeline using GPT-4o Vision.
+- **Inbound Document Webhooks:** Direct document receipt via email, WhatsApp/SMS, and API endpoints with HMAC verification and an MCP-based extraction pipeline with vision support.
 - **Credit Passport & Bankability Score:** Real-time financial health analysis for loan eligibility, including a financial metrics engine, weighted bankability scoring, blocking factor analysis, actionable recommendations, and professional PDF export.
 - **Comprehensive Alerts & Reminders System:** Proactive monitoring for financial events and deadlines, including cash deficiency forecasting, aged AR/AP alerts, pending approvals aggregator, month-end closing checklist, suggested accruals detector, compliance deadline tracker, and anomaly detection.
 - **Background Jobs & Automation:** Daily alert engine, weekly Credit Passport calculation, daily Open Banking transaction sync, daily FX rates update, nightly RAG indexing, and hourly upload cleanup.
 
 ## External Dependencies
--   **OpenAI:** GPT-5 for AI-powered document data extraction and bank reconciliation, GPT-4o for chat mode, OpenAI Realtime API for live voice, and TTS API for voice notes.
--   **Microsoft Graph API:** Outlook email integration and OneDrive cloud storage.
--   **Stripe:** Secure payment processing.
--   **Lean Technologies:** Primary Open Banking provider for UAE.
--   **UAE Central Bank FX Rates:** Source for daily foreign exchange rates (currently from a GitHub mirror).
--   **Twilio:** WhatsApp and SMS webhook integration.
--   **Google Drive:** Cloud storage integration via Replit connector.
--   **DuckDuckGo:** Web search integration for AI Copilot.
--   **pgvector:** Used for Retrieval-Augmented Generation (RAG).
+- **MCP Providers (Model Context Protocol)**:
+  - Kimi AI: Free tier vision model
+  - Qwen (Alibaba): Free tier multimodal
+  - DeepSeek: Free tier reasoning
+  - OpenAI: Optional if API key provided
+  - Custom: User can configure additional MCP providers
+- **Microsoft Graph API:** Outlook email integration and OneDrive cloud storage.
+- **Stripe:** Secure payment processing.
+- **Lean Technologies:** Primary Open Banking provider for UAE.
+- **UAE Central Bank FX Rates:** Source for daily foreign exchange rates (currently from a GitHub mirror).
+- **Twilio:** WhatsApp and SMS webhook integration.
+- **Google Drive:** Cloud storage integration via Replit connector.
+- **DuckDuckGo:** Web search integration for AI Copilot.
+- **pgvector:** Used for Retrieval-Augmented Generation (RAG).
+
+## Phase 8 - Testing Status
+
+### ✅ Tested Features (6/25)
+1. AI Consent API - List All Consents
+2. AI Consent Stats Endpoint
+3. AI Consent Toggle Update
+4. MCP Server Status (Admin API)
+5. Frontend Application Load
+6. Server Health Check
+
+### ❌ Untested Features (19/25) - To Complete Later
+**Cloud Storage (5 features)**:
+- OneDrive OAuth Flow & Connection
+- Google Drive OAuth Flow & Connection
+- Document Upload to OneDrive
+- Document Upload to Google Drive
+- Parallel Upload (Local + OneDrive + Google Drive)
+
+**Cloud Retrieval (2 features)**:
+- File Retrieval with Fallback (Local → Google → OneDrive)
+- Cloud Storage Error Handling & Graceful Degradation
+
+**AI Usage Tracking (1 feature)**:
+- AI Usage Tracking & Cost Calculation
+
+**Multi-LLM Integration (4 features)**:
+- Kimi AI Integration (Free Tier)
+- Qwen AI Integration (Alibaba, Free Tier)
+- DeepSeek Reasoning Mode
+- Provider Preference/Fallback Chain
+
+**MCP Infrastructure (3 features)**:
+- MCP Server Lifecycle Management
+- MCP Client Retry Logic
+- MCP Admin API Access Control
+
+**Testing Blockers**: OAuth credentials needed (OneDrive, Google Drive), API access (Kimi, Qwen, DeepSeek)
+
+**Full Details**: See `UNTESTED_FEATURES_SUMMARY.md` for 8-16 hour testing roadmap
