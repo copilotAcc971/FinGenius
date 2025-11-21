@@ -1,0 +1,94 @@
+~/workspace$ npm run dev
+
+> rest-express@1.0.0 dev
+> NODE_ENV=development tsx server/index.ts
+
+[TokenEncryption] Running in DEVELOPMENT mode (environment variable encryption)
+
+⚠️  WARNING: OPEN_BANKING_ENCRYPTION_KEY not found in environment variables.
+   A temporary key has been generated for this session.
+   For production use, set: OPEN_BANKING_ENCRYPTION_KEY=3d5d7f544352dcf060e6fece9c5712cc79309e6d5372b6276d1a7442c02332e6
+
+[AI Copilot] WebSocket server initialized on /ws/ai-copilot
+[Dashboard Metrics] WebSocket server initialized on /ws/dashboard-metrics
+6:20:26 PM [express] serving on port 5000
+[RBAC] ✓ Security enabled - all permissions will be checked
+[VAPID] ✓ Loaded existing keys from database
+[RBAC Seed] Seeding permissions...
+[RBAC Seed] ✓ Seeded 180 permissions
+[RBAC Init] Starting comprehensive RBAC initialization...
+[RBAC Init] Found 191 permissions
+[RBAC Init] Processing 47 tenants...
+[RBAC Init]   Updated Owner role for tenant X with 191 permissions
+[RBAC Init]   Updated Owner role for tenant X with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Workspace XZli with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Workspace 1763045088449 with 191 permissions
+[RBAC Init]   Updated Owner role for tenant X with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Accounting Inc with 191 permissions
+[RBAC Init]   Updated Owner role for tenant E2E Test Accounting with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final Test Co with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final E2E Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Complete E2E Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Complete System Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Simple E2E with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final Working Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Complete with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Assets Fix with 191 permissions
+[RBAC Init]   Updated Owner role for tenant X with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant TestWorkspace-6LhEWa with 191 permissions
+[RBAC Init]   Updated Owner role for tenant IFRS Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant IFRS Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant IFRS Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant IFRS Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final IFRS Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final IFRS Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final IFRS Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final IFRS Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Schema Fix Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Schema Fix Test with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Route Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Route Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final Verify Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final Verify Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Final Verify Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Cache Fix Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Cache Fix Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Exact False Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Exact False Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Tenant o7el2X with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Tenant unfu with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Tenant 001 with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Nav Test WS with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Accounting Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Open Banking Test Workspace with 191 permissions
+[RBAC Init]   Updated Owner role for tenant Test Warehouse Co hSQ with 191 permissions
+[RBAC Init] Complete - all tenants now have Owner roles with full permissions
+Initializing scheduled reports...
+Scheduled reports initialization complete: 0 jobs registered
+[TransactionSync] Initializing daily transaction sync job (2 AM UTC)
+[TransactionSync] Daily transaction sync job initialized
+[AI Copilot Uploads] Initializing cleanup cron job...
+Initializing FX rates update cron job (runs daily at 6 AM UTC)...
+✓ FX rates update job successfully scheduled
+[Alert Engine] Initializing daily alert engine job...
+[Alert Engine] Schedule: 0 9 * * * (9 AM UTC daily)
+[Alert Engine] ✓ Daily alert engine job successfully scheduled
+[Daily Alerts] Initializing daily alert generation job...
+[Daily Alerts] Schedule: 0 9 * * * (9 AM UTC daily)
+[Daily Alerts] ✓ Daily alert generation job successfully scheduled
+[Weekly Credit Passport] Initializing weekly recalculation job...
+[Weekly Credit Passport] Schedule: 0 8 * * 1 (Monday 8 AM UTC)
+[Weekly Credit Passport] ✓ Weekly recalculation job successfully scheduled
+[Background Indexer] Starting nightly indexing job...
+[Background Indexer] Schedule: 0 2 * * * (UTC)
+[Background Indexer] ✓ Background indexing job successfully scheduled
+[AI Copilot Uploads] Cleanup cron job registered (runs hourly)
+[AI Copilot Uploads] Running cleanup for expired files...
+[AI Copilot Uploads] Found 0 expired files to delete
+[AI Copilot Uploads] Cleanup completed
+^C
+~/workspace$ 
