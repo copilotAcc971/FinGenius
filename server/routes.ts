@@ -2372,10 +2372,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Generate PDF
         pdfBuffer = await generateInvoicePDF(pdfData);
         pdfAttached = true;
-          tenantId,
-          invoiceId: invoice.id,
-          lineItemCount: lineItems?.length || 0
-        });
       } catch (pdfGenerationError: any) {
         // STEP 4: Improved structured logging
         pdfError = pdfGenerationError.message || 'PDF generation failed';
@@ -8091,10 +8087,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Validate required parameters
       if (!entityType || !entityId) {
-          tenantId,
-          userId,
-          clientIp,
-        });
         return res.status(400).json({ 
           message: "Missing required parameters: entityType and entityId" 
         });
@@ -8102,11 +8094,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Validate entityType
       if (!['customer', 'vendor'].includes(entityType as string)) {
-          tenantId,
-          userId,
-          entityType,
-          clientIp,
-        });
         return res.status(400).json({ 
           message: "Invalid entityType. Must be 'customer' or 'vendor'" 
         });
@@ -8118,12 +8105,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(and(eq(customers.id, entityId as string), eq(customers.tenantId, tenantId)))
           .limit(1);
         if (!customer[0]) {
-            tenantId,
-            userId,
-            entityType,
-            entityId,
-            clientIp,
-          });
           return res.status(403).json({ message: 'Entity not found or access denied' });
         }
       } else if (entityType === 'vendor') {
@@ -8131,12 +8112,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(and(eq(vendors.id, entityId as string), eq(vendors.tenantId, tenantId)))
           .limit(1);
         if (!vendor[0]) {
-            tenantId,
-            userId,
-            entityType,
-            entityId,
-            clientIp,
-          });
           return res.status(403).json({ message: 'Entity not found or access denied' });
         }
       }
@@ -8162,14 +8137,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const provider = openBankingProviderFactory.createProvider('lean');
       const authorizationUrl = provider.getAuthorizationUrl(redirectUri, state);
 
-        tenantId,
-        userId,
-        entityType,
-        entityId,
-        provider: 'lean',
-        clientIp,
-      });
-
       res.json({ authorizationUrl });
     } catch (error: any) {
       console.error('[Open Banking] Error generating authorization URL:', error);
@@ -8190,8 +8157,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Validate required parameters
       if (!code || !state) {
-          clientIp,
-        });
         return res.status(400).json({ 
           message: "Invalid request" 
         });
@@ -8215,17 +8180,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           exp: number;
         };
       } catch (error) {
-          clientIp,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
         return res.status(400).json({ message: 'Invalid or expired state parameter' });
       }
 
       // SECURITY: Check for nonce replay attack
       if (nonceStore.isNonceUsed(statePayload.nonce)) {
-          nonce: statePayload.nonce,
-          clientIp,
-        });
         return res.status(400).json({ message: 'Invalid or reused authorization state' });
       }
 
@@ -8235,9 +8194,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate tenantId exists in database
       const tenant = await storage.getTenant(tenantId);
       if (!tenant) {
-          tenantId,
-          clientIp,
-        });
         return res.status(400).json({ 
           message: "Invalid request" 
         });
@@ -8249,11 +8205,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(and(eq(customers.id, entityId), eq(customers.tenantId, tenantId)))
           .limit(1);
         if (!customer[0]) {
-            tenantId,
-            entityType,
-            entityId,
-            clientIp,
-          });
           return res.status(403).json({ message: 'Entity validation failed' });
         }
       } else if (entityType === 'vendor') {
@@ -8261,11 +8212,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(and(eq(vendors.id, entityId), eq(vendors.tenantId, tenantId)))
           .limit(1);
         if (!vendor[0]) {
-            tenantId,
-            entityType,
-            entityId,
-            clientIp,
-          });
           return res.status(403).json({ message: 'Entity validation failed' });
         }
       }
@@ -8285,13 +8231,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const provider = openBankingProviderFactory.createProvider('lean');
       const tokens = await provider.exchangeCodeForTokens(code as string, redirectUri);
 
-        tenantId,
-        entityType,
-        entityId,
-        provider: 'lean',
-        clientIp,
-      });
-
       // Create OpenBankingService instance for this tenant
       const openBankingService = new OpenBankingService(tenantId);
 
@@ -8310,20 +8249,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ['accounts', 'transactions', 'payments', 'identity'] // Default permissions
       );
 
-        connectionId: connection.id,
-        tenantId,
-        provider: 'lean',
-        clientIp,
-      });
-
       // Fetch bank accounts from provider
       const accounts = await openBankingService.getAccounts(connection.id);
-
-        connectionId: connection.id,
-        accountCount: accounts.length,
-        tenantId,
-        clientIp,
-      });
 
       // Store bank accounts in database
       for (const account of accounts) {
@@ -8339,12 +8266,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           status: 'active',
         });
       }
-
-        connectionId: connection.id,
-        accountCount: accounts.length,
-        tenantId,
-        clientIp,
-      });
 
       res.json({ 
         success: true, 
