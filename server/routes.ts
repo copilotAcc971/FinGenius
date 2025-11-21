@@ -11499,3 +11499,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
+
+  // ====== FINANCIAL REPORTING ROUTES (Task 10-1 to 10-8) ======
+  
+  app.get('/api/reports', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { reportService } = await import('./services/reporting-service');
+      const reports = await reportService.listReports(tenantId);
+      res.json(reports);
+    } catch (error: any) {
+      console.error('[Reports] List error:', error);
+      res.status(500).json({ message: 'Failed to list reports' });
+    }
+  });
+
+  app.post('/api/reports/generate', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { reportType } = req.body;
+      const { reportService } = await import('./services/reporting-service');
+      
+      let report;
+      const now = new Date();
+      const periodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const periodEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+      
+      switch (reportType) {
+        case 'p_and_l':
+          report = await reportService.generatePAndLReport(tenantId, periodStart, periodEnd);
+          break;
+        case 'balance_sheet':
+          report = await reportService.generateBalanceSheetReport(tenantId, periodEnd);
+          break;
+        case 'cash_flow':
+          report = await reportService.generateCashFlowReport(tenantId, periodStart, periodEnd);
+          break;
+        default:
+          return res.status(400).json({ message: 'Invalid report type' });
+      }
+      
+      res.json(report);
+    } catch (error: any) {
+      console.error('[Reports] Generate error:', error);
+      res.status(500).json({ message: 'Failed to generate report' });
+    }
+  });
+
+  app.post('/api/reports/:id/export', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const reportId = parseInt(req.params.id);
+      const { format } = req.body;
+      const { reportService } = await import('./services/reporting-service');
+      
+      const result = await reportService.exportReport(tenantId, reportId, format);
+      res.json(result);
+    } catch (error: any) {
+      console.error('[Reports] Export error:', error);
+      res.status(500).json({ message: 'Failed to export report' });
+    }
+  });
+
+  app.get('/api/compliance/dashboards', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { reportService } = await import('./services/reporting-service');
+      const dashboards = await Promise.all([
+        reportService.getComplianceDashboard(tenantId, 'sox'),
+        reportService.getComplianceDashboard(tenantId, 'aml_kyc'),
+        reportService.getComplianceDashboard(tenantId, 'gdpr'),
+      ]);
+      res.json(dashboards.filter(d => d !== null));
+    } catch (error: any) {
+      console.error('[Compliance] Dashboard error:', error);
+      res.status(500).json({ message: 'Failed to get compliance dashboards' });
+    }
+  });
+
+  app.post('/api/credit-passport/generate', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { customerId } = req.body;
+      const { reportService } = await import('./services/reporting-service');
+      
+      const passport = await reportService.generateCreditPassport(tenantId, customerId);
+      res.json(passport);
+    } catch (error: any) {
+      console.error('[Credit Passport] Generate error:', error);
+      res.status(500).json({ message: 'Failed to generate credit passport' });
+    }
+  });
+
+  app.post('/api/reports/schedule', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { reportType, schedule, recipientEmails } = req.body;
+      const { reportService } = await import('./services/reporting-service');
+      
+      const scheduledReport = await reportService.scheduleReport(tenantId, reportType, schedule, recipientEmails);
+      res.json(scheduledReport);
+    } catch (error: any) {
+      console.error('[Scheduled Reports] Create error:', error);
+      res.status(500).json({ message: 'Failed to schedule report' });
+    }
+  });

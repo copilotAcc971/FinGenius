@@ -6722,3 +6722,131 @@ export const copilotToolCallsRelations = relations(copilotToolCalls, ({ one }) =
     references: [copilotMessages.id],
   }),
 }));
+
+// ====== FINANCIAL REPORTING (Task 10-1 to 10-8) ======
+
+export const financialReports = pgTable('financial_reports', {
+  id: serial('id').primaryKey(),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  reportType: varchar('report_type').notNull(), // p_and_l, balance_sheet, cash_flow, trial_balance
+  periodStart: date('period_start').notNull(),
+  periodEnd: date('period_end').notNull(),
+  currency: varchar('currency').notNull().default('AED'),
+  reportData: jsonb('report_data').notNull(), // P&L, BS, CF line items
+  totalAssets: decimal('total_assets', { precision: 20, scale: 2 }),
+  totalLiabilities: decimal('total_liabilities', { precision: 20, scale: 2 }),
+  totalEquity: decimal('total_equity', { precision: 20, scale: 2 }),
+  netIncome: decimal('net_income', { precision: 20, scale: 2 }),
+  operatingCashFlow: decimal('operating_cash_flow', { precision: 20, scale: 2 }),
+  isIFRSCompliant: boolean('is_ifrs_compliant').default(true),
+  createdAt: timestamp('created_at').default(sql`now()`).notNull(),
+  updatedAt: timestamp('updated_at').default(sql`now()`).notNull(),
+}, (table) => [
+  index('idx_financial_reports_tenant_type').on(table.tenantId, table.reportType),
+  index('idx_financial_reports_period').on(table.periodStart, table.periodEnd),
+]);
+
+export const complianceDashboards = pgTable('compliance_dashboards', {
+  id: serial('id').primaryKey(),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  complianceType: varchar('compliance_type').notNull(), // sox, aml_kyc, psd2, gdpr, pci_dss
+  status: varchar('status').notNull(), // compliant, non_compliant, partial, pending
+  score: decimal('score', { precision: 5, scale: 2 }), // 0-100
+  auditItems: jsonb('audit_items'), // Checklist items
+  deadlines: jsonb('deadlines'), // Key deadlines
+  trainingRequired: jsonb('training_required'), // Required trainings
+  lastReviewedAt: timestamp('last_reviewed_at'),
+  nextReviewDue: date('next_review_due'),
+  createdAt: timestamp('created_at').default(sql`now()`).notNull(),
+  updatedAt: timestamp('updated_at').default(sql`now()`).notNull(),
+}, (table) => [
+  index('idx_compliance_dashboards_tenant_type').on(table.tenantId, table.complianceType),
+]);
+
+export const scheduledReports = pgTable('scheduled_reports', {
+  id: serial('id').primaryKey(),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  reportType: varchar('report_type').notNull(), // p_and_l, balance_sheet, etc
+  schedule: varchar('schedule').notNull(), // daily, weekly, monthly, quarterly, yearly
+  recipientEmails: text('recipient_emails').array(), // Email recipients
+  isActive: boolean('is_active').default(true),
+  lastExecutedAt: timestamp('last_executed_at'),
+  nextExecutionAt: timestamp('next_execution_at'),
+  createdAt: timestamp('created_at').default(sql`now()`).notNull(),
+  updatedAt: timestamp('updated_at').default(sql`now()`).notNull(),
+}, (table) => [
+  index('idx_scheduled_reports_tenant').on(table.tenantId),
+]);
+
+export const creditPassports = pgTable('credit_passports', {
+  id: serial('id').primaryKey(),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerId: varchar('customer_id').references(() => customers.id, { onDelete: 'cascade' }),
+  overallScore: decimal('overall_score', { precision: 5, scale: 2 }), // 0-100
+  bankabilityGrade: varchar('bankability_grade'), // A+, A, B+, B, C, D, F
+  loanEligibility: varchar('loan_eligibility'), // excellent, good, fair, poor, not_eligible
+  financialMetrics: jsonb('financial_metrics'), // Key ratios
+  blockingFactors: jsonb('blocking_factors'), // Issues preventing eligibility
+  recommendations: jsonb('recommendations'), // Actionable suggestions
+  generatedAt: timestamp('generated_at').default(sql`now()`).notNull(),
+  expiresAt: timestamp('expires_at'),
+  pdfUrl: varchar('pdf_url'),
+}, (table) => [
+  index('idx_credit_passports_tenant_customer').on(table.tenantId, table.customerId),
+]);
+
+export const reportExports = pgTable('report_exports', {
+  id: serial('id').primaryKey(),
+  tenantId: varchar('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  reportId: integer('report_id').references(() => financialReports.id, { onDelete: 'cascade' }),
+  exportFormat: varchar('export_format').notNull(), // csv, excel, pdf
+  fileUrl: varchar('file_url').notNull(),
+  fileName: varchar('file_name').notNull(),
+  fileSize: integer('file_size'),
+  createdAt: timestamp('created_at').default(sql`now()`).notNull(),
+}, (table) => [
+  index('idx_report_exports_tenant').on(table.tenantId),
+]);
+
+export const financialReportsRelations = relations(financialReports, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [financialReports.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export const complianceDashboardsRelations = relations(complianceDashboards, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [complianceDashboards.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export const scheduledReportsRelations = relations(scheduledReports, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [scheduledReports.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export const creditPassportsRelations = relations(creditPassports, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [creditPassports.tenantId],
+    references: [tenants.id],
+  }),
+  customer: one(customers, {
+    fields: [creditPassports.customerId],
+    references: [customers.id],
+  }),
+}));
+
+export const reportExportsRelations = relations(reportExports, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [reportExports.tenantId],
+    references: [tenants.id],
+  }),
+  report: one(financialReports, {
+    fields: [reportExports.reportId],
+    references: [financialReports.id],
+  }),
+}));
