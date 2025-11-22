@@ -3,15 +3,24 @@ import type { Invoice, TenantCompanyProfile } from '@shared/schema';
 /**
  * UAE Peppol QR Code Generator
  * 
- * Generates TLV (Tag-Length-Value) format QR codes for UAE e-invoices
- * as required by UAE Federal Tax Authority (FTA)
+ * Generates TLV (Tag-Length-Value) format QR codes per official PINT-AE specifications.
  * 
- * TLV Format:
- * - Tag 1: Seller name
- * - Tag 2: VAT registration number
- * - Tag 3: Invoice date and time
- * - Tag 4: Invoice total (including VAT)
- * - Tag 5: VAT amount
+ * OFFICIAL REFERENCE:
+ * - PINT AE Specifications: https://docs.peppol.eu/poac/ae/2025-Q2/pint-ae/
+ * - UAE eInvoicing Portal: https://mof.gov.ae/einvoicing/
+ * 
+ * COMPLIANCE REQUIREMENTS:
+ * - TLV Format: Base64-encoded tag-length-value pairs
+ * - All QR codes MANDATORY on all invoice types (both B2B and B2C)
+ * - Verification: QR code allows instant verification of invoice authenticity
+ * - Currency: All amounts in AED (mandatory per UAE VAT regulations)
+ * 
+ * TLV Tag Structure (per official spec):
+ * - Tag 1: Seller name (max 255 bytes UTF-8)
+ * - Tag 2: VAT registration number / TIN (first 10 digits)
+ * - Tag 3: Invoice timestamp (ISO 8601 format)
+ * - Tag 4: Invoice total with VAT (in AED)
+ * - Tag 5: VAT amount (in AED)
  */
 export class UAEPeppolQRGenerator {
   /**

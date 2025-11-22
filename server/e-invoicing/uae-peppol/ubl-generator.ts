@@ -3,11 +3,27 @@ import type { Invoice, Customer, TenantCompanyProfile, InvoiceLineItem } from '@
 /**
  * UAE Peppol UBL 2.1 XML Generator
  * 
- * Generates UBL (Universal Business Language) 2.1 XML compliant with:
- * - PINT-AE (Peppol International Model - Arab Emirates)
- * - UAE Federal Tax Authority (FTA) requirements
+ * Generates UBL (Universal Business Language) 2.1 XML compliant with official:
+ * - PINT-AE (Peppol International Model - Arab Emirates) specifications
+ * - UAE Federal Tax Authority (FTA) e-invoicing requirements
  * 
- * Standard: urn:peppol:pint:billing-1@ae-1
+ * OFFICIAL REFERENCES:
+ * - PINT AE Billing Spec: https://docs.peppol.eu/poac/ae/2025-Q2/pint-ae/
+ * - UBL 2.1 Schema: urn:oasis:names:specification:ubl:schema:xsd:Invoice-2
+ * - PINT AE Profile: urn:peppol:pint:billing-1@ae-1
+ * 
+ * COMPLIANCE REQUIREMENTS:
+ * - All invoices in UBL 2.1 XML format (XML or JSON allowed per spec)
+ * - CustomizationID: Must be set to urn:peppol:pint:billing-1@ae-1
+ * - InvoiceTypeCode: 380 for tax invoices (mandatory)
+ * - Document Currency: Support multi-currency but report VAT in AED
+ * - VAT Amount: Mandatory in AED regardless of invoice currency (BTAE-08 and BTAE-20)
+ * - Tax Registration Number (TIN): First 10 digits of tax registration (unique identifier)
+ * - Credit Notes: Use document type 381 (Tax Credit Note) or 81 (Commercial Credit Note)
+ * 
+ * EXPORT TRANSACTIONS:
+ * - If foreign buyer is on Peppol network: Use their endpoint
+ * - If not on network: Use dummy endpoint; send invoice via email outside network
  */
 export class UAEPeppolUBLGenerator {
   /**

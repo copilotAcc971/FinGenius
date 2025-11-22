@@ -6,14 +6,30 @@ import type { IStorage } from '../../storage';
 /**
  * UAE Peppol Service - Main Orchestration Layer
  * 
- * Coordinates UBL XML generation, QR code creation, and ASP transmission
- * for UAE Peppol e-invoicing compliance.
+ * Implements PINT-AE (Peppol International Model - Arab Emirates) e-invoicing
+ * in compliance with UAE Ministry of Finance official specifications.
  * 
- * Key Requirements:
- * - UBL 2.1 XML format (PINT-AE standard)
- * - TLV QR code generation
- * - Transmission within 14 days of invoice date
- * - Audit trail preservation
+ * OFFICIAL SPECIFICATIONS:
+ * - PINT AE Billing: https://docs.peppol.eu/poac/ae/2025-Q2/pint-ae/
+ * - Test Specifications: https://test-docs.peppol.eu/pint/pint-ae/pint-ae/bis/
+ * - UAE eInvoicing Portal: https://mof.gov.ae/einvoicing/
+ * - Official Guidelines: https://docs.peppol.eu/poac/ae/2025-Q2/
+ * 
+ * Key Compliance Requirements:
+ * - UBL 2.1 XML format with CustomizationID: urn:peppol:pint:billing-1@ae-1
+ * - TLV (Tag-Length-Value) QR code generation
+ * - Invoice transmission within 14 days of invoice date
+ * - Document type codes: 380 (Tax Invoice), 381 (Tax Credit Note), 480 (Out of Scope), 81 (Credit Note)
+ * - VAT amount and total payable mandatory in AED per UAE VAT regulations
+ * - Tax identification number (TIN) required for both supplier and buyer
+ * - Transmission via Accredited Service Provider (ASP) using DCTCE 5-corner model
+ * - Audit trail preservation for all operations
+ * 
+ * Timeline:
+ * - Q4 2024: Service provider accreditation
+ * - Q2 2025: Legislation updates & system testing
+ * - July 2026: Phase 1 go-live (pilot)
+ * - January 2027: Mandatory for large businesses (revenue ≥ AED 50 million)
  */
 export class UAEPeppolService {
   private aspService: UAEPeppolASPService;
