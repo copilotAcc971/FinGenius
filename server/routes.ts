@@ -561,6 +561,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
+      // CRITICAL: Risk assessment for new customers
+      const riskAssessment = riskScoringService.calculateCustomerRiskScore(customer);
+      console.log(`[RiskScoring] Customer assessed: ${customer.name} (Score: ${riskAssessment.riskScore}, Level: ${riskAssessment.riskLevel})`);
+      
+      // Save ALL risk profiles (not just high-risk) for complete compliance
+      await storage.createCustomerRiskProfile({
+        tenantId: req.tenantId!,
+        customerId: customer.id,
+        riskScore: riskAssessment.riskScore,
+        riskLevel: riskAssessment.riskLevel,
+        riskFactors: riskAssessment.factors,
+        lastAssessmentDate: new Date(),
+        assessmentNotes: `Initial customer risk assessment - ${riskAssessment.riskLevel} risk`,
+      }).catch(err => console.error('[RiskScoring] Failed to save risk profile:', err));
+      
+      // CRITICAL: Sanctions screening for new customers
+      await sanctionsScreeningService.screenEntity({
+        tenantId: req.tenantId!,
+        entityType: 'customer',
+        entityId: customer.id,
+        entityName: customer.name,
+        entityData: {
+          company: customer.company,
+          billingAddress: customer.billingAddress,
+          shippingAddress: customer.shippingAddress,
+        },
+        screeningType: 'full',
+      }).catch(err => console.error('[SanctionsScreening] Failed to screen customer:', err));
+      
       res.json(customer);
     } catch (error: any) {
       // LOG FAILURE
@@ -698,6 +727,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: req.get('user-agent'),
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
+      
+      // CRITICAL: Risk assessment for vendors (supply chain risk)
+      // Convert vendor to customer-like structure for risk scoring
+      const vendorAsCustomer = {
+        ...vendor,
+        customerType: 'business' as const,
+        company: vendor.companyName || vendor.name,
+        billingAddress: vendor.address,
+      } as any;
+      
+      const riskAssessment = riskScoringService.calculateCustomerRiskScore(vendorAsCustomer);
+      console.log(`[RiskScoring] Vendor assessed: ${vendor.name} (Score: ${riskAssessment.riskScore}, Level: ${riskAssessment.riskLevel})`);
+      
+      // Save ALL risk profiles (not just high-risk) for complete compliance
+      await storage.createCustomerRiskProfile({
+        tenantId: req.tenantId!,
+        customerId: vendor.id, // Using vendor ID as customer ID for risk profile
+        riskScore: riskAssessment.riskScore,
+        riskLevel: riskAssessment.riskLevel,
+        riskFactors: riskAssessment.factors,
+        lastAssessmentDate: new Date(),
+        assessmentNotes: `Vendor supply chain risk assessment - ${riskAssessment.riskLevel} risk`,
+      }).catch(err => console.error('[RiskScoring] Failed to save vendor risk profile:', err));
+      
+      // CRITICAL: Sanctions screening for vendors
+      await sanctionsScreeningService.screenEntity({
+        tenantId: req.tenantId!,
+        entityType: 'vendor',
+        entityId: vendor.id,
+        entityName: vendor.name,
+        entityData: {
+          company: vendor.companyName || vendor.name,
+          address: vendor.address,
+        },
+        screeningType: 'full',
+      }).catch(err => console.error('[SanctionsScreening] Failed to screen vendor:', err));
       
       res.json(vendor);
     } catch (error: any) {
@@ -2044,17 +2109,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wasSuccessful: true,
       }).catch(err => console.error('Audit log failed:', err));
       
-      // CRITICAL WIRING: Monitor transaction for AML compliance
-      if (invoice.invoice.total && parseFloat(invoice.invoice.total) > 0) {
-        await transactionMonitoringService.monitorTransaction(req.tenantId!, {
-          id: invoice.invoice.id,
-          type: 'invoice',
-          customerId: invoice.invoice.customerId,
-          amount: parseFloat(invoice.invoice.total),
-          currency: invoice.invoice.currency || 'USD',
-          date: invoice.invoice.date ? new Date(invoice.invoice.date) : new Date(),
-        }).catch(err => console.error('[TransactionMonitoring] Failed:', err));
-      }
+      // CRITICAL WIRING: Monitor ALL transactions for AML compliance (including zero amounts and adjustments)
+      await transactionMonitoringService.monitorTransaction(req.tenantId!, {
+        id: invoice.invoice.id,
+        type: 'invoice',
+        customerId: invoice.invoice.customerId,
+        amount: parseFloat(invoice.invoice.total || '0'),
+        currency: invoice.invoice.currency || 'AED',
+        date: invoice.invoice.date ? new Date(invoice.invoice.date) : new Date(),
+      }).catch(err => console.error('[TransactionMonitoring] Failed:', err));
       
       res.json(invoice);
       
@@ -3712,17 +3775,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
-      // CRITICAL WIRING: Monitor transaction for AML compliance
-      if (result.payment.amount) {
-        await transactionMonitoringService.monitorTransaction(req.tenantId!, {
-          id: result.payment.id,
-          type: 'payment',
-          customerId: result.payment.customerId,
-          amount: parseFloat(result.payment.amount),
-          currency: result.payment.currency || 'USD',
-          date: result.payment.paymentDate ? new Date(result.payment.paymentDate) : new Date(),
-        }).catch(err => console.error('[TransactionMonitoring] Failed:', err));
-      }
+      // CRITICAL WIRING: Monitor ALL transactions for AML compliance (including zero amounts and adjustments)
+      await transactionMonitoringService.monitorTransaction(req.tenantId!, {
+        id: result.payment.id,
+        type: 'payment',
+        customerId: result.payment.customerId,
+        amount: parseFloat(result.payment.amount || '0'),
+        currency: result.payment.currency || 'AED',
+        date: result.payment.paymentDate ? new Date(result.payment.paymentDate) : new Date(),
+      }).catch(err => console.error('[TransactionMonitoring] Failed:', err));
       
       res.status(201).json(result);
       
@@ -5842,6 +5903,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
+      // CRITICAL: Monitor transaction for AML compliance (monitor ALL transactions including zero amounts)
+      await transactionMonitoringService.monitorTransaction(tenantId, {
+        id: bill.id,
+        type: 'invoice', // Bills are vendor invoices
+        customerId: '',  // Empty for bills
+        vendorId: bill.vendorId,
+        amount: parseFloat(bill.total || '0'),
+        currency: bill.currency || 'AED',
+        date: new Date(bill.billDate || new Date()),
+      }).catch(err => console.error('[TransactionMonitoring] Failed to monitor bill:', err));
+      
       res.status(201).json(bill);
       
       // Broadcast real-time dashboard metrics update
@@ -5915,6 +5987,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
+      // CRITICAL: Monitor updated transaction (including reversals/adjustments)
+      await transactionMonitoringService.monitorTransaction(tenantId, {
+        id: bill.id,
+        type: 'invoice',
+        customerId: '',
+        vendorId: bill.vendorId,
+        amount: parseFloat(bill.total || '0'),
+        currency: bill.currency || 'AED',
+        date: new Date(bill.billDate || new Date()),
+      }).catch(err => console.error('[TransactionMonitoring] Failed to monitor bill update:', err));
+      
       res.json(bill);
       
       // Broadcast real-time dashboard metrics update
@@ -5965,6 +6048,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: req.get('user-agent'),
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
+      
+      // CRITICAL: Monitor deletion (reversal transaction)
+      if (before) {
+        await transactionMonitoringService.monitorTransaction(tenantId, {
+          id: id,
+          type: 'invoice',
+          customerId: '',
+          vendorId: before.vendorId,
+          amount: -parseFloat(before.total || '0'), // Negative amount for reversal
+          currency: before.currency || 'AED',
+          date: new Date(),
+        }).catch(err => console.error('[TransactionMonitoring] Failed to monitor bill deletion:', err));
+      }
       
       res.json({ message: "Bill deleted" });
       
@@ -6096,6 +6192,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bill: result.bill,
         journalEntry: result.journalEntry,
       });
+      
+      // LOG SUCCESS (audit trail)
+      await auditLogger.logFinancialTransaction({
+        tenantId,
+        userId,
+        action: 'post',
+        entityType: 'bill',
+        entityId: id,
+        changes: { 
+          before: { status: bill.status }, 
+          after: { status: 'paid', journalEntryId: result.journalEntry.id } 
+        },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log:', err));
+      
+      // CRITICAL: Monitor posted transaction for AML compliance
+      await transactionMonitoringService.monitorTransaction(tenantId, {
+        id: result.bill.id,
+        type: 'invoice',
+        customerId: '',
+        vendorId: result.bill.vendorId,
+        amount: parseFloat(result.bill.total || '0'),
+        currency: result.bill.currency || 'AED',
+        date: new Date(),
+      }).catch(err => console.error('[TransactionMonitoring] Failed to monitor bill posting:', err));
       
       // Broadcast real-time dashboard metrics update
       broadcastMetricsUpdate(tenantId).catch(err => 
