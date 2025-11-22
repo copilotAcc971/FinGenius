@@ -42,6 +42,7 @@ import CompanyProfile from "@/features/settings/pages/company-profile-page";
 import JournalEntries from "@/features/accounts/pages/journal-entries-page";
 import JournalEntryDetailPage from "@/features/accounts/pages/journal-entry-detail-page";
 import Assets from "@/features/assets/pages/assets-page";
+import FixedAssets from "@/features/assets/pages/fixed-assets-page";
 import PurchaseOrders from "@/features/purchase-orders/pages/purchase-orders-page";
 import RoleManagement from "@/features/settings/pages/role-management-page";
 import UserManagement from "@/features/settings/pages/user-management-page";
@@ -98,6 +99,7 @@ function Router() {
           <Route path="/approvals" component={ConsolidatedApprovals} />
           <Route path="/workflows/:id" component={WorkflowForm} />
           <Route path="/assets" component={Assets} />
+          <Route path="/fixed-assets" component={FixedAssets} />
           <Route path="/banking" component={ConsolidatedBanking} />
           <Route path="/sales" component={ConsolidatedSales} />
           <Route path="/purchases" component={ConsolidatedPurchases} />

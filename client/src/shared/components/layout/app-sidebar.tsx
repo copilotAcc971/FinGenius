@@ -106,7 +106,8 @@ const accountingItems = [
   { title: "Journal Entries", url: "/journal-entries", icon: FileText },
   { title: "Approvals", url: "/approvals", icon: CheckCircle },
   { title: "Account Balances", url: "/account-balances", icon: PieChart },
-  { title: "Fixed Assets", url: "/assets", icon: Package },
+  { title: "Assets", url: "/assets", icon: Package },
+  { title: "Fixed Assets", url: "/fixed-assets", icon: Building },
   { title: "Banking", url: "/banking", icon: Landmark },
   { title: "Employee Expenses", url: "/employee-expenses", icon: Receipt },
 ];

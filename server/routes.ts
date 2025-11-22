@@ -65,6 +65,9 @@ import { RiskScoringService } from './compliance/risk-scoring';
 import { SanctionsScreeningService } from './compliance/sanctions-screening';
 import { TransactionMonitoringService } from './compliance/transaction-monitoring';
 import { broadcastMetricsUpdate } from './dashboard/metrics-websocket-server';
+import { FixedAssetsService } from './services/fixed-assets.service';
+const fixedAssetsService = new FixedAssetsService(storage);
+
 import {
   insertTenantSchema,
   insertTenantCompanyProfileSchema,
@@ -73,6 +76,7 @@ import {
   updateCustomerSchema,
   insertVendorSchema,
   insertAccountSchema,
+  insertFixedAssetSchema,
   insertItemSchema,
   insertTaxSchema,
   updateTaxSchema,
@@ -100,7 +104,6 @@ import {
   insertRetainerInvoiceLineItemSchema,
   insertJournalEntrySchema,
   journalEntryPayloadSchema,
-  insertAssetSchema,
   insertBankReconciliationSchema,
   bankReconciliationPayloadSchema,
   insertCustomReportConfigSchema,
@@ -13781,6 +13784,226 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('[Reports] Comparison error:', error);
       res.status(500).json({ message: error.message || 'Failed to fetch comparison data' });
+    }
+  });
+
+  // ====== FIXED ASSETS ROUTES ======
+  
+  // Get all fixed assets
+  app.get('/api/fixed-assets', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      const assets = await storage.getFixedAssets(tenantId);
+      res.json(assets);
+    } catch (error: any) {
+      console.error('[Fixed Assets] Error fetching assets:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch fixed assets' });
+    }
+  });
+
+  // Get single fixed asset
+  app.get('/api/fixed-assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const { id } = req.params;
+    const tenantId = req.tenantId;
+    
+    try {
+      const asset = await storage.getFixedAsset(id, tenantId);
+      if (!asset) {
+        return res.status(404).json({ message: 'Fixed asset not found' });
+      }
+      res.json(asset);
+    } catch (error: any) {
+      console.error('[Fixed Assets] Error fetching asset:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch fixed asset' });
+    }
+  });
+
+  // Create fixed asset
+  app.post('/api/fixed-assets', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const tenantId = req.tenantId;
+    
+    try {
+      // Validate request body
+      const assetData = insertFixedAssetSchema.parse(req.body);
+      
+      // Create asset with tenant ID
+      const asset = await storage.createFixedAsset({
+        ...assetData,
+        tenantId
+      });
+      
+      res.status(201).json(asset);
+    } catch (error: any) {
+      console.error('[Fixed Assets] Error creating asset:', error);
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ 
+          message: 'Invalid asset data',
+          errors: error.errors 
+        });
+      }
+      res.status(500).json({ message: error.message || 'Failed to create fixed asset' });
+    }
+  });
+
+  // Update fixed asset
+  app.put('/api/fixed-assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const { id } = req.params;
+    const tenantId = req.tenantId;
+    
+    try {
+      // Check if asset exists
+      const existingAsset = await storage.getFixedAsset(id, tenantId);
+      if (!existingAsset) {
+        return res.status(404).json({ message: 'Fixed asset not found' });
+      }
+      
+      // Update asset
+      const updatedAsset = await storage.updateFixedAsset(id, tenantId, req.body);
+      res.json(updatedAsset);
+    } catch (error: any) {
+      console.error('[Fixed Assets] Error updating asset:', error);
+      res.status(500).json({ message: error.message || 'Failed to update fixed asset' });
+    }
+  });
+
+  // Dispose fixed asset
+  app.post('/api/fixed-assets/:id/dispose', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const { id } = req.params;
+    const tenantId = req.tenantId;
+    const userId = req.user?.id;
+    
+    try {
+      const { disposalDate, disposalAmount } = req.body;
+      
+      if (!disposalDate || !disposalAmount) {
+        return res.status(400).json({ 
+          message: 'Disposal date and amount are required' 
+        });
+      }
+      
+      // Get asset details
+      const asset = await storage.getFixedAsset(id, tenantId);
+      if (!asset) {
+        return res.status(404).json({ message: 'Fixed asset not found' });
+      }
+      
+      if (asset.status === 'disposed') {
+        return res.status(400).json({ message: 'Asset is already disposed' });
+      }
+      
+      // Handle disposal with journal entry
+      const result = await fixedAssetsService.handleAssetDisposal(
+        asset,
+        new Date(disposalDate),
+        disposalAmount,
+        tenantId,
+        userId
+      );
+      
+      // Update asset status
+      const updatedAsset = await storage.disposeFixedAsset(
+        id, 
+        tenantId, 
+        new Date(disposalDate),
+        disposalAmount
+      );
+      
+      res.json({
+        asset: updatedAsset,
+        journalEntry: result.journalEntry,
+        gainLoss: result.gainLoss
+      });
+    } catch (error: any) {
+      console.error('[Fixed Assets] Error disposing asset:', error);
+      res.status(500).json({ message: error.message || 'Failed to dispose fixed asset' });
+    }
+  });
+
+  // Get depreciation schedule
+  app.get('/api/fixed-assets/:id/depreciation-schedule', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const { id } = req.params;
+    const tenantId = req.tenantId;
+    
+    try {
+      const asset = await storage.getFixedAsset(id, tenantId);
+      if (!asset) {
+        return res.status(404).json({ message: 'Fixed asset not found' });
+      }
+      
+      // Get saved depreciation records
+      const depreciationRecords = await storage.getFixedAssetDepreciationSchedule(id, tenantId);
+      
+      // Generate full schedule
+      const schedule = await fixedAssetsService.generateDepreciationSchedule(asset);
+      
+      res.json({
+        asset,
+        schedule,
+        recordedDepreciation: depreciationRecords
+      });
+    } catch (error: any) {
+      console.error('[Fixed Assets] Error fetching depreciation schedule:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch depreciation schedule' });
+    }
+  });
+
+  // Process monthly depreciation
+  app.post('/api/fixed-assets/process-depreciation', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const tenantId = req.tenantId;
+    const userId = req.user?.id;
+    
+    try {
+      const { periodDate } = req.body;
+      
+      if (!periodDate) {
+        return res.status(400).json({ 
+          message: 'Period date is required' 
+        });
+      }
+      
+      const date = new Date(periodDate);
+      
+      // Process depreciation for all active assets
+      const results = await fixedAssetsService.processMonthlyDepreciation(
+        tenantId,
+        date,
+        userId
+      );
+      
+      res.json({
+        message: `Processed depreciation for ${results.length} assets`,
+        results
+      });
+    } catch (error: any) {
+      console.error('[Fixed Assets] Error processing depreciation:', error);
+      res.status(500).json({ message: error.message || 'Failed to process depreciation' });
+    }
+  });
+
+  // Delete fixed asset
+  app.delete('/api/fixed-assets/:id', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    const { id } = req.params;
+    const tenantId = req.tenantId;
+    
+    try {
+      const asset = await storage.getFixedAsset(id, tenantId);
+      if (!asset) {
+        return res.status(404).json({ message: 'Fixed asset not found' });
+      }
+      
+      // Don't allow deletion of disposed assets with journal entries
+      if (asset.status === 'disposed') {
+        return res.status(400).json({ 
+          message: 'Cannot delete disposed assets. They must be retained for audit purposes.' 
+        });
+      }
+      
+      await storage.deleteFixedAsset(id, tenantId);
+      res.json({ message: 'Fixed asset deleted successfully' });
+    } catch (error: any) {
+      console.error('[Fixed Assets] Error deleting asset:', error);
+      res.status(500).json({ message: error.message || 'Failed to delete fixed asset' });
     }
   });
 

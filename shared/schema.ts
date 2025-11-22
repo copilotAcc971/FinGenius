@@ -3528,89 +3528,106 @@ export const purchaseOrderPayloadSchema = z.object({
 
 export type PurchaseOrderPayload = z.infer<typeof purchaseOrderPayloadSchema>;
 
-// Asset Management (Fixed Assets)
-export const assets = pgTable("assets", {
+// Fixed Assets Management (IAS 16 compliant)
+export const fixedAssets = pgTable("fixed_assets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
-  assetNumber: varchar("asset_number", { length: 100 }),
+  assetCode: varchar("asset_code", { length: 100 }).notNull(), // FA-YYYY-00001
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
-  category: varchar("category", { length: 100 }),
+  category: varchar("category", { length: 100 }), // Machinery, Equipment, Vehicle, Building, etc.
   
   // Financial details
-  purchaseDate: timestamp("purchase_date").notNull(),
-  purchasePrice: decimal("purchase_price", { precision: 12, scale: 2 }).notNull(),
-  salvageValue: decimal("salvage_value", { precision: 12, scale: 2 }).default("0"),
+  acquisitionDate: timestamp("acquisition_date").notNull(),
+  acquisitionCost: decimal("acquisition_cost", { precision: 20, scale: 2 }).notNull(),
+  salvageValue: decimal("salvage_value", { precision: 20, scale: 2 }).default("0"),
+  usefulLifeYears: decimal("useful_life_years", { precision: 5, scale: 2 }).notNull(), // Support partial years
   
   // Depreciation
-  depreciationMethod: varchar("depreciation_method", { length: 50 }).notNull(), // straight_line, declining_balance, units_of_production
-  usefulLife: integer("useful_life"), // in months or units
-  accumulatedDepreciation: decimal("accumulated_depreciation", { precision: 12, scale: 2 }).default("0"),
+  depreciationMethod: varchar("depreciation_method", { length: 50 }).notNull(), // 'straight-line', 'declining-balance', 'none'
+  decliningBalanceRate: decimal("declining_balance_rate", { precision: 5, scale: 2 }), // For declining balance method (e.g., 20%)
   
   // Status
-  status: varchar("status", { length: 50 }).notNull().default("active"), // active, disposed, sold
+  status: varchar("status", { length: 50 }).notNull().default("active"), // 'active', 'disposed', 'fully-depreciated'
   disposalDate: timestamp("disposal_date"),
-  disposalAmount: decimal("disposal_amount", { precision: 12, scale: 2 }),
+  disposalAmount: decimal("disposal_amount", { precision: 20, scale: 2 }),
+  
+  // Calculated fields (updated via triggers/service)
+  currentBookValue: decimal("current_book_value", { precision: 20, scale: 2 }),
+  accumulatedDepreciation: decimal("accumulated_depreciation", { precision: 20, scale: 2 }).default("0"),
   
   // Accounting
   assetAccountId: varchar("asset_account_id").references(() => accounts.id),
-  depreciationAccountId: varchar("depreciation_account_id").references(() => accounts.id),
+  depreciationExpenseAccountId: varchar("depreciation_expense_account_id").references(() => accounts.id),
+  accumulatedDepreciationAccountId: varchar("accumulated_depreciation_account_id").references(() => accounts.id),
   
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
-  unique("unique_asset_number_tenant").on(table.tenantId, table.assetNumber),
-  sql`CONSTRAINT check_asset_status CHECK (status IN ('active', 'disposed', 'sold'))`,
-  sql`CONSTRAINT check_asset_depreciation_method CHECK (depreciation_method IN ('straight_line', 'declining_balance', 'units_of_production'))`,
+  unique("unique_asset_code_tenant").on(table.tenantId, table.assetCode),
+  index("idx_fixed_assets_status").on(table.status),
+  index("idx_fixed_assets_category").on(table.category),
+  sql`CONSTRAINT check_fixed_asset_status CHECK (status IN ('active', 'disposed', 'fully-depreciated'))`,
+  sql`CONSTRAINT check_fixed_asset_depreciation_method CHECK (depreciation_method IN ('straight-line', 'declining-balance', 'none'))`,
 ]);
 
-export const insertAssetSchema = createInsertSchema(assets, {
-  status: z.enum(['active', 'disposed', 'sold']),
-  depreciationMethod: z.enum(['straight_line', 'declining_balance', 'units_of_production']),
-  purchasePrice: decimalString,
+export const insertFixedAssetSchema = createInsertSchema(fixedAssets, {
+  status: z.enum(['active', 'disposed', 'fully-depreciated']),
+  depreciationMethod: z.enum(['straight-line', 'declining-balance', 'none']),
+  acquisitionCost: decimalString,
   salvageValue: decimalString,
-  accumulatedDepreciation: decimalString,
+  usefulLifeYears: decimalString,
+  decliningBalanceRate: decimalString.nullable().optional(),
   disposalAmount: decimalString.nullable().optional(),
+  currentBookValue: decimalString.nullable().optional(),
+  accumulatedDepreciation: decimalString.nullable().optional(),
 }).omit({
   id: true,
-  assetNumber: true,
+  assetCode: true, // Auto-generated server-side
   tenantId: true, // Injected server-side
-  accumulatedDepreciation: true, // Will be defaulted server-side
+  currentBookValue: true, // Calculated server-side
+  accumulatedDepreciation: true, // Calculated server-side
   createdAt: true,
   updatedAt: true,
 }).extend({
-  purchaseDate: z.coerce.date(),
+  acquisitionDate: z.coerce.date(),
   disposalDate: z.coerce.date().nullable().optional(),
 });
 
-export type InsertAsset = z.infer<typeof insertAssetSchema>;
-export type Asset = typeof assets.$inferSelect;
+export type InsertFixedAsset = z.infer<typeof insertFixedAssetSchema>;
+export type FixedAsset = typeof fixedAssets.$inferSelect;
 
-// Asset Depreciation Schedule
-export const assetDepreciationSchedules = pgTable("asset_depreciation_schedules", {
+// Fixed Asset Depreciation
+export const fixedAssetDepreciation = pgTable("fixed_asset_depreciation", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
-  assetId: varchar("asset_id").notNull().references(() => assets.id),
+  fixedAssetId: varchar("fixed_asset_id").notNull().references(() => fixedAssets.id),
   periodDate: timestamp("period_date").notNull(),
-  depreciationAmount: decimal("depreciation_amount", { precision: 12, scale: 2 }).notNull(),
-  bookValue: decimal("book_value", { precision: 12, scale: 2 }).notNull(),
+  depreciationAmount: decimal("depreciation_amount", { precision: 20, scale: 2 }).notNull(),
+  accumulatedDepreciation: decimal("accumulated_depreciation", { precision: 20, scale: 2 }).notNull(),
+  bookValue: decimal("book_value", { precision: 20, scale: 2 }).notNull(),
   journalEntryId: varchar("journal_entry_id").references(() => journalEntries.id),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [
+  index("idx_fixed_asset_depreciation_asset").on(table.fixedAssetId),
+  index("idx_fixed_asset_depreciation_period").on(table.periodDate),
+]);
 
-export const insertAssetDepreciationScheduleSchema = createInsertSchema(assetDepreciationSchedules, {
+export const insertFixedAssetDepreciationSchema = createInsertSchema(fixedAssetDepreciation, {
   depreciationAmount: decimalString,
+  accumulatedDepreciation: decimalString,
   bookValue: decimalString,
 }).omit({
   id: true,
+  tenantId: true,
   createdAt: true,
 }).extend({
   periodDate: z.coerce.date(),
 });
 
-export type InsertAssetDepreciationSchedule = z.infer<typeof insertAssetDepreciationScheduleSchema>;
-export type AssetDepreciationSchedule = typeof assetDepreciationSchedules.$inferSelect;
+export type InsertFixedAssetDepreciation = z.infer<typeof insertFixedAssetDepreciationSchema>;
+export type FixedAssetDepreciation = typeof fixedAssetDepreciation.$inferSelect;
 
 // Bank Reconciliation
 export const bankReconciliations = pgTable("bank_reconciliations", {

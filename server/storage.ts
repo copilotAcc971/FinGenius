@@ -41,8 +41,8 @@ import {
   journalEntries,
   journalEntryLegs,
   journalEntrySequences,
-  assets,
-  assetDepreciationSchedules,
+  fixedAssets,
+  fixedAssetDepreciation,
   assetSequences,
   accountSequences,
   bankReconciliations,
@@ -132,10 +132,10 @@ import {
   type JournalEntryLeg,
   type InsertJournalEntryLeg,
   type JournalEntryPayload,
-  type Asset,
-  type InsertAsset,
-  type AssetDepreciationSchedule,
-  type InsertAssetDepreciationSchedule,
+  type FixedAsset,
+  type InsertFixedAsset,
+  type FixedAssetDepreciation as FixedAssetDepreciationType,
+  type InsertFixedAssetDepreciation,
   type BankReconciliation,
   type InsertBankReconciliation,
   type BankReconciliationItem,
@@ -516,14 +516,16 @@ export interface IStorage {
     tx?: typeof db
   ): Promise<JournalEntryLeg[]>;
 
-  // Asset operations
-  getAssets(tenantId: string): Promise<Asset[]>;
-  getAsset(id: string, tenantId: string): Promise<Asset | undefined>;
-  getAssetDepreciationSchedules(assetId: string, tenantId: string): Promise<AssetDepreciationSchedule[]>;
-  createAsset(asset: InsertAsset & { tenantId: string }): Promise<Asset>;
-  updateAsset(id: string, tenantId: string, asset: Partial<InsertAsset>): Promise<Asset>;
-  deleteAsset(id: string, tenantId: string): Promise<void>;
-  getNextAssetNumber(tenantId: string): Promise<string>;
+  // Fixed Asset operations
+  getFixedAssets(tenantId: string): Promise<FixedAsset[]>;
+  getFixedAsset(id: string, tenantId: string): Promise<FixedAsset | undefined>;
+  getFixedAssetDepreciationSchedule(assetId: string, tenantId: string): Promise<FixedAssetDepreciationType[]>;
+  createFixedAsset(asset: InsertFixedAsset & { tenantId: string }): Promise<FixedAsset>;
+  updateFixedAsset(id: string, tenantId: string, asset: Partial<InsertFixedAsset>): Promise<FixedAsset>;
+  disposeFixedAsset(id: string, tenantId: string, disposalDate: Date, disposalAmount: string): Promise<FixedAsset>;
+  deleteFixedAsset(id: string, tenantId: string): Promise<void>;
+  recordDepreciation(depreciation: InsertFixedAssetDepreciation & { tenantId: string }): Promise<FixedAssetDepreciationType>;
+  getNextFixedAssetCode(tenantId: string): Promise<string>;
 
   // Bank Reconciliation operations
   getBankReconciliations(tenantId: string): Promise<BankReconciliation[]>;
@@ -5273,56 +5275,57 @@ export class DatabaseStorage implements IStorage {
     return legs;
   }
 
-  // Asset operations
-  async getAssets(tenantId: string): Promise<Asset[]> {
+  // Fixed Asset operations
+  async getFixedAssets(tenantId: string): Promise<FixedAsset[]> {
     return await db
       .select()
-      .from(assets)
-      .where(eq(assets.tenantId, tenantId))
-      .orderBy(desc(assets.createdAt));
+      .from(fixedAssets)
+      .where(eq(fixedAssets.tenantId, tenantId))
+      .orderBy(desc(fixedAssets.createdAt));
   }
 
-  async getAsset(id: string, tenantId: string): Promise<Asset | undefined> {
-    const [asset] = await db.select().from(assets).where(
+  async getFixedAsset(id: string, tenantId: string): Promise<FixedAsset | undefined> {
+    const [asset] = await db.select().from(fixedAssets).where(
       and(
-        eq(assets.id, id),
-        eq(assets.tenantId, tenantId)
+        eq(fixedAssets.id, id),
+        eq(fixedAssets.tenantId, tenantId)
       )
     );
     return asset;
   }
 
-  async getAssetDepreciationSchedules(assetId: string, tenantId: string): Promise<AssetDepreciationSchedule[]> {
+  async getFixedAssetDepreciationSchedule(assetId: string, tenantId: string): Promise<FixedAssetDepreciationType[]> {
     return await db
       .select()
-      .from(assetDepreciationSchedules)
+      .from(fixedAssetDepreciation)
       .where(
         and(
-          eq(assetDepreciationSchedules.assetId, assetId),
-          eq(assetDepreciationSchedules.tenantId, tenantId)
+          eq(fixedAssetDepreciation.fixedAssetId, assetId),
+          eq(fixedAssetDepreciation.tenantId, tenantId)
         )
       )
-      .orderBy(assetDepreciationSchedules.periodDate);
+      .orderBy(fixedAssetDepreciation.periodDate);
   }
 
-  async createAsset(assetData: InsertAsset & { tenantId: string }): Promise<Asset> {
+  async createFixedAsset(assetData: InsertFixedAsset & { tenantId: string }): Promise<FixedAsset> {
     return await db.transaction(async (tx) => {
-      // Generate asset number using sequence
-      const assetNumber = await this.getNextAssetNumber(assetData.tenantId);
+      // Generate asset code using sequence
+      const assetCode = await this.getNextFixedAssetCode(assetData.tenantId);
 
       // SECURITY: Strip tenantId from payload, FORCE server tenantId
       const { tenantId: _, ...safeAssetData } = assetData;
 
-      // Create asset with auto-generated number and server-side defaults
+      // Create asset with auto-generated code and server-side defaults
       const [asset] = await tx
-        .insert(assets)
+        .insert(fixedAssets)
         .values({
           ...safeAssetData,
           tenantId: assetData.tenantId, // Inject from parameter
-          assetNumber, // Auto-generated
-          depreciationMethod: assetData.depreciationMethod || "straight_line", // Default if missing
+          assetCode, // Auto-generated
+          depreciationMethod: assetData.depreciationMethod || "straight-line", // Default if missing
           accumulatedDepreciation: assetData.accumulatedDepreciation || "0", // Default to "0"
           disposalAmount: assetData.disposalAmount || null, // Default to null
+          currentBookValue: assetData.acquisitionCost, // Initially equals acquisition cost
         })
         .returning();
 
@@ -5330,25 +5333,25 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async updateAsset(id: string, tenantId: string, assetData: Partial<InsertAsset>): Promise<Asset> {
-    const asset = await this.getAsset(id);
-    if (!asset || asset.tenantId !== tenantId) {
-      throw new Error("Asset not found");
+  async updateFixedAsset(id: string, tenantId: string, assetData: Partial<InsertFixedAsset>): Promise<FixedAsset> {
+    const asset = await this.getFixedAsset(id, tenantId);
+    if (!asset) {
+      throw new Error("Fixed asset not found");
     }
 
     // STRIP tenantId from payload - NEVER trust client
     const { tenantId: _, ...safeAssetData } = assetData as any;
 
     const [updatedAsset] = await db
-      .update(assets)
+      .update(fixedAssets)
       .set({
         ...safeAssetData,
         updatedAt: new Date(),
       })
       .where(
         and(
-          eq(assets.id, id),
-          eq(assets.tenantId, tenantId)
+          eq(fixedAssets.id, id),
+          eq(fixedAssets.tenantId, tenantId)
         )
       )
       .returning();
@@ -5360,59 +5363,108 @@ export class DatabaseStorage implements IStorage {
     return updatedAsset;
   }
 
-  async deleteAsset(id: string, tenantId: string): Promise<void> {
-    const asset = await this.getAsset(id);
-    if (!asset || asset.tenantId !== tenantId) {
-      throw new Error("Asset not found");
+  async disposeFixedAsset(id: string, tenantId: string, disposalDate: Date, disposalAmount: string): Promise<FixedAsset> {
+    const asset = await this.getFixedAsset(id, tenantId);
+    if (!asset) {
+      throw new Error("Fixed asset not found");
+    }
+
+    const [updatedAsset] = await db
+      .update(fixedAssets)
+      .set({
+        status: 'disposed',
+        disposalDate,
+        disposalAmount,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(fixedAssets.id, id),
+          eq(fixedAssets.tenantId, tenantId)
+        )
+      )
+      .returning();
+
+    return updatedAsset;
+  }
+
+  async deleteFixedAsset(id: string, tenantId: string): Promise<void> {
+    const asset = await this.getFixedAsset(id, tenantId);
+    if (!asset) {
+      throw new Error("Fixed asset not found");
     }
 
     await db.transaction(async (tx) => {
-      // Delete depreciation schedules first
+      // Delete depreciation records first
       await tx
-        .delete(assetDepreciationSchedules)
-        .where(eq(assetDepreciationSchedules.assetId, id));
+        .delete(fixedAssetDepreciation)
+        .where(eq(fixedAssetDepreciation.fixedAssetId, id));
 
       // Delete asset
       await tx
-        .delete(assets)
-        .where(and(eq(assets.id, id), eq(assets.tenantId, tenantId)));
+        .delete(fixedAssets)
+        .where(and(eq(fixedAssets.id, id), eq(fixedAssets.tenantId, tenantId)));
     });
   }
 
-  async getNextAssetNumber(tenantId: string): Promise<string> {
+  async recordDepreciation(depreciation: InsertFixedAssetDepreciation & { tenantId: string }): Promise<FixedAssetDepreciationType> {
+    const [record] = await db
+      .insert(fixedAssetDepreciation)
+      .values({
+        ...depreciation,
+        id: crypto.randomUUID(),
+        createdAt: new Date()
+      })
+      .returning();
+
+    return record;
+  }
+
+  async getNextFixedAssetCode(tenantId: string): Promise<string> {
     return await db.transaction(async (tx) => {
-      // Get or create sequence record (transaction provides basic isolation)
+      const year = new Date().getFullYear();
+      const prefix = `FA-${year}`;
+      
+      // Get or create sequence record for this year
       let [sequence] = await tx
         .select()
         .from(assetSequences)
-        .where(eq(assetSequences.tenantId, tenantId))
+        .where(
+          and(
+            eq(assetSequences.tenantId, tenantId),
+            eq(assetSequences.prefix, prefix)
+          )
+        )
         .limit(1);
 
       if (!sequence) {
-        // Create initial sequence
+        // Create initial sequence for this year
         [sequence] = await tx
           .insert(assetSequences)
           .values({
+            id: crypto.randomUUID(),
             tenantId,
-            lastNumber: 1,
-            prefix: "ASSET-",
+            lastSequence: 1,
+            prefix,
+            createdAt: new Date(),
+            updatedAt: new Date()
           })
           .returning();
 
-        return `ASSET-${String(1).padStart(4, '0')}`;
+        return `${prefix}-00001`;
       }
 
       // Increment and update
-      const nextNumber = sequence.lastNumber + 1;
+      const nextNumber = sequence.lastSequence + 1;
       await tx
         .update(assetSequences)
         .set({
-          lastNumber: nextNumber,
+          lastSequence: nextNumber,
           updatedAt: new Date(),
         })
-        .where(eq(assetSequences.tenantId, tenantId));
+        .where(eq(assetSequences.id, sequence.id));
 
-      return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
+      return `${prefix}-${String(nextNumber).padStart(5, '0')}`;
     });
   }
 
