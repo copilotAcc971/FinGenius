@@ -3016,7 +3016,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertQuoteLineItemSchema.parse({ ...item, tenantId })
       );
       
-      const quote = await storage.createQuote(validatedQuote, validatedLineItems);
+      // Calculate taxes using TaxCalculator service
+      const lineItemsForTax = validatedLineItems.map(item => ({
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
+      }));
+      
+      const taxCalc = TaxCalculator.calculateInvoiceTax(
+        lineItemsForTax,
+        5, // Default UAE VAT rate
+        false // Tax-exclusive
+      );
+      
+      // Merge calculated taxes into validated quote
+      const quoteWithTax = {
+        ...validatedQuote,
+        subtotal: taxCalc.subtotal.toFixed(2),
+        taxAmount: taxCalc.totalTax.toFixed(2),
+        total: taxCalc.total.toFixed(2)
+      };
+      
+      const quote = await storage.createQuote({ ...quoteWithTax }, validatedLineItems);
       res.status(201).json(quote);
     } catch (error: any) {
       if (error.name === 'ZodError') {
@@ -3150,7 +3171,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertSalesOrderLineItemSchema.parse({ ...item, tenantId })
       );
       
-      const order = await storage.createSalesOrder(validatedOrder, validatedLineItems);
+      // Calculate taxes using TaxCalculator service
+      const lineItemsForTax = validatedLineItems.map(item => ({
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
+      }));
+      
+      const taxCalc = TaxCalculator.calculateInvoiceTax(
+        lineItemsForTax,
+        5, // Default UAE VAT rate
+        false // Tax-exclusive
+      );
+      
+      // Merge calculated taxes into validated order
+      const orderWithTax = {
+        ...validatedOrder,
+        subtotal: taxCalc.subtotal.toFixed(2),
+        taxAmount: taxCalc.totalTax.toFixed(2),
+        total: taxCalc.total.toFixed(2)
+      };
+      
+      const order = await storage.createSalesOrder(orderWithTax, validatedLineItems);
       res.status(201).json(order);
     } catch (error: any) {
       if (error.name === 'ZodError') {
@@ -3285,7 +3327,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertCreditNoteLineItemSchema.parse({ ...item, tenantId })
       );
       
-      const creditNote = await storage.createCreditNote(validatedCreditNote, validatedLineItems);
+      // Calculate taxes using TaxCalculator service
+      const lineItemsForTax = validatedLineItems.map(item => ({
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
+      }));
+      
+      const taxCalc = TaxCalculator.calculateInvoiceTax(
+        lineItemsForTax,
+        5, // Default UAE VAT rate
+        false // Tax-exclusive
+      );
+      
+      // Merge calculated taxes into validated credit note
+      const creditNoteWithTax = {
+        ...validatedCreditNote,
+        subtotal: taxCalc.subtotal.toFixed(2),
+        taxAmount: taxCalc.totalTax.toFixed(2),
+        total: taxCalc.total.toFixed(2)
+      };
+      
+      const creditNote = await storage.createCreditNote(creditNoteWithTax, validatedLineItems);
       res.status(201).json(creditNote);
     } catch (error: any) {
       if (error.name === 'ZodError') {
@@ -3845,7 +3908,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertRecurringInvoiceLineItemSchema.parse(item)
       );
       
-      const recurringInvoice = await storage.createRecurringInvoice(validatedData, validatedLineItems);
+      // Calculate taxes using TaxCalculator service
+      const lineItemsForTax = validatedLineItems.map(item => ({
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
+      }));
+      
+      const taxCalc = TaxCalculator.calculateInvoiceTax(
+        lineItemsForTax,
+        5, // Default UAE VAT rate
+        false // Tax-exclusive
+      );
+      
+      // Merge calculated taxes into validated data
+      const recurringWithTax = {
+        ...validatedData,
+        subtotal: taxCalc.subtotal.toFixed(2),
+        taxAmount: taxCalc.totalTax.toFixed(2),
+        total: taxCalc.total.toFixed(2)
+      };
+      
+      const recurringInvoice = await storage.createRecurringInvoice(recurringWithTax, validatedLineItems);
       res.status(201).json(recurringInvoice);
     } catch (error: any) {
       if (error.name === 'ZodError') {
@@ -3974,7 +4058,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertRetainerInvoiceLineItemSchema.parse(item)
       );
       
-      const retainerInvoice = await storage.createRetainerInvoice(validatedData, validatedLineItems);
+      // Calculate taxes using TaxCalculator service
+      const lineItemsForTax = validatedLineItems.map(item => ({
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
+      }));
+      
+      const taxCalc = TaxCalculator.calculateInvoiceTax(
+        lineItemsForTax,
+        5, // Default UAE VAT rate
+        false // Tax-exclusive
+      );
+      
+      // Merge calculated taxes into validated data
+      const retainerWithTax = {
+        ...validatedData,
+        subtotal: taxCalc.subtotal.toFixed(2),
+        taxAmount: taxCalc.totalTax.toFixed(2),
+        total: taxCalc.total.toFixed(2)
+      };
+      
+      const retainerInvoice = await storage.createRetainerInvoice(retainerWithTax, validatedLineItems);
       res.status(201).json(retainerInvoice);
     } catch (error: any) {
       console.error('Error creating retainer invoice:', error);
