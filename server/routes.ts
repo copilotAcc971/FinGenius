@@ -815,22 +815,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/vendors/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('vendors.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const userId = req.user.claims.sub;
+      const tenantId = req.tenantId!;
       
-      // Fetch the vendor to get its tenantId (also serves as before state)
-      const vendor = await storage.getVendor(id);
+      // SECURITY: Fetch the vendor with tenant verification (also serves as before state)
+      const vendor = await storage.getVendor(id, tenantId);
       if (!vendor) {
-        return res.status(404).json({ message: "Vendor not found" });
-      }
-      
-      // Verify user owns the tenant this vendor belongs to
-      const tenant = await storage.getTenant(vendor.tenantId);
-      if (!tenant || tenant.ownerId !== userId) {
-        return res.status(403).json({ message: "Access denied" });
+        return res.status(404).json({ message: "Vendor not found or access denied" });
       }
       
       // Now perform the update
-      const updated = await storage.updateVendor(id, vendor.tenantId, req.body);
+      const updated = await storage.updateVendor(id, tenantId, req.body);
       
       // LOG SUCCESS
       await auditLogger.logFinancialTransaction({
@@ -906,22 +900,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/vendors/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('vendors.delete'), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const userId = req.user.claims.sub;
+      const tenantId = req.tenantId!;
       
-      // Fetch the vendor to get its tenantId (also serves as before state)
-      const vendor = await storage.getVendor(id);
+      // SECURITY: Fetch the vendor with tenant verification (also serves as before state)
+      const vendor = await storage.getVendor(id, tenantId);
       if (!vendor) {
-        return res.status(404).json({ message: "Vendor not found" });
-      }
-      
-      // Verify user owns the tenant this vendor belongs to
-      const tenant = await storage.getTenant(vendor.tenantId);
-      if (!tenant || tenant.ownerId !== userId) {
-        return res.status(403).json({ message: "Access denied" });
+        return res.status(404).json({ message: "Vendor not found or access denied" });
       }
       
       // Now perform the delete
-      await storage.deleteVendor(id, vendor.tenantId);
+      await storage.deleteVendor(id, tenantId);
       
       // LOG SUCCESS
       await auditLogger.logFinancialTransaction({
@@ -2102,16 +2090,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/invoices/:id/line-items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.read'), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const userId = req.user.claims.sub;
       
-      const invoice = await storage.getInvoice(id);
+      // SECURITY: Verify invoice belongs to tenant
+      const invoice = await storage.getInvoice(id, req.tenantId);
       if (!invoice) {
-        return res.status(404).json({ message: "Invoice not found" });
-      }
-      
-      const tenant = await storage.getTenant(invoice.tenantId);
-      if (!tenant || tenant.ownerId !== userId) {
-        return res.status(403).json({ message: "Access denied" });
+        return res.status(404).json({ message: "Invoice not found or access denied" });
       }
       
       const lineItems = await storage.getInvoiceLineItems(id, req.tenantId);
@@ -5075,9 +5058,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/journal-entries/:id", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
       const { id } = req.params;
-      const journalEntry = await storage.getJournalEntry(id);
+      const tenantId = req.tenantId!;
+      // SECURITY: Verify journal entry belongs to tenant
+      const journalEntry = await storage.getJournalEntry(id, tenantId);
       if (!journalEntry) {
-        return res.status(404).json({ message: "Journal entry not found" });
+        return res.status(404).json({ message: "Journal entry not found or access denied" });
       }
       res.json(journalEntry);
     } catch (error: any) {

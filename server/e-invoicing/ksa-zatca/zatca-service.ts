@@ -60,12 +60,14 @@ export class KSAZATCAService {
     error?: string;
   }> {
     try {
-      const invoice = await this.storage.getInvoice(invoiceId);
-      if (!invoice || invoice.tenantId !== tenantId) {
-        return { success: false, error: 'Invoice not found' };
+      // SECURITY: Get invoice with tenant verification
+      const invoice = await this.storage.getInvoice(invoiceId, tenantId);
+      if (!invoice) {
+        return { success: false, error: 'Invoice not found or access denied' };
       }
       
-      const customer = await this.storage.getCustomer(invoice.customerId);
+      // SECURITY: Get customer with tenant verification
+      const customer = await this.storage.getCustomer(invoice.customerId, tenantId);
       if (!customer) {
         return { success: false, error: 'Customer not found' };
       }
@@ -139,9 +141,10 @@ export class KSAZATCAService {
     error?: string;
   }> {
     try {
-      const invoice = await this.storage.getInvoice(invoiceId);
-      if (!invoice || invoice.tenantId !== tenantId) {
-        return { success: false, error: 'Invoice not found' };
+      // SECURITY: Get invoice with tenant verification
+      const invoice = await this.storage.getInvoice(invoiceId, tenantId);
+      if (!invoice) {
+        return { success: false, error: 'Invoice not found or access denied' };
       }
       
       if (!invoice.zatcaFatoorahXml || !invoice.zatcaUuid || !invoice.zatcaHash) {
@@ -186,9 +189,10 @@ export class KSAZATCAService {
     error?: string;
   }> {
     try {
-      const invoice = await this.storage.getInvoice(invoiceId);
-      if (!invoice || invoice.tenantId !== tenantId) {
-        return { success: false, error: 'Invoice not found' };
+      // SECURITY: Get invoice with tenant verification
+      const invoice = await this.storage.getInvoice(invoiceId, tenantId);
+      if (!invoice) {
+        return { success: false, error: 'Invoice not found or access denied' };
       }
       
       if (!invoice.zatcaFatoorahXml || !invoice.zatcaUuid || !invoice.zatcaHash) {

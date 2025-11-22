@@ -309,7 +309,7 @@ export interface IStorage {
 
   // Customer operations
   getCustomersByTenant(tenantId: string): Promise<Customer[]>;
-  getCustomer(id: string): Promise<Customer | undefined>;
+  getCustomer(id: string, tenantId: string): Promise<Customer | undefined>;
   getCustomerById(id: string, tenantId: string): Promise<Customer | null>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   updateCustomer(id: string, tenantId: string, customer: Partial<InsertCustomer>): Promise<Customer>;
@@ -317,14 +317,14 @@ export interface IStorage {
 
   // Vendor operations
   getVendorsByTenant(tenantId: string): Promise<Vendor[]>;
-  getVendor(id: string): Promise<Vendor | undefined>;
+  getVendor(id: string, tenantId: string): Promise<Vendor | undefined>;
   createVendor(vendor: InsertVendor): Promise<Vendor>;
   updateVendor(id: string, tenantId: string, vendor: Partial<InsertVendor>): Promise<Vendor>;
   deleteVendor(id: string, tenantId: string): Promise<void>;
 
   // Account operations
   getAccounts(tenantId: string): Promise<Account[]>;
-  getAccount(id: string): Promise<Account | undefined>;
+  getAccount(id: string, tenantId: string): Promise<Account | undefined>;
   getAccountByCode(tenantId: string, code: string): Promise<Account[]>;
   createAccount(account: InsertAccount & { tenantId: string }): Promise<Account>;
   updateAccount(id: string, tenantId: string, account: Partial<InsertAccount>): Promise<Account>;
@@ -337,7 +337,7 @@ export interface IStorage {
 
   // Item operations
   getItems(tenantId: string): Promise<Item[]>;
-  getItem(id: string): Promise<Item | undefined>;
+  getItem(id: string, tenantId: string): Promise<Item | undefined>;
   createItem(item: InsertItem & { tenantId: string }): Promise<Item>;
   updateItem(id: string, tenantId: string, item: Partial<InsertItem>): Promise<Item>;
   deleteItem(id: string, tenantId: string): Promise<void>;
@@ -355,14 +355,14 @@ export interface IStorage {
 
   // Tax operations
   getTaxes(tenantId: string): Promise<Tax[]>;
-  getTax(id: string): Promise<Tax | undefined>;
+  getTax(id: string, tenantId: string): Promise<Tax | undefined>;
   createTax(tax: InsertTax & { tenantId: string }): Promise<Tax>;
   updateTax(id: string, tenantId: string, tax: Partial<InsertTax>): Promise<Tax>;
   deleteTax(id: string, tenantId: string): Promise<void>;
 
   // Invoice operations
   getInvoicesByTenant(tenantId: string, includeDeleted?: boolean): Promise<Invoice[]>;
-  getInvoice(id: string): Promise<Invoice | undefined>;
+  getInvoice(id: string, tenantId: string): Promise<Invoice | undefined>;
   getInvoiceById(id: string, tenantId: string): Promise<Invoice | null>;
   getInvoiceLineItems(invoiceId: string, tenantId: string): Promise<InvoiceLineItem[]>;
   getInvoiceLineItemsWithTax(invoiceId: string, tenantId: string): Promise<Array<{
@@ -388,16 +388,16 @@ export interface IStorage {
 
   // Bill operations
   getBillsByTenant(tenantId: string): Promise<Bill[]>;
-  getBill(id: string): Promise<Bill | undefined>;
+  getBill(id: string, tenantId: string): Promise<Bill | undefined>;
   getBillById(id: string, tenantId: string): Promise<Bill | null>;
-  getBillLineItems(billId: string): Promise<BillLineItem[]>;
+  getBillLineItems(billId: string, tenantId: string): Promise<BillLineItem[]>;
   createBillWithItems(payload: BillPayload, tenantId: string): Promise<Bill>;
   updateBillWithItems(id: string, tenantId: string, payload: BillPayload): Promise<Bill>;
   deleteBill(id: string, tenantId: string): Promise<void>;
 
   // Purchase Order operations
   getPurchaseOrders(tenantId: string): Promise<PurchaseOrder[]>;
-  getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined>;
+  getPurchaseOrder(id: string, tenantId: string): Promise<PurchaseOrder | undefined>;
   getPurchaseOrderLineItems(purchaseOrderId: string, tenantId: string): Promise<PurchaseOrderLineItem[]>;
   createPurchaseOrderWithItems(payload: PurchaseOrderPayload): Promise<PurchaseOrder>;
   updatePurchaseOrderWithItems(id: string, tenantId: string, payload: PurchaseOrderPayload): Promise<PurchaseOrder>;
@@ -406,7 +406,7 @@ export interface IStorage {
 
   // Expense operations
   getExpensesByTenant(tenantId: string): Promise<Expense[]>;
-  getExpense(id: string): Promise<Expense | undefined>;
+  getExpense(id: string, tenantId: string): Promise<Expense | undefined>;
   createExpense(expense: InsertExpense): Promise<Expense>;
   updateExpense(id: string, tenantId: string, expense: Partial<InsertExpense>): Promise<Expense>;
 
@@ -495,7 +495,7 @@ export interface IStorage {
 
   // Journal Entry operations
   getJournalEntries(tenantId: string): Promise<JournalEntry[]>;
-  getJournalEntry(id: string): Promise<JournalEntry | undefined>;
+  getJournalEntry(id: string, tenantId: string): Promise<JournalEntry | undefined>;
   getJournalEntryLegs(journalEntryId: string, tenantId: string): Promise<JournalEntryLeg[]>;
   createJournalEntryWithLegs(payload: JournalEntryPayload): Promise<JournalEntry>;
   updateJournalEntryWithLegs(id: string, tenantId: string, payload: JournalEntryPayload): Promise<JournalEntry>;
@@ -516,7 +516,7 @@ export interface IStorage {
 
   // Asset operations
   getAssets(tenantId: string): Promise<Asset[]>;
-  getAsset(id: string): Promise<Asset | undefined>;
+  getAsset(id: string, tenantId: string): Promise<Asset | undefined>;
   getAssetDepreciationSchedules(assetId: string, tenantId: string): Promise<AssetDepreciationSchedule[]>;
   createAsset(asset: InsertAsset & { tenantId: string }): Promise<Asset>;
   updateAsset(id: string, tenantId: string, asset: Partial<InsertAsset>): Promise<Asset>;
@@ -525,7 +525,7 @@ export interface IStorage {
 
   // Bank Reconciliation operations
   getBankReconciliations(tenantId: string): Promise<BankReconciliation[]>;
-  getBankReconciliation(id: string): Promise<BankReconciliation | undefined>;
+  getBankReconciliation(id: string, tenantId: string): Promise<BankReconciliation | undefined>;
   getBankReconciliationItems(reconciliationId: string, tenantId: string): Promise<BankReconciliationItem[]>;
   createBankReconciliationWithItems(payload: BankReconciliationPayload): Promise<BankReconciliation>;
   updateBankReconciliationWithItems(id: string, tenantId: string, payload: BankReconciliationPayload): Promise<BankReconciliation>;
@@ -1329,8 +1329,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(customers.createdAt));
   }
 
-  async getCustomer(id: string): Promise<Customer | undefined> {
-    const [customer] = await db.select().from(customers).where(eq(customers.id, id));
+  async getCustomer(id: string, tenantId: string): Promise<Customer | undefined> {
+    const [customer] = await db.select().from(customers).where(
+      and(
+        eq(customers.id, id),
+        eq(customers.tenantId, tenantId)
+      )
+    );
     return customer;
   }
 
@@ -1372,11 +1377,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteCustomer(id: string, tenantId: string): Promise<void> {
-    const customer = await this.getCustomer(id);
-    if (!customer || customer.tenantId !== tenantId) {
+    const customer = await this.getCustomer(id, tenantId);
+    if (!customer) {
       throw new Error("Customer not found");
     }
-    await db.delete(customers).where(eq(customers.id, id));
+    await db.delete(customers).where(
+      and(
+        eq(customers.id, id),
+        eq(customers.tenantId, tenantId)
+      )
+    );
   }
 
   // Vendor operations
@@ -1388,8 +1398,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(vendors.createdAt));
   }
 
-  async getVendor(id: string): Promise<Vendor | undefined> {
-    const [vendor] = await db.select().from(vendors).where(eq(vendors.id, id));
+  async getVendor(id: string, tenantId: string): Promise<Vendor | undefined> {
+    const [vendor] = await db.select().from(vendors).where(
+      and(
+        eq(vendors.id, id),
+        eq(vendors.tenantId, tenantId)
+      )
+    );
     return vendor;
   }
 
@@ -1416,11 +1431,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteVendor(id: string, tenantId: string): Promise<void> {
-    const vendor = await this.getVendor(id);
-    if (!vendor || vendor.tenantId !== tenantId) {
+    const vendor = await this.getVendor(id, tenantId);
+    if (!vendor) {
       throw new Error("Vendor not found");
     }
-    await db.delete(vendors).where(eq(vendors.id, id));
+    await db.delete(vendors).where(
+      and(
+        eq(vendors.id, id),
+        eq(vendors.tenantId, tenantId)
+      )
+    );
   }
 
   // Account operations
@@ -1432,8 +1452,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(accounts.createdAt));
   }
 
-  async getAccount(id: string): Promise<Account | undefined> {
-    const [account] = await db.select().from(accounts).where(eq(accounts.id, id));
+  async getAccount(id: string, tenantId: string): Promise<Account | undefined> {
+    const [account] = await db.select().from(accounts).where(
+      and(
+        eq(accounts.id, id),
+        eq(accounts.tenantId, tenantId)
+      )
+    );
     return account;
   }
 
@@ -1462,8 +1487,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateAccount(id: string, tenantId: string, accountData: Partial<InsertAccount>): Promise<Account> {
-    const account = await this.getAccount(id);
-    if (!account || account.tenantId !== tenantId) {
+    const account = await this.getAccount(id, tenantId);
+    if (!account) {
       throw new Error("Account not found");
     }
     
@@ -1476,8 +1501,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteAccount(id: string, tenantId: string): Promise<void> {
-    const account = await this.getAccount(id);
-    if (!account || account.tenantId !== tenantId) {
+    const account = await this.getAccount(id, tenantId);
+    if (!account) {
       throw new Error("Account not found");
     }
     await db.delete(accounts).where(and(eq(accounts.id, id), eq(accounts.tenantId, tenantId)));
@@ -1577,8 +1602,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(items.createdAt));
   }
 
-  async getItem(id: string): Promise<Item | undefined> {
-    const [item] = await db.select().from(items).where(eq(items.id, id));
+  async getItem(id: string, tenantId: string): Promise<Item | undefined> {
+    const [item] = await db.select().from(items).where(
+      and(
+        eq(items.id, id),
+        eq(items.tenantId, tenantId)
+      )
+    );
     return item;
   }
 
@@ -1704,8 +1734,13 @@ export class DatabaseStorage implements IStorage {
       .where(eq(taxes.tenantId, tenantId));
   }
 
-  async getTax(id: string): Promise<Tax | undefined> {
-    const [tax] = await db.select().from(taxes).where(eq(taxes.id, id));
+  async getTax(id: string, tenantId: string): Promise<Tax | undefined> {
+    const [tax] = await db.select().from(taxes).where(
+      and(
+        eq(taxes.id, id),
+        eq(taxes.tenantId, tenantId)
+      )
+    );
     return tax;
   }
 
@@ -1791,8 +1826,14 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(invoices.invoiceDate));
   }
 
-  async getInvoice(id: string): Promise<Invoice | undefined> {
-    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+  async getInvoice(id: string, tenantId: string): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices).where(
+      and(
+        eq(invoices.id, id),
+        eq(invoices.tenantId, tenantId),
+        isNull(invoices.deletedAt) // Include soft-delete check for invoices
+      )
+    );
     return invoice;
   }
 
@@ -2071,8 +2112,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(bills.billDate));
   }
 
-  async getBill(id: string): Promise<Bill | undefined> {
-    const [bill] = await db.select().from(bills).where(eq(bills.id, id));
+  async getBill(id: string, tenantId: string): Promise<Bill | undefined> {
+    const [bill] = await db.select().from(bills).where(
+      and(
+        eq(bills.id, id),
+        eq(bills.tenantId, tenantId)
+      )
+    );
     return bill;
   }
 
@@ -2296,13 +2342,14 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(purchaseOrders.orderDate));
   }
 
-  async getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined> {
+  async getPurchaseOrder(id: string, tenantId: string): Promise<PurchaseOrder | undefined> {
     const [po] = await db
       .select()
       .from(purchaseOrders)
       .where(
         and(
           eq(purchaseOrders.id, id),
+          eq(purchaseOrders.tenantId, tenantId),
           isNull(purchaseOrders.deletedAt)
         )
       );
@@ -2542,8 +2589,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(expenses.date));
   }
 
-  async getExpense(id: string): Promise<Expense | undefined> {
-    const [expense] = await db.select().from(expenses).where(eq(expenses.id, id));
+  async getExpense(id: string, tenantId: string): Promise<Expense | undefined> {
+    const [expense] = await db.select().from(expenses).where(
+      and(
+        eq(expenses.id, id),
+        eq(expenses.tenantId, tenantId)
+      )
+    );
     return expense;
   }
 
@@ -4629,11 +4681,16 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(journalEntries.entryDate));
   }
 
-  async getJournalEntry(id: string): Promise<JournalEntry | undefined> {
+  async getJournalEntry(id: string, tenantId: string): Promise<JournalEntry | undefined> {
     const [entry] = await db
       .select()
       .from(journalEntries)
-      .where(eq(journalEntries.id, id));
+      .where(
+        and(
+          eq(journalEntries.id, id),
+          eq(journalEntries.tenantId, tenantId)
+        )
+      );
     return entry;
   }
 
@@ -4901,8 +4958,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(assets.createdAt));
   }
 
-  async getAsset(id: string): Promise<Asset | undefined> {
-    const [asset] = await db.select().from(assets).where(eq(assets.id, id));
+  async getAsset(id: string, tenantId: string): Promise<Asset | undefined> {
+    const [asset] = await db.select().from(assets).where(
+      and(
+        eq(assets.id, id),
+        eq(assets.tenantId, tenantId)
+      )
+    );
     return asset;
   }
 
@@ -5039,11 +5101,16 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(bankReconciliations.reconciliationDate));
   }
 
-  async getBankReconciliation(id: string): Promise<BankReconciliation | undefined> {
+  async getBankReconciliation(id: string, tenantId: string): Promise<BankReconciliation | undefined> {
     const [reconciliation] = await db
       .select()
       .from(bankReconciliations)
-      .where(eq(bankReconciliations.id, id));
+      .where(
+        and(
+          eq(bankReconciliations.id, id),
+          eq(bankReconciliations.tenantId, tenantId)
+        )
+      );
     return reconciliation;
   }
 

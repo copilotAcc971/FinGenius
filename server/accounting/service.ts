@@ -323,8 +323,9 @@ export async function fetchAccount(
   tenantId: string,
   accountId: string
 ): Promise<Account> {
+  // SECURITY: Fetch account with tenant verification
   const account = await retryOperation(
-    async () => storage.getAccount(accountId),
+    async () => storage.getAccount(accountId, tenantId),
     3, // maxAttempts
     1000 // delayMs
   );
@@ -334,22 +335,7 @@ export async function fetchAccount(
       new ValidationError(`Account not found: ${accountId}`, { accountId }),
       { tenantId, accountId }
     );
-    throw new ValidationError(`Account not found: ${accountId}`, { accountId });
-  }
-  
-  // Security: Verify account belongs to tenant
-  if (account.tenantId !== tenantId) {
-    logError(
-      new ValidationError(
-        `Account does not belong to tenant: ${accountId}`,
-        { accountId, accountTenantId: account.tenantId, requestTenantId: tenantId }
-      ),
-      { tenantId, accountId }
-    );
-    throw new ValidationError(
-      `Account does not belong to tenant: ${accountId}`,
-      { accountId, accountTenantId: account.tenantId, requestTenantId: tenantId }
-    );
+    throw new ValidationError(`Account not found or access denied: ${accountId}`, { accountId });
   }
   
   if (!account.isActive) {

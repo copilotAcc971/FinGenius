@@ -57,14 +57,14 @@ export class UAEPeppolService {
     error?: string;
   }> {
     try {
-      // Get invoice with related data
-      const invoice = await this.storage.getInvoice(invoiceId);
-      if (!invoice || invoice.tenantId !== tenantId) {
-        return { success: false, error: 'Invoice not found' };
+      // SECURITY: Get invoice with tenant verification
+      const invoice = await this.storage.getInvoice(invoiceId, tenantId);
+      if (!invoice) {
+        return { success: false, error: 'Invoice not found or access denied' };
       }
       
-      // Get customer
-      const customer = await this.storage.getCustomer(invoice.customerId);
+      // SECURITY: Get customer with tenant verification
+      const customer = await this.storage.getCustomer(invoice.customerId, tenantId);
       if (!customer) {
         return { success: false, error: 'Customer not found' };
       }
@@ -139,10 +139,10 @@ export class UAEPeppolService {
     error?: string;
   }> {
     try {
-      // Get invoice
-      const invoice = await this.storage.getInvoice(invoiceId);
-      if (!invoice || invoice.tenantId !== tenantId) {
-        return { success: false, error: 'Invoice not found' };
+      // SECURITY: Get invoice with tenant verification
+      const invoice = await this.storage.getInvoice(invoiceId, tenantId);
+      if (!invoice) {
+        return { success: false, error: 'Invoice not found or access denied' };
       }
       
       // Verify invoice is prepared
@@ -228,8 +228,9 @@ export class UAEPeppolService {
     hasUblXml: boolean;
   } | null> {
     try {
-      const invoice = await this.storage.getInvoice(invoiceId);
-      if (!invoice || invoice.tenantId !== tenantId) {
+      // SECURITY: Get invoice with tenant verification
+      const invoice = await this.storage.getInvoice(invoiceId, tenantId);
+      if (!invoice) {
         return null;
       }
       

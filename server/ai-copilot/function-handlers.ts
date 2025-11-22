@@ -107,10 +107,11 @@ export const functionHandlers: Record<string, AccountingFunctionHandler> = {
       throw new Error('Customer ID is required');
     }
     
-    const customer = await storage.getCustomer(customerId);
+    // SECURITY: Verify customer belongs to tenant
+    const customer = await storage.getCustomer(customerId, context.tenantId);
     
-    if (!customer || customer.tenantId !== context.tenantId) {
-      throw new Error('Customer not found');
+    if (!customer) {
+      throw new Error('Customer not found or access denied');
     }
     
     const invoices = await storage.getInvoicesByTenant(context.tenantId, false);
@@ -302,11 +303,11 @@ export const functionHandlers: Record<string, AccountingFunctionHandler> = {
   async post_journal_entry(args: any, context: FunctionContext) {
     const { journalEntryId } = args;
     
-    // Get the journal entry
-    const entry = await storage.getJournalEntry(journalEntryId);
+    // SECURITY: Get the journal entry with tenant verification
+    const entry = await storage.getJournalEntry(journalEntryId, context.tenantId);
     
-    if (!entry || entry.tenantId !== context.tenantId) {
-      throw new Error('Journal entry not found');
+    if (!entry) {
+      throw new Error('Journal entry not found or access denied');
     }
     
     if (entry.status === 'posted') {
@@ -354,10 +355,11 @@ export const functionHandlers: Record<string, AccountingFunctionHandler> = {
     const { customerId, items, invoiceDate, dueDate, notes } = args;
     
     // Get customer to populate invoice details
-    const customer = await storage.getCustomer(customerId);
+    // SECURITY: Verify customer belongs to tenant
+    const customer = await storage.getCustomer(customerId, context.tenantId);
     
-    if (!customer || customer.tenantId !== context.tenantId) {
-      throw new Error('Customer not found');
+    if (!customer) {
+      throw new Error('Customer not found or access denied');
     }
     
     // Create invoice with status='draft'
@@ -401,11 +403,11 @@ export const functionHandlers: Record<string, AccountingFunctionHandler> = {
   async post_invoice(args: any, context: FunctionContext) {
     const { invoiceId } = args;
     
-    // Get the invoice
-    const invoice = await storage.getInvoice(invoiceId);
+    // SECURITY: Get the invoice with tenant verification
+    const invoice = await storage.getInvoice(invoiceId, context.tenantId);
     
-    if (!invoice || invoice.tenantId !== context.tenantId) {
-      throw new Error('Invoice not found');
+    if (!invoice) {
+      throw new Error('Invoice not found or access denied');
     }
     
     if (invoice.status !== 'draft') {
@@ -446,11 +448,11 @@ export const functionHandlers: Record<string, AccountingFunctionHandler> = {
   async draft_bill(args: any, context: FunctionContext) {
     const { vendorId, items, billDate, dueDate, notes } = args;
     
-    // Get vendor to populate bill details
-    const vendor = await storage.getVendor(vendorId);
+    // SECURITY: Get vendor with tenant verification
+    const vendor = await storage.getVendor(vendorId, context.tenantId);
     
-    if (!vendor || vendor.tenantId !== context.tenantId) {
-      throw new Error('Vendor not found');
+    if (!vendor) {
+      throw new Error('Vendor not found or access denied');
     }
     
     // Create bill with status='draft'
@@ -497,11 +499,11 @@ export const functionHandlers: Record<string, AccountingFunctionHandler> = {
   async post_bill(args: any, context: FunctionContext) {
     const { billId } = args;
     
-    // Get the bill
-    const bill = await storage.getBill(billId);
+    // SECURITY: Get the bill with tenant verification
+    const bill = await storage.getBill(billId, context.tenantId);
     
-    if (!bill || bill.tenantId !== context.tenantId) {
-      throw new Error('Bill not found');
+    if (!bill) {
+      throw new Error('Bill not found or access denied');
     }
     
     // TODO: SEGREGATION OF DUTIES - Currently not enforced for bills
