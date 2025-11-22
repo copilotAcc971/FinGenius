@@ -54,6 +54,49 @@ export class CapabilityNotSupportedError extends Error {
 export class OpenBankingService {
   constructor(private tenantId: string) {}
 
+  async getConnection(connectionId: string): Promise<OpenBankingConnection | null> {
+    try {
+      const [connection] = await db
+        .select()
+        .from(openBankingConnections)
+        .where(and(
+          eq(openBankingConnections.id, connectionId),
+          eq(openBankingConnections.tenantId, this.tenantId)
+        ))
+        .limit(1);
+      
+      if (!connection) {
+        return null;
+      }
+
+      // Decrypt tokens
+      if (connection.accessToken && connection.encryptionIV && connection.encryptionAuthTag && connection.encryptionKeyVersion) {
+        const decrypted = await tokenEncryption.decrypt({
+          ciphertext: connection.accessToken,
+          iv: connection.encryptionIV,
+          authTag: connection.encryptionAuthTag,
+          keyVersion: connection.encryptionKeyVersion,
+        });
+        connection.accessToken = decrypted;
+      }
+
+      if (connection.refreshToken && connection.refreshTokenIV && connection.refreshTokenAuthTag && connection.refreshTokenKeyVersion) {
+        const decrypted = await tokenEncryption.decrypt({
+          ciphertext: connection.refreshToken,
+          iv: connection.refreshTokenIV,
+          authTag: connection.refreshTokenAuthTag,
+          keyVersion: connection.refreshTokenKeyVersion,
+        });
+        connection.refreshToken = decrypted;
+      }
+
+      return connection;
+    } catch (error) {
+      console.error('[OpenBankingService] Error getting connection:', error);
+      throw error;
+    }
+  }
+
   async initiateConnection(
     provider: OpenBankingProvider,
     entityId: string,

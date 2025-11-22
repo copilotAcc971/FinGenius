@@ -11981,6 +11981,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ====== PHASE 6: OPEN BANKING ROUTES (Lean Technologies) ======
 
+  // OAuth2: Initiate bank connection
+  app.post('/api/bank-connections/authorize', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const userId = req.user?.id;
+      const { customerId, redirectUri = '/bank-accounts' } = req.body;
+      
+      if (!customerId) {
+        return res.status(400).json({ message: 'customerId is required' });
+      }
+
+      // Import the Lean provider and crypto
+      const { LeanProvider } = await import('./open-banking/providers/lean-provider');
+      const crypto = await import('crypto');
+      const leanProvider = new LeanProvider();
+      
+      // Generate signed state for CSRF protection
+      const stateSecret = process.env.SESSION_SECRET || 'dev-state-secret';
+      const nonce = crypto.randomBytes(16).toString('hex');
+      const statePayload = {
+        tenantId,
+        customerId,
+        userId,
+        nonce,
+        timestamp: Date.now()
+      };
+      
+      // Create HMAC signature
+      const stateJson = JSON.stringify(statePayload);
+      const signature = crypto
+        .createHmac('sha256', stateSecret)
+        .update(stateJson)
+        .digest('hex');
+      
+      // Combine payload and signature
+      const state = Buffer.from(JSON.stringify({
+        payload: statePayload,
+        signature
+      })).toString('base64');
+      
+      // Get authorization URL
+      const fullRedirectUri = `${req.protocol}://${req.get('host')}/api/bank-connections/callback`;
+      const authUrl = leanProvider.getAuthorizationUrl(fullRedirectUri, state);
+      
+      res.json({ 
+        success: true, 
+        authUrl,
+        message: 'Redirect user to authUrl to connect their bank account'
+      });
+    } catch (error: any) {
+      console.error('[OpenBanking] Authorization error:', error);
+      res.status(500).json({ message: error.message || 'Failed to initiate bank connection' });
+    }
+  });
+
+  // OAuth2: Handle callback from Lean
+  app.get('/api/bank-connections/callback', async (req: any, res) => {
+    try {
+      const { code, state } = req.query;
+      
+      if (!code || !state) {
+        return res.status(400).send('Missing code or state parameter');
+      }
+      
+      // Import crypto for state validation
+      const crypto = await import('crypto');
+      const stateSecret = process.env.SESSION_SECRET || 'dev-state-secret';
+      
+      // Decode and validate signed state
+      const stateWrapper = JSON.parse(Buffer.from(state as string, 'base64').toString());
+      const { payload: stateData, signature } = stateWrapper;
+      
+      // Verify signature
+      const expectedSignature = crypto
+        .createHmac('sha256', stateSecret)
+        .update(JSON.stringify(stateData))
+        .digest('hex');
+      
+      if (signature !== expectedSignature) {
+        console.error('[OpenBanking] Invalid state signature');
+        return res.status(403).send('Invalid state signature');
+      }
+      
+      // Verify timestamp (5 minute window)
+      const elapsed = Date.now() - stateData.timestamp;
+      if (elapsed > 5 * 60 * 1000) {
+        console.error('[OpenBanking] State expired');
+        return res.status(403).send('Authorization state expired');
+      }
+      
+      const { tenantId, customerId } = stateData;
+      
+      // Import services
+      const { LeanProvider } = await import('./open-banking/providers/lean-provider');
+      const { OpenBankingService } = await import('./open-banking/service');
+      
+      const leanProvider = new LeanProvider();
+      const fullRedirectUri = `${req.protocol}://${req.get('host')}/api/bank-connections/callback`;
+      
+      // Exchange code for tokens
+      const tokenResponse = await leanProvider.exchangeCodeForTokens(
+        code as string,
+        fullRedirectUri
+      );
+      
+      // Create entity ID for this connection
+      const entityId = `lean_${customerId}_${Date.now()}`;
+      
+      // Save connection using OpenBankingService
+      const obService = new OpenBankingService(tenantId);
+      await obService.initiateConnection(
+        'lean',
+        entityId,
+        customerId,
+        tokenResponse.accessToken,
+        tokenResponse.refreshToken,
+        tokenResponse.expiresIn
+      );
+      
+      // Redirect to success page
+      res.redirect('/bank-accounts?connection=success');
+    } catch (error: any) {
+      console.error('[OpenBanking] Callback error:', error);
+      res.redirect('/bank-accounts?connection=failed');
+    }
+  });
+
+  // Sync transactions for a bank account
+  app.post('/api/bank-transactions/sync', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { accountId, startDate, endDate } = req.body;
+      
+      if (!accountId) {
+        return res.status(400).json({ message: 'accountId is required' });
+      }
+      
+      // Import sync service
+      const { TransactionSyncService } = await import('./open-banking/transaction-sync-service');
+      const syncService = new TransactionSyncService(tenantId);
+      
+      // Run sync
+      const result = await syncService.syncAccountTransactions(
+        accountId,
+        startDate ? new Date(startDate) : undefined,
+        endDate ? new Date(endDate) : undefined
+      );
+      
+      res.json({ 
+        success: true, 
+        data: result,
+        message: `Synced ${result.synced} new transactions`
+      });
+    } catch (error: any) {
+      console.error('[TransactionSync] Error:', error);
+      res.status(500).json({ message: error.message || 'Transaction sync failed' });
+    }
+  });
+
   // Get all bank connections for tenant
   app.get('/api/bank-connections', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
@@ -12041,6 +12200,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('[Reconciliation] Dashboard error:', error);
       res.status(500).json({ message: error.message || 'Failed to fetch reconciliation dashboard' });
+    }
+  });
+
+  // Run reconciliation matching for unmatched transactions
+  app.post('/api/reconciliation/match', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { accountId, dateFrom, dateTo } = req.body;
+      
+      // Import reconciliation service
+      const { ReconciliationService } = await import('./open-banking/reconciliation-service');
+      const reconService = new ReconciliationService(tenantId);
+      
+      // Run reconciliation
+      const result = await reconService.reconcileTransactions(
+        accountId,
+        dateFrom ? new Date(dateFrom) : undefined,
+        dateTo ? new Date(dateTo) : undefined
+      );
+      
+      res.json({ 
+        success: true, 
+        data: result,
+        message: `Matched ${result.matched} transactions, ${result.pending} pending review`
+      });
+    } catch (error: any) {
+      console.error('[Reconciliation] Matching error:', error);
+      res.status(500).json({ message: error.message || 'Reconciliation failed' });
+    }
+  });
+
+  // Initiate payment via Lean
+  app.post('/api/bank-payments/initiate', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { 
+        connectionId, 
+        recipientName,
+        recipientIban,
+        amount,
+        currency = 'AED',
+        reference,
+        description 
+      } = req.body;
+      
+      if (!connectionId || !recipientName || !recipientIban || !amount) {
+        return res.status(400).json({ 
+          message: 'Missing required fields: connectionId, recipientName, recipientIban, amount' 
+        });
+      }
+      
+      // Import services
+      const { OpenBankingService } = await import('./open-banking/service');
+      const obService = new OpenBankingService(tenantId);
+      
+      // Get connection and decrypt tokens
+      const connection = await obService.getConnection(connectionId);
+      if (!connection) {
+        return res.status(404).json({ message: 'Connection not found' });
+      }
+      
+      // Import Lean provider
+      const { LeanProvider } = await import('./open-banking/providers/lean-provider');
+      const leanProvider = new LeanProvider();
+      
+      // Initiate payment
+      const paymentResult = await leanProvider.initiatePayment(
+        connection.accessToken,
+        {
+          amount,
+          currency,
+          recipientName,
+          recipientIban,
+          reference: reference || `PAY-${Date.now()}`,
+          description: description || 'Payment via FinGenius',
+        }
+      );
+      
+      // Store payment record
+      await storage.createBankPayment({
+        tenantId,
+        connectionId,
+        paymentId: paymentResult.paymentId,
+        status: paymentResult.status,
+        amount,
+        currency,
+        recipientName,
+        recipientIban,
+        reference: paymentResult.reference,
+        createdAt: new Date(),
+      });
+      
+      res.json({ 
+        success: true, 
+        data: paymentResult,
+        message: 'Payment initiated successfully'
+      });
+    } catch (error: any) {
+      console.error('[Payment] Initiation error:', error);
+      res.status(500).json({ message: error.message || 'Payment initiation failed' });
     }
   });
 

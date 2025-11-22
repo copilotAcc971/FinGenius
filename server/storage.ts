@@ -878,6 +878,7 @@ export interface IStorage {
   // PHASE 6: OPEN BANKING (Lean Technologies)
   // ====================================
   getBankConnections(tenantId: string): Promise<any[]>;
+  getBankConnectionById(id: string, tenantId: string): Promise<any | null>;
   createBankConnection(data: any): Promise<any>;
   updateBankConnection(id: string, tenantId: string, data: Partial<any>): Promise<any>;
   getBankAccounts(tenantId: string): Promise<any[]>;
@@ -897,6 +898,7 @@ export interface IStorage {
     lastSyncTime?: Date;
     connectionsByStatus: Record<string, number>;
   }>;
+  createBankPayment(data: any): Promise<any>;
 
   // ====================================
   // AUTHORITY MATRIX & FUNCTION PERMISSIONS (AI Copilot RBAC)
@@ -9896,6 +9898,18 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(openBankingConnections.createdAt));
   }
 
+  async getBankConnectionById(id: string, tenantId: string): Promise<any | null> {
+    const [connection] = await db
+      .select()
+      .from(openBankingConnections)
+      .where(and(
+        eq(openBankingConnections.id, id),
+        eq(openBankingConnections.tenantId, tenantId)
+      ))
+      .limit(1);
+    return connection || null;
+  }
+
   async createBankConnection(data: any): Promise<any> {
     const [connection] = await db
       .insert(openBankingConnections)
@@ -10013,6 +10027,14 @@ export class DatabaseStorage implements IStorage {
         : undefined,
       connectionsByStatus: statusCounts,
     };
+  }
+
+  async createBankPayment(data: any): Promise<any> {
+    const [payment] = await db
+      .insert(openBankingPayments)
+      .values(data)
+      .returning();
+    return payment;
   }
 
   // ====================================
