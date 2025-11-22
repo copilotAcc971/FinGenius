@@ -12503,6 +12503,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ====== INTERACTIVE REPORTING ENDPOINTS ======
+  // Trend data for 30-day financial chart
+  app.get('/api/reports/trend', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { days } = req.query;
+      const { interactiveReportingService } = await import('./services/interactive-reporting-service');
+      const trendData = await interactiveReportingService.getTrendData(tenantId, parseInt(days) || 30);
+      res.json(trendData);
+    } catch (error: any) {
+      console.error('[Reports] Trend error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch trend data' });
+    }
+  });
+
+  // Period comparison (MoM, QoQ, YoY)
+  app.get('/api/reports/compare', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { type } = req.query;
+      const { interactiveReportingService } = await import('./services/interactive-reporting-service');
+      
+      const now = new Date();
+      const currentEnd = now;
+      let currentStart = new Date();
+      
+      if (type === 'year') {
+        currentStart.setFullYear(currentStart.getFullYear() - 1);
+        currentStart.setFullYear(currentStart.getFullYear() + 1);
+        currentStart = new Date(currentStart.getFullYear(), 0, 1);
+      } else if (type === 'quarter') {
+        const quarter = Math.floor(now.getMonth() / 3);
+        currentStart = new Date(now.getFullYear(), quarter * 3, 1);
+      } else {
+        currentStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+      
+      const comparisonData = await interactiveReportingService.comparePeriods(tenantId, currentStart, currentEnd, type as 'year' | 'quarter' | 'month');
+      res.json(comparisonData);
+    } catch (error: any) {
+      console.error('[Reports] Comparison error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch comparison data' });
+    }
+  });
+
   // ====== LEAN WEBHOOK HANDLER ======
   // Receives payment execution events and transaction updates from Lean Technologies
   // Verify webhook signature with LEAN_WEBHOOK_SECRET

@@ -31,6 +31,7 @@ import { useAuth } from "@/shared/hooks/useAuth";
 import { useDashboardMetrics } from "@/shared/lib/dashboard/metrics-client";
 import { format } from "date-fns";
 import { motion, useSpring, useTransform } from "framer-motion";
+import { InteractiveReportsPanel } from "../components/interactive-reports-panel";
 
 interface Invoice {
   id: string;
@@ -479,6 +480,12 @@ export default function Dashboard() {
           </Card>
         </div>
       )}
+
+      {/* Interactive Reports Section */}
+      <div>
+        <h2 className="text-xl font-semibold mb-4">Interactive Financial Reports</h2>
+        <InteractiveReportsPanel />
+      </div>
 
       {/* Recent Documents Section */}
       <div>
