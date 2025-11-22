@@ -334,6 +334,8 @@ export default function Workflows() {
                           variant="ghost" 
                           size="icon"
                           data-testid={`button-edit-${workflow.id}`}
+                          aria-label={`Edit workflow ${workflow.name}`}
+                          title="Edit workflow"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -343,6 +345,8 @@ export default function Workflows() {
                         size="icon"
                         onClick={() => setWorkflowToToggle(workflow)}
                         data-testid={`button-toggle-${workflow.id}`}
+                        aria-label={workflow.isActive ? `Deactivate workflow ${workflow.name}` : `Activate workflow ${workflow.name}`}
+                        title={workflow.isActive ? "Deactivate" : "Activate"}
                       >
                         {workflow.isActive ? (
                           <PowerOff className="h-4 w-4" />
@@ -355,6 +359,8 @@ export default function Workflows() {
                         size="icon"
                         onClick={() => setWorkflowToDelete(workflow)}
                         data-testid={`button-delete-${workflow.id}`}
+                        aria-label={`Delete workflow ${workflow.name}`}
+                        title="Delete workflow"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>

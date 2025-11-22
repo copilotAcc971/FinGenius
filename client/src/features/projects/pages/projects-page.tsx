@@ -224,7 +224,13 @@ export default function Projects() {
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" data-testid={`button-actions-${project.id}`}>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            data-testid={`button-actions-${project.id}`}
+                            aria-label={`Actions for project ${project.name}`}
+                            title="More options"
+                          >
                             <Edit className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>

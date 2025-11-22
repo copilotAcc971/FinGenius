@@ -93,6 +93,8 @@ export function VoiceNoteInterface({
                 onClick={onPlay}
                 disabled={disabled || audioQueue.length === 0}
                 data-testid="button-play"
+                aria-label="Play audio"
+                title="Play"
               >
                 <Play className="h-4 w-4" />
               </Button>
@@ -102,6 +104,8 @@ export function VoiceNoteInterface({
                 onClick={onPause}
                 disabled={disabled}
                 data-testid="button-pause"
+                aria-label="Pause audio"
+                title="Pause"
               >
                 <Pause className="h-4 w-4" />
               </Button>
@@ -112,6 +116,8 @@ export function VoiceNoteInterface({
               onClick={onStop}
               disabled={disabled || !isPlaying}
               data-testid="button-stop"
+              aria-label="Stop audio"
+              title="Stop"
             >
               <Square className="h-4 w-4" />
             </Button>

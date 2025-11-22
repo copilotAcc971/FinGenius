@@ -237,7 +237,13 @@ export default function Assets() {
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${asset.id}`}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          data-testid={`button-actions-${asset.id}`}
+                          aria-label={`Actions for asset ${asset.name}`}
+                          title="More options"
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>

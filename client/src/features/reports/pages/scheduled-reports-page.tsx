@@ -239,6 +239,8 @@ export default function ScheduledReportsPage() {
                           size="icon"
                           onClick={() => handleEdit(report)}
                           data-testid={`button-edit-${report.id}`}
+                          aria-label={`Edit report ${report.name}`}
+                          title="Edit report"
                         >
                           <Edit className="w-4 h-4" />
                         </Button>
@@ -247,6 +249,8 @@ export default function ScheduledReportsPage() {
                           size="icon"
                           onClick={() => handleToggle(report.id, report.isActive)}
                           data-testid={`button-toggle-${report.id}`}
+                          aria-label={report.isActive ? `Pause report ${report.name}` : `Activate report ${report.name}`}
+                          title={report.isActive ? "Pause" : "Activate"}
                         >
                           <Calendar className="w-4 h-4" />
                         </Button>
@@ -255,6 +259,8 @@ export default function ScheduledReportsPage() {
                           size="icon"
                           onClick={() => handleRunNow(report.id)}
                           data-testid={`button-run-now-${report.id}`}
+                          aria-label={`Run report ${report.name} now`}
+                          title="Run now"
                         >
                           <Play className="w-4 h-4" />
                         </Button>
@@ -263,6 +269,8 @@ export default function ScheduledReportsPage() {
                           size="icon"
                           onClick={() => handleViewHistory(report)}
                           data-testid={`button-history-${report.id}`}
+                          aria-label={`View history for report ${report.name}`}
+                          title="View history"
                         >
                           <History className="w-4 h-4" />
                         </Button>
@@ -271,6 +279,8 @@ export default function ScheduledReportsPage() {
                           size="icon"
                           onClick={() => handleDelete(report.id)}
                           data-testid={`button-delete-${report.id}`}
+                          aria-label={`Delete report ${report.name}`}
+                          title="Delete report"
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
