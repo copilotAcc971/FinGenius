@@ -3566,6 +3566,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return { creditNote: updatedCreditNote[0], journalEntry };
       });
 
+      // LOG SUCCESS - Credit note posted
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'post',
+        entityType: 'credit_note',
+        entityId: result.creditNote.id,
+        changes: { before: { status: 'draft' }, after: result.creditNote },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log credit note post:', err));
+
+      // CRITICAL: Monitor credit note posting for AML compliance (including reversals)
+      const creditNoteAmount = parseFloat(result.creditNote.total || '0');
+      await transactionMonitoringService.monitorTransaction(req.tenantId!, {
+        id: result.creditNote.id,
+        type: 'credit_note',
+        customerId: result.creditNote.customerId,
+        amount: creditNoteAmount,
+        currency: result.creditNote.currency || 'AED',
+        date: result.creditNote.date ? new Date(result.creditNote.date) : new Date(),
+      }).catch(err => console.error('[TransactionMonitoring] Failed to monitor credit note:', err));
+
       res.status(201).json(result);
     } catch (error: any) {
       if (error instanceof AccountingValidationError || error instanceof ValidationError) {
@@ -3651,6 +3675,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         return { debitNote: updatedDebitNote[0], journalEntry };
       });
+
+      // LOG SUCCESS - Debit note posted
+      await auditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user!.claims.sub,
+        action: 'post',
+        entityType: 'debit_note',
+        entityId: result.debitNote.id,
+        changes: { before: { status: 'draft' }, after: result.debitNote },
+        ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+        userAgent: req.get('user-agent'),
+        wasSuccessful: true,
+      }).catch(err => console.error('[Audit] Failed to log debit note post:', err));
+
+      // CRITICAL: Monitor debit note posting for AML compliance (supply chain risk)
+      const debitNoteAmount = parseFloat(result.debitNote.total || '0');
+      await transactionMonitoringService.monitorTransaction(req.tenantId!, {
+        id: result.debitNote.id,
+        type: 'debit_note',
+        customerId: result.debitNote.vendorId, // For vendor debit notes
+        amount: debitNoteAmount,
+        currency: result.debitNote.currency || 'AED',
+        date: result.debitNote.date ? new Date(result.debitNote.date) : new Date(),
+      }).catch(err => console.error('[TransactionMonitoring] Failed to monitor debit note:', err));
 
       res.status(201).json(result);
     } catch (error: any) {
