@@ -637,36 +637,6 @@ export class OpenBankingService {
     }
   }
 
-  private async getConnection(connectionId: string): Promise<OpenBankingConnection> {
-    try {
-      const [connection] = await db
-        .select()
-        .from(openBankingConnections)
-        .where(
-          and(
-            eq(openBankingConnections.id, connectionId),
-            eq(openBankingConnections.tenantId, this.tenantId)
-          )
-        )
-        .limit(1);
-
-      if (!connection) {
-        throw new Error('Connection not found or access denied');
-      }
-
-      if (connection.status === 'disconnected') {
-        throw new Error('Connection has been disconnected');
-      }
-
-      return connection;
-    } catch (error) {
-      console.error('[OpenBankingService] Failed to retrieve connection:', error);
-      throw new Error(
-        `Failed to retrieve connection: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    }
-  }
-
   private async updateTokens(connectionId: string, tokens: TokenResponse): Promise<void> {
     try {
       const encryptedAccessToken = await tokenEncryption.encrypt(tokens.accessToken);

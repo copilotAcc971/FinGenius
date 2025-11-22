@@ -11912,41 +11912,6 @@ export class MemStorage implements IStorage {
     };
   }
 
-  async getGoingConcernStatus(tenantId: string): Promise<{status: string; assessmentDate: Date; reviewedBy: string} | null> {
-    const note = this.financialStatementNotes.find(n => 
-      n.tenantId === tenantId &&
-      n.noteType === 'going_concern' &&
-      n.isActive &&
-      n.goingConcernStatus !== 'positive' &&
-      n.goingConcernStatus !== null
-    );
-    
-    if (!note || !note.goingConcernStatus || !note.goingConcernAssessmentDate || !note.goingConcernReviewedBy) {
-      return null;
-    }
-    
-    return {
-      status: note.goingConcernStatus,
-      assessmentDate: note.goingConcernAssessmentDate,
-      reviewedBy: note.goingConcernReviewedBy,
-    };
-  }
-
-  async getNoteVersionHistory(tenantId: string, noteId: string): Promise<FinancialStatementNote[]> {
-    const versions: FinancialStatementNote[] = [];
-    let currentId: string | null = noteId;
-    
-    while (currentId) {
-      const note = this.financialStatementNotes.find(n => n.id === currentId && n.tenantId === tenantId);
-      if (!note) break;
-      
-      versions.push(note);
-      currentId = note.previousVersionId;
-    }
-    
-    return versions;
-  }
-
   // IAS 2 NRV Assessments
   private nrvAssessments: NrvAssessment[] = [];
 
