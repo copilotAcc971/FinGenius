@@ -7,6 +7,8 @@
 import axios from 'axios';
 import { TaxCalculator } from './services/tax-calculator';
 import { CurrencyConverter } from './services/currency-converter';
+import { MemStorage } from './storage';
+import { AuditLogger } from './audit/audit-logger';
 
 const API_BASE = 'http://localhost:5000/api';
 
@@ -297,70 +299,53 @@ async function runAuditLoggingTests() {
   console.log('\n📋 AUDIT LOGGING TESTS');
   console.log('======================\n');
 
+  // Create a MemStorage instance for testing
+  const storage = new MemStorage();
+
   // Test 1: Audit logger instantiation
   await test('Audit Logger: Service instantiation', async () => {
-    try {
-      const AuditLogger = await import('./audit/audit-logger').then(m => m.AuditLogger);
-      const logger = new AuditLogger();
-      if (!logger) {
-        throw new Error('Failed to instantiate AuditLogger');
-      }
-    } catch (error: any) {
-      // If import fails, check that file exists at least
-      if (!error.message.includes('Cannot find module')) {
-        throw error;
-      }
+    const logger = new AuditLogger(storage);
+    if (!logger) {
+      throw new Error('Failed to instantiate AuditLogger');
     }
   });
 
-  // Test 2: Log structure validation
-  await test('Audit Logger: Logs have required fields', async () => {
-    try {
-      const AuditLogger = await import('./audit/audit-logger').then(m => m.AuditLogger);
-      const logger = new AuditLogger();
-      
-      await logger.log({
-        userId: 'user-test',
-        tenantId: 'tenant-test',
-        action: 'create',
-        module: 'invoices',
-        metadata: { test: true }
-      });
-    } catch (error: any) {
-      // Expected if DB not available, just test that method exists
-      if (!error.message.includes('database') && !error.message.includes('ECONNREFUSED') && !error.message.includes('Cannot find module')) {
-        throw error;
-      }
-    }
+  // Test 2: Log financial transaction
+  await test('Audit Logger: Log financial transaction', async () => {
+    const logger = new AuditLogger(storage);
+    
+    // Use the correct method: logFinancialTransaction
+    await logger.logFinancialTransaction({
+      tenantId: 'tenant-test',
+      userId: 'user-test',
+      action: 'create',
+      entityType: 'invoice',
+      entityId: 'inv-001',
+      changes: { 
+        before: null, 
+        after: { id: 'inv-001', amount: 1000 }
+      },
+      wasSuccessful: true
+    });
+    // If no error thrown, test passes
   });
 
   // Test 3: Multiple audit operations
   await test('Audit Logger: Multiple operations in sequence', async () => {
-    try {
-      const AuditLogger = await import('./audit/audit-logger').then(m => m.AuditLogger);
-      const logger = new AuditLogger();
-      
-      const operations = ['create', 'update', 'delete', 'view'];
-      for (const action of operations) {
-        try {
-          await logger.log({
-            userId: 'user-test',
-            tenantId: 'tenant-test',
-            action,
-            module: 'test'
-          });
-        } catch (error: any) {
-          // Ignore DB connection errors
-          if (!error.message.includes('database') && !error.message.includes('ECONNREFUSED')) {
-            throw error;
-          }
-        }
-      }
-    } catch (error: any) {
-      if (!error.message.includes('Cannot find module')) {
-        throw error;
-      }
+    const logger = new AuditLogger(storage);
+    
+    const operations = ['create', 'update', 'delete', 'approve'];
+    for (const action of operations) {
+      await logger.logFinancialTransaction({
+        tenantId: 'tenant-test',
+        userId: 'user-test',
+        action,
+        entityType: 'test-entity',
+        entityId: `entity-${action}`,
+        wasSuccessful: true
+      });
     }
+    // If all operations complete without error, test passes
   });
 }
 
