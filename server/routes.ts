@@ -12303,6 +12303,206 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ====== PHASE 10: INVENTORY MANAGEMENT ROUTES ======
+  // Stock Movements
+  app.get('/api/stock-movements', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId } = req.query;
+      const movements = await storage.getStockMovements(tenantId, itemId);
+      res.json({ success: true, data: movements });
+    } catch (error: any) {
+      console.error('[Inventory] Get stock movements error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch stock movements' });
+    }
+  });
+
+  app.post('/api/stock-movements', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId, movementType, quantity, unitCost, costingMethod, referenceId, referenceType, notes } = req.body;
+
+      if (!itemId || !movementType || !quantity || !unitCost || !costingMethod) {
+        return res.status(400).json({ message: 'Missing required fields' });
+      }
+
+      const movement = await storage.createStockMovement({
+        tenantId,
+        itemId,
+        movementType,
+        quantity,
+        unitCost,
+        totalCost: Number(quantity) * Number(unitCost),
+        costingMethod,
+        referenceId,
+        referenceType,
+        notes,
+      });
+
+      // Update item quantity on hand
+      const currentItem = await storage.getItem(itemId);
+      if (currentItem) {
+        const qtyChange = movementType === 'sale' ? -Number(quantity) : Number(quantity);
+        const newQty = Number(currentItem.quantityOnHand || 0) + qtyChange;
+        await storage.updateItem(itemId, tenantId, { quantityOnHand: newQty.toString() });
+      }
+
+      res.json({ success: true, data: movement, message: 'Stock movement recorded' });
+    } catch (error: any) {
+      console.error('[Inventory] Create stock movement error:', error);
+      res.status(500).json({ message: error.message || 'Failed to create stock movement' });
+    }
+  });
+
+  // Inventory Valuations
+  app.get('/api/inventory-valuations', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId, periodDate } = req.query;
+      const valuations = await storage.getInventoryValuations(tenantId, itemId, periodDate ? new Date(periodDate) : undefined);
+      res.json({ success: true, data: valuations });
+    } catch (error: any) {
+      console.error('[Inventory] Get valuations error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch valuations' });
+    }
+  });
+
+  app.post('/api/inventory-valuations', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId, periodDate, costingMethod, quantityOnHand, unitValue, costOfGoodsSold } = req.body;
+
+      if (!itemId || !periodDate || !costingMethod || !quantityOnHand) {
+        return res.status(400).json({ message: 'Missing required fields' });
+      }
+
+      const totalVal = Number(quantityOnHand) * Number(unitValue);
+      const nrvWriteDown = 0; // Can be calculated separately
+      const finalVal = totalVal - nrvWriteDown;
+
+      const valuation = await storage.createInventoryValuation({
+        tenantId,
+        itemId,
+        periodDate: new Date(periodDate),
+        costingMethod,
+        quantityOnHand,
+        unitValue,
+        totalValuation: totalVal.toString(),
+        costOfGoodsSold,
+        nrvWriteDown: nrvWriteDown.toString(),
+        finalValuation: finalVal.toString(),
+        status: 'draft',
+      });
+
+      res.json({ success: true, data: valuation, message: 'Inventory valuation created' });
+    } catch (error: any) {
+      console.error('[Inventory] Create valuation error:', error);
+      res.status(500).json({ message: error.message || 'Failed to create valuation' });
+    }
+  });
+
+  app.patch('/api/inventory-valuations/:id/status', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { id } = req.params;
+      const { status } = req.body;
+
+      if (!['draft', 'approved', 'finalized'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status' });
+      }
+
+      const updated = await storage.updateInventoryValuationStatus(id, tenantId, status);
+      res.json({ success: true, data: updated, message: `Valuation status updated to ${status}` });
+    } catch (error: any) {
+      console.error('[Inventory] Update valuation status error:', error);
+      res.status(500).json({ message: error.message || 'Failed to update status' });
+    }
+  });
+
+  // Opening Stock
+  app.get('/api/opening-stock', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId } = req.query;
+      const stocks = await storage.getOpeningStock(tenantId, itemId);
+      res.json({ success: true, data: stocks });
+    } catch (error: any) {
+      console.error('[Inventory] Get opening stock error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch opening stock' });
+    }
+  });
+
+  app.post('/api/opening-stock', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId, fiscalYearStart, quantity, unitCost, costingMethod, notes } = req.body;
+
+      if (!itemId || !fiscalYearStart || !quantity || !unitCost || !costingMethod) {
+        return res.status(400).json({ message: 'Missing required fields' });
+      }
+
+      const totalVal = Number(quantity) * Number(unitCost);
+      const openStock = await storage.createOpeningStock({
+        tenantId,
+        itemId,
+        fiscalYearStart: new Date(fiscalYearStart),
+        quantity,
+        unitCost,
+        totalValue: totalVal.toString(),
+        costingMethod,
+        notes,
+      });
+
+      // Also create a stock movement for opening stock
+      await storage.createStockMovement({
+        tenantId,
+        itemId,
+        movementType: 'opening',
+        quantity,
+        unitCost,
+        totalCost: totalVal.toString(),
+        costingMethod,
+        referenceId: openStock.id,
+        referenceType: 'opening',
+        notes: `Opening stock for fiscal year starting ${fiscalYearStart}`,
+      });
+
+      res.json({ success: true, data: openStock, message: 'Opening stock created' });
+    } catch (error: any) {
+      console.error('[Inventory] Create opening stock error:', error);
+      res.status(500).json({ message: error.message || 'Failed to create opening stock' });
+    }
+  });
+
+  // Costing calculation endpoints
+  app.get('/api/inventory/costing/fifo/:itemId', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId } = req.params;
+      const { periodDate } = req.query;
+      
+      const valuation = await storage.calculateFifoValuation(tenantId, itemId, periodDate ? new Date(periodDate) : new Date());
+      res.json({ success: true, data: valuation, method: 'FIFO' });
+    } catch (error: any) {
+      console.error('[Inventory] FIFO calculation error:', error);
+      res.status(500).json({ message: error.message || 'Failed to calculate FIFO valuation' });
+    }
+  });
+
+  app.get('/api/inventory/costing/wac/:itemId', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId } = req.params;
+      const { periodDate } = req.query;
+      
+      const valuation = await storage.calculateWacValuation(tenantId, itemId, periodDate ? new Date(periodDate) : new Date());
+      res.json({ success: true, data: valuation, method: 'WAC' });
+    } catch (error: any) {
+      console.error('[Inventory] WAC calculation error:', error);
+      res.status(500).json({ message: error.message || 'Failed to calculate WAC valuation' });
+    }
+  });
+
   // ====== LEAN WEBHOOK HANDLER ======
   // Receives payment execution events and transaction updates from Lean Technologies
   // Verify webhook signature with LEAN_WEBHOOK_SECRET

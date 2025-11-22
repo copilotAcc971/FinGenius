@@ -274,6 +274,15 @@ import {
   anomalyDetection,
   type AnomalyDetection,
   type InsertAnomalyDetection,
+  stockMovements,
+  type StockMovement,
+  type InsertStockMovement,
+  inventoryValuations,
+  type InventoryValuation,
+  type InsertInventoryValuation,
+  openingStock,
+  type OpeningStock,
+  type InsertOpeningStock,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc, or, lt } from "drizzle-orm";
@@ -332,6 +341,17 @@ export interface IStorage {
   createItem(item: InsertItem & { tenantId: string }): Promise<Item>;
   updateItem(id: string, tenantId: string, item: Partial<InsertItem>): Promise<Item>;
   deleteItem(id: string, tenantId: string): Promise<void>;
+
+  // Phase 10: Inventory Management operations
+  getStockMovements(tenantId: string, itemId?: string): Promise<StockMovement[]>;
+  createStockMovement(movement: InsertStockMovement & { tenantId: string }): Promise<StockMovement>;
+  getInventoryValuations(tenantId: string, itemId?: string, periodDate?: Date): Promise<InventoryValuation[]>;
+  createInventoryValuation(valuation: InsertInventoryValuation & { tenantId: string }): Promise<InventoryValuation>;
+  updateInventoryValuationStatus(id: string, tenantId: string, status: 'draft' | 'approved' | 'finalized'): Promise<InventoryValuation>;
+  getOpeningStock(tenantId: string, itemId?: string): Promise<OpeningStock[]>;
+  createOpeningStock(stock: InsertOpeningStock & { tenantId: string }): Promise<OpeningStock>;
+  calculateFifoValuation(tenantId: string, itemId: string, periodDate: Date): Promise<{ unitValue: number; quantity: number; totalValue: number }>;
+  calculateWacValuation(tenantId: string, itemId: string, periodDate: Date): Promise<{ unitValue: number; quantity: number; totalValue: number }>;
 
   // Tax operations
   getTaxes(tenantId: string): Promise<Tax[]>;
@@ -1590,6 +1610,90 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Item not found");
     }
     await db.delete(items).where(and(eq(items.id, id), eq(items.tenantId, tenantId)));
+  }
+
+  // Phase 10: Inventory Management implementations
+  async getStockMovements(tenantId: string, itemId?: string): Promise<StockMovement[]> {
+    const conditions = [eq(stockMovements.tenantId, tenantId)];
+    if (itemId) conditions.push(eq(stockMovements.itemId, itemId));
+    return await db.select().from(stockMovements).where(and(...conditions)).orderBy(desc(stockMovements.createdAt));
+  }
+
+  async createStockMovement(movement: InsertStockMovement & { tenantId: string }): Promise<StockMovement> {
+    const [created] = await db.insert(stockMovements).values(movement).returning();
+    return created;
+  }
+
+  async getInventoryValuations(tenantId: string, itemId?: string, periodDate?: Date): Promise<InventoryValuation[]> {
+    const conditions = [eq(inventoryValuations.tenantId, tenantId)];
+    if (itemId) conditions.push(eq(inventoryValuations.itemId, itemId));
+    if (periodDate) conditions.push(eq(inventoryValuations.periodDate, periodDate));
+    return await db.select().from(inventoryValuations).where(and(...conditions)).orderBy(desc(inventoryValuations.periodDate));
+  }
+
+  async createInventoryValuation(valuation: InsertInventoryValuation & { tenantId: string }): Promise<InventoryValuation> {
+    const [created] = await db.insert(inventoryValuations).values(valuation).returning();
+    return created;
+  }
+
+  async updateInventoryValuationStatus(id: string, tenantId: string, status: 'draft' | 'approved' | 'finalized'): Promise<InventoryValuation> {
+    const [updated] = await db.update(inventoryValuations).set({ status }).where(and(eq(inventoryValuations.id, id), eq(inventoryValuations.tenantId, tenantId))).returning();
+    return updated;
+  }
+
+  async getOpeningStock(tenantId: string, itemId?: string): Promise<OpeningStock[]> {
+    const conditions = [eq(openingStock.tenantId, tenantId)];
+    if (itemId) conditions.push(eq(openingStock.itemId, itemId));
+    return await db.select().from(openingStock).where(and(...conditions)).orderBy(desc(openingStock.createdAt));
+  }
+
+  async createOpeningStock(stock: InsertOpeningStock & { tenantId: string }): Promise<OpeningStock> {
+    const [created] = await db.insert(openingStock).values(stock).returning();
+    return created;
+  }
+
+  async calculateFifoValuation(tenantId: string, itemId: string, periodDate: Date): Promise<{ unitValue: number; quantity: number; totalValue: number }> {
+    const movements = await db.select().from(stockMovements)
+      .where(and(eq(stockMovements.tenantId, tenantId), eq(stockMovements.itemId, itemId), eq(stockMovements.costingMethod, 'FIFO')))
+      .orderBy(asc(stockMovements.createdAt));
+    
+    let remaining = 0, totalCost = 0;
+    for (const m of movements) {
+      if (m.movementType === 'purchase' || m.movementType === 'opening') {
+        remaining += Number(m.quantity);
+        totalCost += Number(m.totalCost);
+      } else if (m.movementType === 'sale') {
+        remaining -= Number(m.quantity);
+      }
+    }
+    return {
+      unitValue: remaining > 0 ? totalCost / remaining : 0,
+      quantity: remaining,
+      totalValue: totalCost,
+    };
+  }
+
+  async calculateWacValuation(tenantId: string, itemId: string, periodDate: Date): Promise<{ unitValue: number; quantity: number; totalValue: number }> {
+    const movements = await db.select().from(stockMovements)
+      .where(and(eq(stockMovements.tenantId, tenantId), eq(stockMovements.itemId, itemId), eq(stockMovements.costingMethod, 'WAC')))
+      .orderBy(asc(stockMovements.createdAt));
+    
+    let quantity = 0, totalCost = 0;
+    for (const m of movements) {
+      if (m.movementType === 'purchase' || m.movementType === 'opening') {
+        quantity += Number(m.quantity);
+        totalCost += Number(m.totalCost);
+      } else if (m.movementType === 'sale') {
+        const avgCost = quantity > 0 ? totalCost / quantity : 0;
+        totalCost -= Number(m.quantity) * avgCost;
+        quantity -= Number(m.quantity);
+      }
+    }
+    return {
+      unitValue: quantity > 0 ? totalCost / quantity : 0,
+      quantity,
+      totalValue: totalCost,
+    };
   }
 
   // Tax operations
