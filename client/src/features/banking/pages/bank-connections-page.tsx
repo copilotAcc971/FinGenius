@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, RefreshCw, Trash2, MoreHorizontal, AlertCircle } from "lucide-react";
+import { Plus, RefreshCw, Trash2, MoreHorizontal, AlertCircle, Landmark } from "lucide-react";
+import { EmptyState } from "@/shared/components/ui/empty-state";
+import { TableSkeleton } from "@/shared/components/ui/skeleton";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import {
@@ -148,23 +150,18 @@ export default function BankConnections() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <div className="rounded-lg border bg-card p-6"><TableSkeleton rows={5} columns={[{key: "1", header: "", width: "100px"}, {key: "2", header: "", width: "150px"}, {key: "3", header: "", width: "100px"}, {key: "4", header: "", width: "150px"}, {key: "5", header: "", width: "80px"}, {key: "6", header: "", width: "120px"}, {key: "7", header: "", width: "100px"}, {key: "8", header: "", width: "70px"}]} minHeight="300px" /></div>
       ) : connections.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No bank connections yet</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            Connect your first bank to enable automatic transaction syncing
-          </p>
-          <Button
-            onClick={() => setShowConnectDialog(true)}
-            data-testid="button-connect-first-bank"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Connect Your First Bank
-          </Button>
-        </div>
+        <EmptyState
+          icon={Landmark}
+          title="No bank connections yet"
+          description="Connect your first bank to enable automatic transaction syncing"
+          action={{
+            label: "Connect Your First Bank",
+            onClick: () => setShowConnectDialog(true)
+          }}
+          data_testid="empty-state-bank-connections"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table data-testid="table-connections">

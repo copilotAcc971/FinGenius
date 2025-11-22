@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Search, MoreHorizontal, Edit, Trash2 } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Edit, Trash2, Building2 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Badge } from "@/shared/components/ui/badge";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import {
   Table,
   TableBody,
@@ -138,24 +139,19 @@ export default function Vendors() {
       {isLoading ? (
         <TableSkeleton rows={8} columns={vendorColumns} minHeight="600px" />
       ) : filteredVendors.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No vendors found</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            {searchTerm ? "Try adjusting your search" : "Get started by adding your first vendor"}
-          </p>
-          {!searchTerm && (
-            <Button
-              onClick={() => {
-                setEditingVendor(null);
-                setShowDialog(true);
-              }}
-              data-testid="button-add-first-vendor"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Vendor
-            </Button>
-          )}
-        </div>
+        <EmptyState
+          icon={Building2}
+          title={searchTerm ? "No vendors match your search" : "No vendors yet"}
+          description={searchTerm ? "Try adjusting your search terms" : "Get started by creating your first vendor"}
+          action={!searchTerm ? {
+            label: "Add Vendor",
+            onClick: () => {
+              setEditingVendor(null);
+              setShowDialog(true);
+            }
+          } : undefined}
+          data_testid="empty-state-vendors"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

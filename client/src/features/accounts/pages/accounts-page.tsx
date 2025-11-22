@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Search, MoreHorizontal, Edit, Trash2 } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Edit, Trash2, Layers } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Badge } from "@/shared/components/ui/badge";
+import { EmptyState } from "@/shared/components/ui/empty-state";
+import { TableSkeleton } from "@/shared/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -153,28 +155,21 @@ export default function Accounts() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <div className="rounded-lg border bg-card p-6"><div className="space-y-4">{Array.from({length: 8}).map((_, i) => <div key={i} className="h-10 bg-gray-100 dark:bg-neutral-800 rounded animate-pulse"></div>)}</div></div>
       ) : filteredAccounts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No accounts found</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            {searchTerm ? "Try adjusting your search" : "Get started by adding your first account"}
-          </p>
-          {!searchTerm && (
-            <Button
-              onClick={() => {
-                setEditingAccount(null);
-                setShowDialog(true);
-              }}
-              data-testid="button-add-first-account"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Account
-            </Button>
-          )}
-        </div>
+        <EmptyState
+          icon={Layers}
+          title={searchTerm ? "No accounts match your search" : "No accounts yet"}
+          description={searchTerm ? "Try adjusting your search terms" : "Get started by creating your first account"}
+          action={!searchTerm ? {
+            label: "Add Account",
+            onClick: () => {
+              setEditingAccount(null);
+              setShowDialog(true);
+            }
+          } : undefined}
+          data_testid="empty-state-accounts"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

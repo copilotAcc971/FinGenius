@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Search, MoreHorizontal, Edit, Trash2 } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Edit, Trash2, Building } from "lucide-react";
+import { EmptyState } from "@/shared/components/ui/empty-state";
+import { TableSkeleton } from "@/shared/components/ui/skeleton";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Badge } from "@/shared/components/ui/badge";
@@ -163,28 +165,21 @@ export default function Assets() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <TableSkeleton rows={8} columns={[{key: "1", header: "", width: "100px"}, {key: "2", header: "", width: "150px"}, {key: "3", header: "", width: "100px"}, {key: "4", header: "", width: "100px"}, {key: "5", header: "", width: "120px"}, {key: "6", header: "", width: "120px"}, {key: "7", header: "", width: "150px"}, {key: "8", header: "", width: "150px"}, {key: "9", header: "", width: "80px"}, {key: "10", header: "", width: "70px"}]} minHeight="600px" />
       ) : filteredAssets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No assets found</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            {searchTerm ? "Try adjusting your search" : "Get started by adding your first fixed asset"}
-          </p>
-          {!searchTerm && (
-            <Button
-              onClick={() => {
-                setEditingAsset(null);
-                setShowDialog(true);
-              }}
-              data-testid="button-add-first-asset"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Asset
-            </Button>
-          )}
-        </div>
+        <EmptyState
+          icon={Building}
+          title={searchTerm ? "No assets match your search" : "No assets yet"}
+          description={searchTerm ? "Try adjusting your search terms" : "Get started by adding your first fixed asset"}
+          action={!searchTerm ? {
+            label: "Add Asset",
+            onClick: () => {
+              setEditingAsset(null);
+              setShowDialog(true);
+            }
+          } : undefined}
+          data_testid="empty-state-assets"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreHorizontal, Edit, Trash2, Mail, Download, Loader2, CheckCircle2 } from "lucide-react";
+import { Plus, MoreHorizontal, Edit, Trash2, Mail, Download, Loader2, CheckCircle2, FileText } from "lucide-react";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { useOptimisticUpdate } from "@/shared/hooks/optimistic-ui/useOptimisticUpdate";
@@ -207,20 +208,19 @@ export default function Invoices() {
       {isLoading ? (
         <TableSkeleton rows={8} columns={invoiceColumns} minHeight="600px" />
       ) : invoices.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No invoices yet</p>
-          <p className="text-sm text-muted-foreground mb-4">Create your first invoice to get started</p>
-          <Button
-            onClick={() => {
+        <EmptyState
+          icon={FileText}
+          title="No invoices yet"
+          description="Create your first invoice to get started"
+          action={{
+            label: "Create Invoice",
+            onClick: () => {
               setEditingInvoice(null);
               setShowDialog(true);
-            }}
-            data-testid="button-create-first-invoice"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Create Invoice
-          </Button>
-        </div>
+            }
+          }}
+          data_testid="empty-state-invoices"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreVertical, Pencil, Trash2, Upload, CheckCircle2, Loader2 } from "lucide-react";
+import { Plus, MoreVertical, Pencil, Trash2, Upload, CheckCircle2, Loader2, Receipt } from "lucide-react";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -211,14 +212,16 @@ export default function Bills() {
       {isLoading ? (
         <TableSkeleton rows={8} columns={billColumns} minHeight="600px" />
       ) : bills.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No bills yet</p>
-          <p className="text-sm text-muted-foreground mb-4">Add your first bill or upload a document for AI extraction</p>
-          <Button onClick={handleAddBill} data-testid="button-add-first-bill">
-            <Plus className="mr-2 h-4 w-4" />
-            Add Bill
-          </Button>
-        </div>
+        <EmptyState
+          icon={Receipt}
+          title="No bills yet"
+          description="Add your first bill or upload a document for AI extraction"
+          action={{
+            label: "Add Bill",
+            onClick: handleAddBill
+          }}
+          data_testid="empty-state-bills"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>
