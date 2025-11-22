@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import type { Invoice, Customer, TenantCompanyProfile, InvoiceLineItem } from '@shared/schema';
 
 /**
@@ -208,8 +208,7 @@ export class KSAZATCAXMLGenerator {
 </Invoice>`;
 
     // Calculate cryptographic hash of XML (SHA-256)
-    const crypto = require('crypto');
-    const hash = crypto.createHash('sha256').update(xml).digest('base64');
+    const hash = createHash('sha256').update(xml).digest('base64');
     
     return { xml, uuid: invoiceUUID, hash };
   }
