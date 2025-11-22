@@ -97,48 +97,10 @@ class TenantSession {
       return this._tenant;
     }
 
-    console.log("[TenantSession] Waiting for tenant to be set...");
-    
-    return new Promise<Tenant | null>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        cleanup();
-        console.warn("[TenantSession] Timeout waiting for tenant context", { 
-          timeout,
-          timestamp: new Date().toISOString(),
-          ready: this._ready,
-          hasTenant: !!this._tenant
-        });
-        
-        // Telemetry hook for production monitoring
-        if (typeof window !== "undefined" && (window as any).trackEvent) {
-          (window as any).trackEvent("tenant_session_timeout", {
-            timeout,
-            ready: this._ready,
-            hasTenant: !!this._tenant
-          });
-        }
-        
-        resolve(null);
-      }, timeout);
-
-      const handler = (tenant: Tenant | null) => {
-        cleanup();
-        console.log("[TenantSession] Tenant received:", tenant?.name);
-        resolve(tenant);
-      };
-
-      const cleanup = () => {
-        clearTimeout(timer);
-        this.off("tenant-changed", handler);
-      };
-
-      this.on("tenant-changed", handler);
-
-      if (this._tenant) {
-        cleanup();
-        resolve(this._tenant);
-      }
-    });
+    // If no tenant is currently set, return null immediately
+    // Don't wait for tenant-changed events that may never come
+    console.log("[TenantSession] No tenant set, returning null");
+    return null;
   }
 
   setTenant(tenant: Tenant | null): void {
