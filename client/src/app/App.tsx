@@ -244,6 +244,12 @@ export default function App() {
 }
 
 // Add lang attribute to html root element for semantic HTML
+// Initialize accessibility helpers
 if (typeof document !== 'undefined') {
   document.documentElement.lang = 'en-US';
+  
+  // Import and run accessibility initialization
+  import('@/shared/lib/utils/accessibility-helpers').then(({ initializeAccessibility }) => {
+    initializeAccessibility();
+  });
 }

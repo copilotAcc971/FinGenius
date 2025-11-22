@@ -184,7 +184,14 @@ export default function Customers() {
                   <TableCell className={getColumnClassName(customerColumns[4])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${customer.id}`} disabled={customer.isPending}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          data-testid={`button-actions-${customer.id}`} 
+                          disabled={customer.isPending}
+                          aria-label={`Actions for customer ${customer.name}`}
+                          title="More options"
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>

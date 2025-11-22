@@ -287,6 +287,8 @@ export default function Invoices() {
                           size="icon" 
                           disabled={invoice.isPending}
                           data-testid={`button-actions-${invoice.id}`}
+                          aria-label={`Actions for invoice ${invoice.invoiceNumber || invoice.id}`}
+                          title="More options"
                         >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>

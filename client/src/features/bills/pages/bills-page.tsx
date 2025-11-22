@@ -248,7 +248,14 @@ export default function Bills() {
                   <TableCell className={getColumnClassName(billColumns[6])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-bill-actions-${bill.id}`} disabled={bill.isPending}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          data-testid={`button-bill-actions-${bill.id}`} 
+                          disabled={bill.isPending}
+                          aria-label={`Actions for bill ${bill.billNumber || bill.id}`}
+                          title="More options"
+                        >
                           <MoreVertical className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
