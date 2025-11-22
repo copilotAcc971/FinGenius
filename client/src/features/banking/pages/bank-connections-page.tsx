@@ -219,6 +219,8 @@ export default function BankConnections() {
                           variant="ghost" 
                           size="icon"
                           data-testid={`button-actions-${connection.id}`}
+                          aria-label={`Actions for bank connection ${connection.bankName || "Unknown Bank"}`}
+                          title="More options"
                         >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>

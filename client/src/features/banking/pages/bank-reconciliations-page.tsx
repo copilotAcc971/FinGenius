@@ -227,7 +227,13 @@ export default function BankReconciliations() {
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${reconciliation.id}`}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          data-testid={`button-actions-${reconciliation.id}`}
+                          aria-label={`Actions for reconciliation on ${new Date(reconciliation.reconciliationDate).toLocaleDateString()}`}
+                          title="More options"
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>

@@ -271,6 +271,8 @@ export default function CustomerPayments() {
                         onClick={() => handleEdit(payment)}
                         disabled={payment.isPending}
                         data-testid={`button-edit-${payment.id}`}
+                        aria-label={`Edit payment ${payment.paymentNumber || payment.id}`}
+                        title="Edit payment"
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -280,6 +282,8 @@ export default function CustomerPayments() {
                         onClick={() => handleDelete(payment)}
                         disabled={payment.isPending}
                         data-testid={`button-delete-${payment.id}`}
+                        aria-label={`Delete payment ${payment.paymentNumber || payment.id}`}
+                        title="Delete payment"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
