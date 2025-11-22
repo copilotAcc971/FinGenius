@@ -111,8 +111,6 @@ app.use((req, res, next) => {
       if (!RBAC_BYPASS_ENABLED) {
         await seedPermissions();
         await initializeRBACForAllTenants();
-      } else {
-        console.log('[RBAC] Skipping permissions seeding (bypass mode)');
       }
       
       // Initialize scheduled reports with proper await
