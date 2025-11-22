@@ -178,6 +178,144 @@ const reimburseExpenseSchema = z.object({
   paymentReference: z.string().min(1, "Payment reference is required"),
 });
 
+// Enhanced validation schemas for monetary inputs and dates
+const monetaryValueSchema = z.string().refine(
+  (val) => {
+    const num = parseFloat(val);
+    return !isNaN(num) && num >= 0;
+  },
+  { message: "Amount must be a non-negative number" }
+);
+
+const invoiceDateValidationSchema = z.object({
+  issueDate: z.string(),
+  dueDate: z.string(),
+}).refine(
+  (data) => {
+    const issue = new Date(data.issueDate);
+    const due = new Date(data.dueDate);
+    return due >= issue;
+  },
+  { message: "Due date must be on or after the issue date" }
+);
+
+// Helper function to track inventory movements for invoices
+async function trackInventoryMovementForInvoice(
+  invoiceId: string,
+  lineItems: any[],
+  movementType: 'sale' | 'return',
+  tenantId: string,
+  storage: any
+) {
+  const movements = [];
+  
+  for (const lineItem of lineItems) {
+    if (!lineItem.itemId) continue;
+    
+    // Get item details to check if it's an inventory item
+    const item = await storage.getItemById(lineItem.itemId, tenantId);
+    if (!item || item.type !== 'goods' || !item.trackInventory) continue;
+    
+    // Create stock movement
+    const movement = await storage.createStockMovement({
+      tenantId,
+      itemId: lineItem.itemId,
+      movementType,
+      quantity: movementType === 'sale' 
+        ? `-${lineItem.quantity}` // Negative for sales
+        : lineItem.quantity, // Positive for returns
+      unitCost: item.purchasePrice || '0',
+      totalCost: (parseFloat(item.purchasePrice || '0') * parseFloat(lineItem.quantity)).toString(),
+      costingMethod: item.costingMethod || 'FIFO',
+      referenceId: invoiceId,
+      referenceType: 'invoice',
+      notes: movementType === 'sale' 
+        ? `Stock movement for invoice ${invoiceId}`
+        : `Stock reversal for deleted invoice ${invoiceId}`,
+    });
+    
+    movements.push(movement);
+    
+    // Update current stock level on the item
+    const currentStock = parseFloat(item.currentStock || '0');
+    const quantityChange = parseFloat(lineItem.quantity);
+    const newStock = movementType === 'sale' 
+      ? currentStock - quantityChange
+      : currentStock + quantityChange;
+    
+    await storage.updateItem(lineItem.itemId, tenantId, {
+      currentStock: newStock.toString(),
+    });
+  }
+  
+  return movements;
+}
+
+// Helper function for e-invoicing compliance
+async function processEInvoicing(
+  invoice: any,
+  companyProfile: any,
+  storage: any
+) {
+  if (!companyProfile?.jurisdiction) return null;
+  
+  try {
+    if (companyProfile.jurisdiction === 'UAE') {
+      // Generate Peppol UBL XML and QR code for UAE
+      const peppolService = new UAEPeppolService();
+      const ublXml = await peppolService.generateUBL(invoice, companyProfile);
+      const qrCode = await peppolService.generateQRCode(invoice);
+      
+      // Store e-invoice data
+      await storage.updateInvoice(invoice.id, invoice.tenantId, {
+        peppolUblXml: ublXml,
+        peppolQrCode: qrCode,
+        peppolTransmissionStatus: 'pending',
+        peppolTransmissionDeadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days from now
+      });
+      
+      return { type: 'peppol', xml: ublXml, qrCode };
+    } else if (companyProfile.jurisdiction === 'KSA') {
+      // Generate ZATCA XML and process for KSA
+      const zatcaService = new KSAZATCAService();
+      const zatcaXml = await zatcaService.generateXML(invoice, companyProfile);
+      const zatcaHash = await zatcaService.calculateHash(zatcaXml);
+      const zatcaQrCode = await zatcaService.generateQRCode(invoice, zatcaHash);
+      const zatcaUuid = `INV-${invoice.id}-${Date.now()}`;
+      
+      // Store ZATCA data
+      await storage.updateInvoice(invoice.id, invoice.tenantId, {
+        zatcaFatoorahXml: zatcaXml,
+        zatcaHash,
+        zatcaQrCode,
+        zatcaUuid,
+        zatcaClearanceStatus: 'pending',
+      });
+      
+      // Submit for clearance/reporting
+      try {
+        const clearanceResult = await zatcaService.submitForClearance(zatcaXml, zatcaUuid);
+        if (clearanceResult.status === 'cleared') {
+          await storage.updateInvoice(invoice.id, invoice.tenantId, {
+            zatcaClearanceStatus: 'cleared',
+            zatcaClearedAt: new Date(),
+          });
+        }
+      } catch (error) {
+        console.error('[E-Invoicing] ZATCA clearance failed:', error);
+        // Continue even if clearance fails - invoice is still created
+      }
+      
+      return { type: 'zatca', xml: zatcaXml, hash: zatcaHash, qrCode: zatcaQrCode };
+    }
+  } catch (error) {
+    console.error('[E-Invoicing] Failed to process e-invoice:', error);
+    // Don't fail invoice creation if e-invoicing fails
+  }
+  
+  return null;
+}
+
 // Schemas for project invoicing endpoints
 const createInvoiceFromTimeEntriesSchema = z.object({
   timeEntryIds: z.array(z.string()).min(1, "At least one time entry is required"),
@@ -2200,6 +2338,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lineItems: req.body.lineItems || [],
       });
       
+      // SERVER-SIDE VALIDATION 1: Validate dates
+      try {
+        invoiceDateValidationSchema.parse({
+          issueDate: parsed.invoice.issueDate,
+          dueDate: parsed.invoice.dueDate,
+        });
+      } catch (error: any) {
+        return res.status(400).json({ 
+          message: error.errors?.[0]?.message || "Invalid date values: Due date must be on or after issue date" 
+        });
+      }
+      
+      // SERVER-SIDE VALIDATION 2: Validate monetary amounts
+      if (parsed.invoice.total) {
+        try {
+          monetaryValueSchema.parse(parsed.invoice.total);
+        } catch (error: any) {
+          return res.status(400).json({ 
+            message: "Invoice total must be a non-negative number" 
+          });
+        }
+      }
+      
+      // Validate each line item amount
+      for (const lineItem of parsed.lineItems) {
+        if (lineItem.unitPrice) {
+          try {
+            monetaryValueSchema.parse(lineItem.unitPrice);
+          } catch (error: any) {
+            return res.status(400).json({ 
+              message: "Line item unit price must be a non-negative number" 
+            });
+          }
+        }
+        if (lineItem.amount) {
+          try {
+            monetaryValueSchema.parse(lineItem.amount);
+          } catch (error: any) {
+            return res.status(400).json({ 
+              message: "Line item amount must be a non-negative number" 
+            });
+          }
+        }
+      }
+      
       // Validate issuerTaxId is present for tax compliance
       if (!parsed.invoice.issuerTaxId || parsed.invoice.issuerTaxId.trim() === '') {
         return res.status(400).json({ 
@@ -2289,6 +2472,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       const invoice = await storage.createInvoiceWithItems(invoiceWithServerTotals);
+      
+      // INVENTORY TRACKING: Create stock movements for inventory items
+      if (parsed.lineItems.some(item => item.itemId)) {
+        try {
+          await trackInventoryMovementForInvoice(
+            invoice.invoice.id,
+            parsed.lineItems,
+            'sale',
+            req.tenantId,
+            storage
+          );
+        } catch (error) {
+          console.error('[Inventory] Failed to track stock movements:', error);
+          // Don't fail invoice creation if inventory tracking fails
+        }
+      }
+      
+      // E-INVOICING COMPLIANCE: Process e-invoicing if required
+      const companyProfile = await storage.getCompanyProfile(req.tenantId);
+      if (companyProfile?.jurisdiction && ['UAE', 'KSA'].includes(companyProfile.jurisdiction)) {
+        try {
+          const eInvoiceResult = await processEInvoicing(invoice.invoice, companyProfile, storage);
+          if (eInvoiceResult) {
+            console.log(`[E-Invoicing] Successfully processed ${eInvoiceResult.type} invoice for ${invoice.invoice.id}`);
+          }
+        } catch (error) {
+          console.error('[E-Invoicing] Failed to process e-invoice:', error);
+          // Don't fail invoice creation if e-invoicing fails
+        }
+      }
       
       // SOX-compliant audit logging
       await auditLogger.logFinancialTransaction({
@@ -2482,6 +2695,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "Cannot delete invoice after it has been sent",
           code: "INVOICE_NOT_DELETABLE" 
         });
+      }
+      
+      // INVENTORY TRACKING: Reverse stock movements before deletion
+      const lineItems = await storage.getInvoiceLineItems(id, invoice.tenantId);
+      if (lineItems && lineItems.some(item => item.itemId)) {
+        try {
+          await trackInventoryMovementForInvoice(
+            id,
+            lineItems,
+            'return', // This will reverse the stock movements
+            invoice.tenantId,
+            storage
+          );
+        } catch (error) {
+          console.error('[Inventory] Failed to reverse stock movements:', error);
+          // Don't fail deletion if inventory reversal fails
+        }
       }
       
       const success = await storage.deleteInvoice(id, invoice.tenantId);
@@ -6382,6 +6612,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Parse body WITHOUT tenantId
       const validated = billPayloadSchema.parse(req.body);
       
+      // SERVER-SIDE VALIDATION 1: Validate dates
+      if (validated.bill.issueDate && validated.bill.dueDate) {
+        try {
+          invoiceDateValidationSchema.parse({
+            issueDate: validated.bill.issueDate,
+            dueDate: validated.bill.dueDate,
+          });
+        } catch (error: any) {
+          return res.status(400).json({ 
+            message: error.errors?.[0]?.message || "Invalid date values: Due date must be on or after issue date" 
+          });
+        }
+      }
+      
+      // SERVER-SIDE VALIDATION 2: Validate monetary amounts
+      if (validated.bill.total) {
+        try {
+          monetaryValueSchema.parse(validated.bill.total);
+        } catch (error: any) {
+          return res.status(400).json({ 
+            message: "Bill total must be a non-negative number" 
+          });
+        }
+      }
+      
+      // Validate each line item amount
+      for (const lineItem of validated.lineItems) {
+        if (lineItem.unitPrice || lineItem.rate) {
+          const price = lineItem.unitPrice || lineItem.rate || '0';
+          try {
+            monetaryValueSchema.parse(price);
+          } catch (error: any) {
+            return res.status(400).json({ 
+              message: "Line item unit price must be a non-negative number" 
+            });
+          }
+        }
+        if (lineItem.amount) {
+          try {
+            monetaryValueSchema.parse(lineItem.amount);
+          } catch (error: any) {
+            return res.status(400).json({ 
+              message: "Line item amount must be a non-negative number" 
+            });
+          }
+        }
+      }
+      
       // CRITICAL: Calculate totals server-side - NEVER trust client values
       const serverCalculation = await FinancialCalculationsService.calculateBillTotal(
         validated.lineItems.map(item => ({
@@ -7320,6 +7598,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       
       const validated = insertPaymentSchema.parse({ ...req.body, tenantId });
+      
+      // SERVER-SIDE VALIDATION: Validate payment amount
+      if (validated.amount) {
+        try {
+          monetaryValueSchema.parse(validated.amount);
+        } catch (error: any) {
+          return res.status(400).json({ 
+            message: "Payment amount must be a non-negative number" 
+          });
+        }
+      }
+      
+      // Validate date is not in the future
+      if (validated.date) {
+        const paymentDate = new Date(validated.date);
+        const today = new Date();
+        today.setHours(23, 59, 59, 999); // End of today
+        
+        if (paymentDate > today) {
+          return res.status(400).json({ 
+            message: "Payment date cannot be in the future" 
+          });
+        }
+      }
 
       // IFRS IAS 21 compliant currency conversion
       let paymentData = validated;
