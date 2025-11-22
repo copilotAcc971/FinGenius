@@ -13,6 +13,7 @@ import {
   logHighRiskOperation,
   checkSegregationOfDuties 
 } from "./services/audit-logger.service";
+import DatabaseTransactionService from "./services/database-transaction.service";
 import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
 import { TaxCalculator } from "./services/tax-calculator";
@@ -2471,23 +2472,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       };
       
-      const invoice = await storage.createInvoiceWithItems(invoiceWithServerTotals);
-      
-      // INVENTORY TRACKING: Create stock movements for inventory items
-      if (parsed.lineItems.some(item => item.itemId)) {
-        try {
-          await trackInventoryMovementForInvoice(
-            invoice.invoice.id,
-            parsed.lineItems,
-            'sale',
-            req.tenantId,
-            storage
-          );
-        } catch (error) {
-          console.error('[Inventory] Failed to track stock movements:', error);
-          // Don't fail invoice creation if inventory tracking fails
+      // ATOMIC TRANSACTION: Create invoice with all related operations
+      const invoice = await DatabaseTransactionService.executeInTransaction(
+        async (tx) => {
+          // 1. Create invoice and line items
+          const invoiceResult = await storage.createInvoiceWithItems(invoiceWithServerTotals, tx);
+          
+          // 2. Track inventory movements if applicable
+          if (parsed.lineItems.some(item => item.itemId)) {
+            await trackInventoryMovementForInvoice(
+              invoiceResult.invoice.id,
+              parsed.lineItems,
+              'sale',
+              req.tenantId,
+              storage,
+              tx
+            );
+          }
+          
+          // 3. Update customer balance if applicable
+          if (invoiceResult.invoice.customerId) {
+            await storage.updateCustomerBalance(
+              invoiceResult.invoice.customerId,
+              invoiceResult.invoice.total || '0',
+              'increase',
+              req.tenantId,
+              tx
+            );
+          }
+          
+          // 4. Create automatic journal entry for the invoice
+          if (invoiceResult.invoice.status === 'posted') {
+            const journalEntry = await createInvoiceJournalEntry(
+              storage,
+              req.tenantId,
+              invoiceResult.invoice.id,
+              {
+                preparedBy: req.user.claims.sub,
+                preparedAt: new Date()
+              },
+              tx
+            );
+            
+            // Update invoice with journal entry reference
+            await storage.updateInvoice(
+              invoiceResult.invoice.id,
+              req.tenantId,
+              { journalEntryId: journalEntry.id },
+              tx
+            );
+          }
+          
+          return invoiceResult;
+        },
+        {
+          description: `Create invoice ${parsed.invoice.invoiceNumber || 'new'}`,
+          tenantId: req.tenantId,
+          userId: req.user.claims.sub,
+          slowTransactionThreshold: 2000, // 2 seconds for invoice creation
+          maxRetries: 3
         }
-      }
+      );
       
       // E-INVOICING COMPLIANCE: Process e-invoicing if required
       const companyProfile = await storage.getCompanyProfile(req.tenantId);
@@ -3918,7 +3963,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
         total: taxCalc.total.toFixed(2)
       };
       
-      const creditNote = await storage.createCreditNote(creditNoteWithTax, validatedLineItems);
+      // ATOMIC TRANSACTION: Create credit note with all related operations
+      const creditNote = await DatabaseTransactionService.executeInTransaction(
+        async (tx) => {
+          // 1. Create credit note and line items
+          const result = await storage.createCreditNote(creditNoteWithTax, validatedLineItems, tx);
+          
+          // 2. Update customer balance if applicable
+          if (result.customerId && result.total) {
+            await storage.updateCustomerBalance(
+              result.customerId,
+              result.total,
+              'decrease', // Credit note reduces customer balance
+              tenantId,
+              tx
+            );
+          }
+          
+          // 3. If applied to an invoice, update invoice balance
+          if (creditNoteData.invoiceId) {
+            await storage.applyCreditToInvoice(
+              creditNoteData.invoiceId,
+              result.total || '0',
+              tenantId,
+              tx
+            );
+          }
+          
+          return result;
+        },
+        {
+          description: `Create credit note ${creditNoteData.creditNoteNumber || 'new'}`,
+          tenantId,
+          userId: req.user.claims.sub,
+          slowTransactionThreshold: 1500,
+          maxRetries: 3
+        }
+      );
+      
       res.status(201).json(creditNote);
     } catch (error: any) {
       if (error.name === 'ZodError') {
@@ -6450,10 +6532,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tenantId = req.tenantId!;
       const userId = req.user.claims.sub;
 
-      // Use storage to post the journal entry
-      const postedEntry = await storage.postJournalEntry(id, tenantId, userId);
+      // ATOMIC TRANSACTION: Post journal entry with all account balance updates
+      const postedEntry = await DatabaseTransactionService.executeInTransaction(
+        async (tx) => {
+          // 1. Get journal entry to validate it exists and is in draft status
+          const entry = await storage.getJournalEntry(id, tenantId, tx);
+          if (!entry) {
+            throw new ValidationError('Journal entry not found');
+          }
+          if (entry.status !== 'draft') {
+            throw new ValidationError(`Cannot post entry with status ${entry.status}`);
+          }
 
-      // Log audit trail
+          // 2. Get all journal entry legs
+          const legs = await storage.getJournalEntryLegs(id, tenantId, tx);
+          
+          // 3. Validate debits equal credits
+          const totalDebits = legs.reduce((sum, leg) => 
+            sum + (leg.debitAmount ? parseFloat(leg.debitAmount) : 0), 0);
+          const totalCredits = legs.reduce((sum, leg) => 
+            sum + (leg.creditAmount ? parseFloat(leg.creditAmount) : 0), 0);
+          
+          if (Math.abs(totalDebits - totalCredits) > 0.01) {
+            throw new ValidationError(
+              `Journal entry not balanced: debits=${totalDebits.toFixed(2)}, credits=${totalCredits.toFixed(2)}`
+            );
+          }
+
+          // 4. Post the journal entry (update status)
+          const posted = await storage.postJournalEntry(id, tenantId, userId, tx);
+
+          // 5. Update account balances for all affected accounts
+          for (const leg of legs) {
+            if (leg.debitAmount) {
+              await storage.updateAccountBalance(
+                leg.accountId,
+                leg.debitAmount,
+                'debit',
+                tenantId,
+                tx
+              );
+            }
+            if (leg.creditAmount) {
+              await storage.updateAccountBalance(
+                leg.accountId,
+                leg.creditAmount,
+                'credit',
+                tenantId,
+                tx
+              );
+            }
+          }
+
+          // 6. Update historical balances
+          await updateHistoricalBalances(tenantId, id, tx);
+
+          return posted;
+        },
+        {
+          description: `Post journal entry ${id}`,
+          tenantId,
+          userId,
+          slowTransactionThreshold: 1500, // 1.5 seconds for posting
+          maxRetries: 3
+        }
+      );
+
+      // Log audit trail (outside transaction)
       await enhancedAuditLogger.logFinancialTransaction({
         tenantId,
         userId,
@@ -6472,6 +6617,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(postedEntry);
     } catch (error: any) {
       console.error("Error posting journal entry:", error);
+      
+      // Log failure
+      await enhancedAuditLogger.logFinancialTransaction({
+        tenantId: req.tenantId!,
+        userId: req.user.claims.sub,
+        action: 'post_journal_entry',
+        entityType: 'journal_entry',
+        entityId: req.params.id,
+        changes: {
+          before: { status: 'draft' },
+          after: null
+        },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        wasSuccessful: false,
+        errorMessage: error.message
+      });
+      
       res.status(400).json({ 
         error: error.message || "Failed to post journal entry" 
       });
@@ -6830,9 +6993,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lineItems: lineItemsWithTenant,
       };
       
-      const bill = await storage.createBillWithItems(payload, tenantId);
+      // ATOMIC TRANSACTION: Create bill with all related operations
+      const bill = await DatabaseTransactionService.executeInTransaction(
+        async (tx) => {
+          // 1. Create bill and line items
+          const billResult = await storage.createBillWithItems(payload, tenantId, tx);
+          
+          // 2. Update vendor balance if applicable
+          if (billResult.vendorId) {
+            await storage.updateVendorBalance(
+              billResult.vendorId,
+              billResult.total || '0',
+              'increase',
+              tenantId,
+              tx
+            );
+          }
+          
+          // 3. Track inventory movements for received items
+          if (payload.lineItems.some(item => item.itemId)) {
+            await trackInventoryMovementForBill(
+              billResult.id,
+              payload.lineItems,
+              'purchase',
+              tenantId,
+              storage,
+              tx
+            );
+          }
+          
+          // 4. Create automatic journal entry for the bill if posted
+          if (billResult.status === 'posted') {
+            const journalEntry = await createBillJournalEntry(
+              await fetchBillEntryData(billResult.id, tenantId, storage, tx),
+              tenantId,
+              req.user.claims.sub,
+              storage,
+              tx
+            );
+            
+            // Update bill with journal entry reference
+            await storage.updateBill(
+              billResult.id,
+              tenantId,
+              { journalEntryId: journalEntry.id },
+              tx
+            );
+          }
+          
+          return billResult;
+        },
+        {
+          description: `Create bill ${payload.bill.billNumber || 'new'}`,
+          tenantId: tenantId,
+          userId: req.user.claims.sub,
+          slowTransactionThreshold: 2000, // 2 seconds for bill creation
+          maxRetries: 3
+        }
+      );
       
-      // LOG SUCCESS
+      // LOG SUCCESS (outside transaction)
       await auditLogger.logFinancialTransaction({
         tenantId: req.tenantId!,
         userId: req.user!.claims.sub,
@@ -7738,53 +7958,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Use atomic transaction to ensure payment and journal entry are created together
-      const result = await withTransaction(async (tx) => {
-        // 1. Create vendor payment record
-        const payment = await storage.createPayment(paymentData, tx);
+      // ATOMIC TRANSACTION: Create payment with journal entry and all account updates
+      const result = await DatabaseTransactionService.executeInTransaction(
+        async (tx) => {
+          // 1. Create vendor payment record
+          const payment = await storage.createPayment(paymentData, tx);
 
-        // 2. Fetch payment data and create journal entry
-        const paymentEntryData = await fetchVendorPaymentEntryData(payment.id, tenantId, storage, tx);
-        const journalEntryData = await createVendorPaymentJournalEntry(
-          paymentEntryData,
+          // 2. Update bill status if payment is for a specific bill
+          if (paymentData.billId) {
+            const bill = await storage.getBillById(paymentData.billId, tenantId, tx);
+            if (bill) {
+              const remainingAmount = parseFloat(bill.total || '0') - parseFloat(payment.amount || '0');
+              const status = remainingAmount <= 0 ? 'paid' : 'partial';
+              await storage.updateBill(paymentData.billId, tenantId, { 
+                status,
+                paidAmount: payment.amount 
+              }, tx);
+            }
+          }
+
+          // 3. Update vendor balance
+          if (paymentData.vendorId) {
+            await storage.updateVendorBalance(
+              paymentData.vendorId,
+              payment.amount || '0',
+              'decrease',
+              tenantId,
+              tx
+            );
+          }
+
+          // 4. Fetch payment data and create journal entry
+          const paymentEntryData = await fetchVendorPaymentEntryData(payment.id, tenantId, storage, tx);
+          const journalEntryData = await createVendorPaymentJournalEntry(
+            paymentEntryData,
+            tenantId,
+            userId,
+            storage,
+            tx
+          );
+
+          // 5. Persist journal entry to database - CRITICAL: Pass tx for atomicity
+          const journalEntryNumber = await storage.getNextJournalEntryNumber(tenantId, tx);
+          const journalEntry = await storage.createJournalEntry(tenantId, {
+            journalEntryNumber,
+            entryDate: journalEntryData.entryDate,
+            description: journalEntryData.description,
+            referenceNumber: journalEntryData.referenceNumber || null,
+            notes: journalEntryData.notes || null,
+            sourceDocumentType: journalEntryData.sourceDocumentType,
+            sourceDocumentId: journalEntryData.sourceDocumentId,
+            status: 'posted',
+            isAutoGenerated: journalEntryData.isAutoGenerated || true,
+            preparedBy: journalEntryData.preparedBy,
+            preparedAt: journalEntryData.preparedAt || new Date(),
+          }, tx);
+
+          // 6. Create journal entry legs - CRITICAL: Pass tx for atomicity
+          const legs = journalEntryData.lines.map(line => ({
+            journalEntryId: journalEntry.id,
+            accountId: line.accountId!,
+            debitAmount: line.debitAmount || null,
+            creditAmount: line.creditAmount || null,
+            description: line.description,
+          }));
+
+          await storage.createJournalEntryLegs(tenantId, legs, tx);
+
+          // 7. Update historical balances for all affected accounts
+          await updateHistoricalBalances(tenantId, journalEntry.id, tx);
+
+          return { payment, journalEntry };
+        },
+        {
+          description: `Process payment ${paymentData.referenceNumber || 'new'}`,
           tenantId,
           userId,
-          storage,
-          tx
-        );
-
-        // 3. Persist journal entry to database - CRITICAL: Pass tx for atomicity
-        const journalEntryNumber = await storage.getNextJournalEntryNumber(tenantId, tx);
-        const journalEntry = await storage.createJournalEntry(tenantId, {
-          journalEntryNumber,
-          entryDate: journalEntryData.entryDate,
-          description: journalEntryData.description,
-          referenceNumber: journalEntryData.referenceNumber || null,
-          notes: journalEntryData.notes || null,
-          sourceDocumentType: journalEntryData.sourceDocumentType,
-          sourceDocumentId: journalEntryData.sourceDocumentId,
-          status: 'posted',
-          isAutoGenerated: journalEntryData.isAutoGenerated || true,
-          preparedBy: journalEntryData.preparedBy,
-          preparedAt: journalEntryData.preparedAt || new Date(),
-        }, tx);
-
-        // 4. Create journal entry legs - CRITICAL: Pass tx for atomicity
-        const legs = journalEntryData.lines.map(line => ({
-          journalEntryId: journalEntry.id,
-          accountId: line.accountId!,
-          debitAmount: line.debitAmount || null,
-          creditAmount: line.creditAmount || null,
-          description: line.description,
-        }));
-
-        await storage.createJournalEntryLegs(tenantId, legs, tx);
-
-        // 5. Update historical balances for all affected accounts
-        await updateHistoricalBalances(tenantId, journalEntry.id, tx);
-
-        return { payment, journalEntry };
-      });
+          slowTransactionThreshold: 2000, // 2 seconds for payment processing
+          maxRetries: 3
+        }
+      );
 
       // LOG SUCCESS
       await auditLogger.logFinancialTransaction({
