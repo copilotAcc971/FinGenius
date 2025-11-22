@@ -211,14 +211,16 @@ export default function SalesOrdersPage() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No sales orders yet</p>
-          <p className="text-sm text-muted-foreground mb-4">Create your first sales order to get started</p>
-          <Button onClick={handleCreate} data-testid="button-create-first-order">
-            <Plus className="mr-2 h-4 w-4" />
-            Create Sales Order
-          </Button>
-        </div>
+        <EmptyState
+          icon={Truck}
+          title="No sales orders yet"
+          description="Create your first sales order to get started"
+          action={{
+            label: "Create Sales Order",
+            onClick: handleCreate
+          }}
+          dataTestId="empty-state-sales-orders"
+        />
       )}
 
       <SalesOrderDialog

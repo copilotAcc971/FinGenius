@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Calendar, TrendingUp, TrendingDown } from "lucide-react";
+import { Calendar, TrendingUp, TrendingDown, DollarSign } from "lucide-react";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/components/ui/select";
@@ -352,12 +353,12 @@ export default function AccountBalances() {
             </CardHeader>
             <CardContent>
               {balanceData.balanceHistory.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-                  <p className="text-lg font-medium mb-2">No transactions found</p>
-                  <p className="text-sm text-muted-foreground">
-                    No transactions in the selected date range
-                  </p>
-                </div>
+                <EmptyState
+                  icon={DollarSign}
+                  title="No transactions found"
+                  description="No transactions in the selected date range"
+                  dataTestId="empty-state-account-balances"
+                />
               ) : (
                 <>
                   <div className="border rounded-lg">

@@ -160,19 +160,16 @@ export default function PurchaseOrders() {
       {isLoading ? (
         <TableSkeleton rows={8} columns={purchaseOrderColumns} minHeight="400px" />
       ) : purchaseOrders.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-muted-foreground mb-4">No purchase orders yet</p>
-          <Button
-            onClick={() => {
-              setEditingPO(null);
-              setShowDialog(true);
-            }}
-            data-testid="button-create-first-purchase-order"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Create your first purchase order
-          </Button>
-        </div>
+        <EmptyState
+          icon={ShoppingCart}
+          title="No purchase orders yet"
+          description="Create your first purchase order to get started"
+          action={{
+            label: "Create your first purchase order",
+            onClick: () => { setEditingPO(null); setShowDialog(true); }
+          }}
+          dataTestId="empty-state-purchase-orders"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

@@ -141,24 +141,19 @@ export default function Taxes() {
           <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
         </div>
       ) : filteredTaxes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No taxes found</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            {searchTerm ? "Try adjusting your search" : "Get started by adding your first tax rate"}
-          </p>
-          {!searchTerm && (
-            <Button
-              onClick={() => {
-                setEditingTax(null);
-                setShowDialog(true);
-              }}
-              data-testid="button-add-first-tax"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Tax
-            </Button>
-          )}
-        </div>
+        <EmptyState
+          icon={Percent}
+          title="No taxes found"
+          description={searchTerm ? "Try adjusting your search" : "Get started by adding your first tax rate"}
+          action={!searchTerm ? {
+            label: "Add Tax",
+            onClick: () => {
+              setEditingTax(null);
+              setShowDialog(true);
+            }
+          } : undefined}
+          dataTestId="empty-state-taxes"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

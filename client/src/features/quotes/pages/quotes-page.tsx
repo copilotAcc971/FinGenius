@@ -208,14 +208,16 @@ export default function QuotesPage() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No quotes yet</p>
-          <p className="text-sm text-muted-foreground mb-4">Create your first quote to get started</p>
-          <Button onClick={handleCreate} data-testid="button-create-first-quote">
-            <Plus className="mr-2 h-4 w-4" />
-            Create Quote
-          </Button>
-        </div>
+        <EmptyState
+          icon={ClipboardList}
+          title="No quotes yet"
+          description="Create your first quote to get started"
+          action={{
+            label: "Create Quote",
+            onClick: handleCreate
+          }}
+          dataTestId="empty-state-quotes"
+        />
       )}
 
       <QuoteDialog
