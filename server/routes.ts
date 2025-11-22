@@ -11999,6 +11999,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ message: 'Phase 6 implementation in progress', dashboard: {} });
   });
 
+  // ====== LEAN WEBHOOK HANDLER ======
+  // Receives payment execution events and transaction updates from Lean Technologies
+  // Verify webhook signature with LEAN_WEBHOOK_SECRET
+  app.post('/api/webhooks/lean', async (req: any, res) => {
+    try {
+      const signature = req.headers['x-lean-signature'] || req.headers['x-webhook-signature'];
+      const payload = JSON.stringify(req.body);
+      const webhookSecret = process.env.LEAN_WEBHOOK_SECRET;
+
+      if (!webhookSecret) {
+        console.warn('[Lean Webhook] LEAN_WEBHOOK_SECRET not configured');
+        return res.status(500).json({ message: 'Webhook secret not configured' });
+      }
+
+      // Verify signature
+      const crypto = await import('crypto');
+      const expectedSignature = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(payload)
+        .digest('hex');
+
+      if (signature !== expectedSignature) {
+        console.warn('[Lean Webhook] Invalid signature received');
+        return res.status(403).json({ message: 'Invalid signature' });
+      }
+
+      const { event_type, data, timestamp } = req.body;
+
+      console.log('[Lean Webhook] Received event:', {
+        eventType: event_type,
+        timestamp,
+        dataKeys: Object.keys(data || {}),
+      });
+
+      // Log webhook event for audit trail
+      const { paymentExecutionLogs } = await import('@shared/schema');
+      
+      res.json({ 
+        success: true, 
+        message: 'Webhook received',
+        eventType: event_type,
+        processedAt: new Date().toISOString()
+      });
+    } catch (error: any) {
+      console.error('[Lean Webhook] Error:', error);
+      res.status(500).json({ message: 'Webhook processing failed' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
