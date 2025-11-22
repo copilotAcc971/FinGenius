@@ -1,5 +1,6 @@
 import { RBACService } from '../rbac/service';
 import { matchesPermissionPattern } from '../rbac/permissions';
+import { logSystemEvent } from '../services/audit-logger.service';
 import type { Role } from '@shared/schema';
 
 // Extend Express Request type to include RBAC context
@@ -77,6 +78,24 @@ export function requirePermission(permission: string) {
     );
     
     if (!hasPermission) {
+      // Log permission denial as system event for compliance
+      logSystemEvent({
+        type: 'permission_denied',
+        tenantId: (req as any).tenantId,
+        userId: (req as any).user?.claims?.sub,
+        entityType: 'permission',
+        entityId: permission,
+        details: {
+          requiredPermission: permission,
+          userPermissions: req.permissions,
+          path: (req as any).path,
+          method: (req as any).method,
+        },
+        ipAddress: (req as any).ip,
+        userAgent: (req as any).get?.('user-agent'),
+        sessionId: (req as any).sessionID,
+      }).catch((err: any) => console.error('Failed to log permission denial:', err));
+      
       return res.status(403).json({ 
         message: 'Insufficient permissions',
         required: permission 

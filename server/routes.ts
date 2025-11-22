@@ -6,6 +6,13 @@ import { z } from "zod";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { AuditLogger } from "./audit/audit-logger";
+import { 
+  enhancedAuditLogger, 
+  auditWrapper, 
+  logSystemEvent, 
+  logHighRiskOperation,
+  checkSegregationOfDuties 
+} from "./services/audit-logger.service";
 import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
 import { TaxCalculator } from "./services/tax-calculator";
@@ -349,7 +356,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // SECURITY: Use schema that excludes tenantId to prevent tampering
       const parsed = updateTenantCompanyProfileSchema.parse(req.body);
       
-      const updated = await storage.updateCompanyProfile(req.tenantId, parsed);
+      // Use audit wrapper to capture before/after states
+      const updated = await auditWrapper(
+        'update_company_profile',
+        'tenant_profile',
+        req.tenantId,
+        req.tenantId,
+        req.user.claims.sub,
+        async () => storage.updateCompanyProfile(req.tenantId, parsed),
+        {
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+          sessionId: req.sessionID,
+          changes: parsed,
+        }
+      );
+      
       res.json(updated);
     } catch (error: any) {
       console.error("[PATCH /api/company-profile] Error updating company profile:", error);
@@ -461,6 +483,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const rbacService = new RBACService(req.tenantId);
+      
+      // Use audit wrapper with high-risk operation logging
+      await logHighRiskOperation(
+        'assign_role',
+        'user',
+        userId,
+        req.tenantId,
+        req.user.claims.sub,
+        {
+          riskLevel: 'high',
+          reason: 'User permission change',
+          justification: req.body.justification || 'Role assignment requested',
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+          sessionId: req.sessionID,
+          roleId,
+        }
+      );
+      
       await rbacService.assignRoleToUser(userId, roleId);
       res.json({ message: "Role assigned successfully" });
     } catch (error: any) {
@@ -1015,8 +1056,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Update with VERIFIED tenantId
-      const updated = await storage.updateAccount(id, tenantId, parsed);
+      // Update with VERIFIED tenantId using audit wrapper
+      const updated = await auditWrapper(
+        'update_account',
+        'account',
+        id,
+        tenantId,
+        req.user.claims.sub,
+        async () => storage.updateAccount(id, tenantId, parsed),
+        {
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+          sessionId: req.sessionID,
+          reason: 'Chart of accounts modification',
+          changes: parsed,
+        }
+      );
+      
       res.json(updated);
     } catch (error: any) {
       console.error("Error updating account:", error);
@@ -1040,8 +1096,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Account not found" });
       }
       
-      // Delete using VERIFIED tenantId from middleware
-      await storage.deleteAccount(id, tenantId);
+      // Delete using VERIFIED tenantId from middleware with audit logging
+      await auditWrapper(
+        'delete_account',
+        'account',
+        id,
+        tenantId,
+        req.user.claims.sub,
+        async () => storage.deleteAccount(id, tenantId),
+        {
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+          sessionId: req.sessionID,
+          reason: 'Account deletion',
+          deletedEntity: existingAccount, // Capture full entity before deletion
+        }
+      );
+      
       res.status(204).send();
     } catch (error: any) {
       console.error("Error deleting account:", error);
@@ -1795,8 +1866,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate sanitized payload with custom update schema
       const parsed = updateTaxSchema.parse(sanitizedPayload);
       
-      // Update with VERIFIED tenantId
-      const updated = await storage.updateTax(id, tenantId, parsed);
+      // Update with VERIFIED tenantId using audit wrapper
+      const updated = await auditWrapper(
+        'update_tax_rate',
+        'tax',
+        id,
+        tenantId,
+        req.user.claims.sub,
+        async () => storage.updateTax(id, tenantId, parsed),
+        {
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+          sessionId: req.sessionID,
+          reason: 'Tax rate modification',
+          changes: parsed,
+        }
+      );
+      
       res.json(updated);
     } catch (error: any) {
       console.error("Error updating tax:", error);
@@ -5924,16 +6010,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate request body
       const { comments } = approveJournalEntrySchema.parse(req.body);
 
-      // Use transaction for atomicity
+      // Check segregation of duties - user cannot approve their own journal entry
+      const sodAllowed = await checkSegregationOfDuties(
+        userId,
+        'approve',
+        'journal_entry',
+        id,
+        tenantId
+      );
+      
+      if (!sodAllowed) {
+        return res.status(403).json({ 
+          message: "You cannot approve your own journal entry (Segregation of Duties violation)" 
+        });
+      }
+
+      // Use transaction for atomicity with audit wrapper
       const result = await withTransaction(async (tx) => {
-        // Approve journal entry at current step
-        const approvalRequest = await approveJournalEntryStep(
-          tenantId,
+        // Wrap the approval in audit logging
+        const approvalResult = await auditWrapper(
+          'approve_journal_entry',
+          'journal_entry',
           id,
+          tenantId,
           userId,
-          comments,
-          tx
+          async () => approveJournalEntryStep(
+            tenantId,
+            id,
+            userId,
+            comments,
+            tx
+          ),
+          {
+            ipAddress: req.ip,
+            userAgent: req.get('user-agent'),
+            sessionId: req.sessionID,
+            comments,
+            approvalStep: 'workflow_approval',
+            riskLevel: 'high',
+          }
         );
+
+        const approvalRequest = approvalResult;
 
         // Fetch updated journal entry
         const [journalEntry] = await tx
@@ -7726,6 +7844,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/reports/profit-loss', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('reports.read'), async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
       const { startDate, endDate } = req.query;
 
       if (!startDate || !endDate) {
@@ -7738,6 +7857,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (isNaN(start.getTime()) || isNaN(end.getTime())) {
         return res.status(400).json({ message: "Invalid date format" });
       }
+
+      // Log report generation as system event for compliance
+      await logSystemEvent({
+        type: 'report_generation',
+        tenantId,
+        userId,
+        entityType: 'profit_loss_report',
+        entityId: `${startDate}_${endDate}`,
+        details: {
+          reportType: 'profit_loss',
+          startDate,
+          endDate,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        sessionId: req.sessionID,
+      });
 
       // Get base report data
       const report = await storage.getProfitLossReport(tenantId, start, end);
