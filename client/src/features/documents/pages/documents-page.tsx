@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Upload, FileText, Loader2 } from "lucide-react";
+import { Upload, FileText, Loader2, File } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Badge } from "@/shared/components/ui/badge";
 import {
   Table,
@@ -106,13 +107,18 @@ export default function Documents() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <div className="rounded-lg border bg-card p-6"><div className="space-y-4">{Array.from({length: 5}).map((_, i) => <div key={i} className="h-10 bg-gray-100 dark:bg-neutral-800 rounded animate-pulse"></div>)}</div></div>
       ) : documents.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-32 border rounded-lg">
-          <p className="text-sm text-muted-foreground">No documents uploaded yet</p>
-        </div>
+        <EmptyState
+          icon={File}
+          title="No documents uploaded yet"
+          description="Upload documents to extract data and link them to invoices or expenses"
+          action={{
+            label: "Upload Document",
+            onClick: () => {}
+          }}
+          data_testid="empty-state-documents"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

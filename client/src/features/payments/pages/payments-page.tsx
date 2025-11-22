@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CreditCard } from "lucide-react";
+import { CreditCard, Wallet } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Badge } from "@/shared/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import {
@@ -96,10 +97,12 @@ export default function Payments() {
       {isLoading ? (
         <TableSkeleton rows={8} columns={paymentColumns} minHeight="500px" />
       ) : payments.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No payments yet</p>
-          <p className="text-sm text-muted-foreground mb-4">Payments will appear here when you pay bills or expenses</p>
-        </div>
+        <EmptyState
+          icon={Wallet}
+          title="No payments yet"
+          description="Payments will appear here when you pay bills or expenses"
+          data_testid="empty-state-payments"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

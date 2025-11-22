@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Edit, Trash2, DollarSign } from "lucide-react";
+import { Plus, Edit, Trash2, DollarSign, FileX } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Badge } from "@/shared/components/ui/badge";
 import { CardSkeleton } from "@/shared/components/ui/skeleton";
@@ -198,14 +199,16 @@ export default function CreditNotesPage() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No credit notes yet</p>
-          <p className="text-sm text-muted-foreground mb-4">Create your first credit note to get started</p>
-          <Button onClick={handleCreate} data-testid="button-create-first-credit-note">
-            <Plus className="mr-2 h-4 w-4" />
-            Create Credit Note
-          </Button>
-        </div>
+        <EmptyState
+          icon={FileX}
+          title="No credit notes yet"
+          description="Create your first credit note to get started"
+          action={{
+            label: "Create Credit Note",
+            onClick: handleCreate
+          }}
+          data_testid="empty-state-credit-notes"
+        />
       )}
 
       <CreditNoteDialog

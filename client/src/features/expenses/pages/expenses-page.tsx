@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus, Receipt } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Badge } from "@/shared/components/ui/badge";
 import {
   Table,
@@ -76,16 +77,18 @@ export default function Expenses() {
       </div>
 
       {isLoading ? (
-        <TableSkeleton rows={8} columns={expenseColumns} minHeight="500px" />
+        <div className="rounded-lg border bg-card p-6"><div className="space-y-4">{Array.from({length: 8}).map((_, i) => <div key={i} className="h-10 bg-gray-100 dark:bg-neutral-800 rounded animate-pulse"></div>)}</div></div>
       ) : expenses.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No expenses yet</p>
-          <p className="text-sm text-muted-foreground mb-4">Add your first expense or upload a receipt for AI extraction</p>
-          <Button data-testid="button-add-first-expense">
-            <Plus className="mr-2 h-4 w-4" />
-            Add Expense
-          </Button>
-        </div>
+        <EmptyState
+          icon={Receipt}
+          title="No expenses yet"
+          description="Add your first expense or upload a receipt for AI extraction"
+          action={{
+            label: "Add Expense",
+            onClick: () => {}
+          }}
+          data_testid="empty-state-expenses"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>

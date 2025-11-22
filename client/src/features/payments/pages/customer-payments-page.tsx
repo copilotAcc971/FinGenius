@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { DollarSign, Plus, Edit, Trash2 } from "lucide-react";
+import { DollarSign, Plus, Edit, Trash2, CreditCard } from "lucide-react";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { PendingBadge } from "@/shared/components/ui/pending-badge";
@@ -207,14 +208,16 @@ export default function CustomerPayments() {
       {isLoading ? (
         <TableSkeleton rows={8} columns={customerPaymentColumns} minHeight="400px" />
       ) : payments.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No payments yet</p>
-          <p className="text-sm text-muted-foreground mb-4">Record your first customer payment</p>
-          <Button onClick={handleAddNew} data-testid="button-add-first-payment">
-            <Plus className="h-4 w-4 mr-2" />
-            Record Payment
-          </Button>
-        </div>
+        <EmptyState
+          icon={CreditCard}
+          title="No payments yet"
+          description="Record your first customer payment"
+          action={{
+            label: "Record Payment",
+            onClick: handleAddNew
+          }}
+          data_testid="empty-state-customer-payments"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>
