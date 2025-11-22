@@ -637,6 +637,8 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
                       className="absolute top-2 right-2"
                       onClick={() => setUploadedImage(null)}
                       data-testid="button-remove-image"
+                      aria-label="Remove uploaded image"
+                      title="Remove image"
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -931,6 +933,8 @@ export function BillDialog({ open, onOpenChange, bill }: BillDialogProps) {
                         size="icon"
                         onClick={() => remove(index)}
                         data-testid={`button-remove-line-item-${index}`}
+                        aria-label={`Remove line item ${index + 1}`}
+                        title="Remove line item"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>

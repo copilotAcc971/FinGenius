@@ -1191,6 +1191,8 @@ export function InvoiceDialog({ open, onOpenChange, invoice }: InvoiceDialogProp
                             onClick={() => remove(index)}
                             className="text-destructive"
                             data-testid={`button-remove-${index}`}
+                            aria-label={`Remove line item ${index + 1}`}
+                            title="Remove line item"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>

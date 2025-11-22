@@ -506,6 +506,8 @@ export function SalesOrderDialog({ open, onOpenChange, order }: SalesOrderDialog
                         size="icon"
                         onClick={() => removeLineItem(index)}
                         data-testid={`button-remove-line-${index}`}
+                        aria-label={`Remove line item ${index + 1}`}
+                        title="Remove line item"
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
