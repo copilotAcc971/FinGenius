@@ -263,8 +263,8 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
    * Note: Placeholder implementation - actual Lean flow uses entity_id + customer_id
    */
   async exchangeCodeForTokens(code: string, redirectUri: string): Promise<TokenResponse> {
-    try {
-      const response = await fetch(`${this.baseUrl}/oauth2/token`, {
+    return this.executeWithRetry(async () => {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/oauth2/token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -295,18 +295,15 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
         refreshToken: data.refresh_token,
         expiresIn: data.expires_in || 3600,
       };
-    } catch (error) {
-      console.error('[LeanProvider] Error exchanging auth code', error);
-      throw error;
-    }
+    }, 'exchangeCodeForTokens');
   }
 
   /**
    * OAuth2: Refresh access token using refresh token
    */
   async refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-    try {
-      const response = await fetch(`${this.baseUrl}/oauth2/token`, {
+    return this.executeWithRetry(async () => {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/oauth2/token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -347,10 +344,7 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
         refreshToken: data.refresh_token,
         expiresIn: data.expires_in || 3600,
       };
-    } catch (error) {
-      console.error('[LeanProvider] Error refreshing access token', error);
-      throw error;
-    }
+    }, 'refreshAccessToken');
   }
 
   /**
@@ -429,9 +423,9 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
   /**
    * Data API: Get account balance for a specific account
    */
-  async getAccountBalance(accessToken: string, accountId: string): Promise<Balance> {
-    try {
-      const response = await fetch(`${this.baseUrl}/data/v2/accounts/${accountId}/balance`, {
+  async getAccountBalance(accessToken: string, accountId: string, refreshToken?: string): Promise<Balance> {
+    return this.executeWithRetry(async () => {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/data/v2/accounts/${accountId}/balance`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -467,10 +461,7 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
         availableAmount: data.available,
         asOf: data.as_of_date ? new Date(data.as_of_date) : new Date(),
       };
-    } catch (error) {
-      console.error('[LeanProvider] Error getting account balance', error);
-      throw error;
-    }
+    }, 'getAccountBalance', refreshToken);
   }
 
   /**
@@ -479,9 +470,10 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
   async getTransactions(
     accessToken: string,
     accountId: string,
-    options?: TransactionOptions
+    options?: TransactionOptions,
+    refreshToken?: string
   ): Promise<Transaction[]> {
-    try {
+    return this.executeWithRetry(async () => {
       const params = new URLSearchParams();
       
       if (options?.startDate) {
@@ -498,7 +490,7 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
 
       const url = `${this.baseUrl}/data/v2/accounts/${accountId}/transactions${params.toString() ? '?' + params.toString() : ''}`;
 
-      const response = await fetch(url, {
+      const response = await this.fetchWithTimeout(url, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -538,18 +530,15 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
         type: (txn.amount < 0 || txn.type === 'debit') ? 'debit' : 'credit',
         pending: txn.pending || txn.status === 'pending' || false,
       }));
-    } catch (error) {
-      console.error('[LeanProvider] Error getting transactions', error);
-      throw error;
-    }
+    }, 'getTransactions', refreshToken);
   }
 
   /**
    * Data API: Get identity/KYC information for the connected account
    */
-  async getIdentity(accessToken: string): Promise<Identity> {
-    try {
-      const response = await fetch(`${this.baseUrl}/data/v2/identity`, {
+  async getIdentity(accessToken: string, refreshToken?: string): Promise<Identity> {
+    return this.executeWithRetry(async () => {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/data/v2/identity`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -589,18 +578,15 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
           postalCode: data.address.postal_code || data.address.zip_code,
         } : undefined,
       };
-    } catch (error) {
-      console.error('[LeanProvider] Error getting identity', error);
-      throw error;
-    }
+    }, 'getIdentity', refreshToken);
   }
 
   /**
    * Payment API: Initiate a payment
    */
-  async makePayment(accessToken: string, payment: PaymentRequest): Promise<PaymentResult> {
-    try {
-      const response = await fetch(`${this.baseUrl}/payments/v2/initiate`, {
+  async makePayment(accessToken: string, payment: PaymentRequest, refreshToken?: string): Promise<PaymentResult> {
+    return this.executeWithRetry(async () => {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/payments/v2/initiate`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -642,18 +628,15 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
         status: data.status || 'pending',
         message: data.message,
       };
-    } catch (error) {
-      console.error('[LeanProvider] Error making payment', error);
-      throw error;
-    }
+    }, 'makePayment', refreshToken);
   }
 
   /**
    * Payment API: Get payment status
    */
-  async getPaymentStatus(accessToken: string, paymentId: string): Promise<PaymentStatus> {
-    try {
-      const response = await fetch(`${this.baseUrl}/payments/v2/${paymentId}/status`, {
+  async getPaymentStatus(accessToken: string, paymentId: string, refreshToken?: string): Promise<PaymentStatus> {
+    return this.executeWithRetry(async () => {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/payments/v2/${paymentId}/status`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -689,18 +672,15 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
         completedAt: data.completed_at ? new Date(data.completed_at) : undefined,
         error: data.error || data.failure_reason,
       };
-    } catch (error) {
-      console.error('[LeanProvider] Error getting payment status', error);
-      throw error;
-    }
+    }, 'getPaymentStatus', refreshToken);
   }
 
   /**
    * Payment API: Create a payment link for customer-facing payments
    */
-  async createPaymentLink(accessToken: string, linkRequest: PaymentLinkRequest): Promise<PaymentLink> {
-    try {
-      const response = await fetch(`${this.baseUrl}/payments/v2/link`, {
+  async createPaymentLink(accessToken: string, linkRequest: PaymentLinkRequest, refreshToken?: string): Promise<PaymentLink> {
+    return this.executeWithRetry(async () => {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/payments/v2/link`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -740,10 +720,7 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
         url: data.url || data.payment_url,
         expiresAt: data.expires_at ? new Date(data.expires_at) : new Date(Date.now() + 24 * 60 * 60 * 1000), // Default: 24 hours
       };
-    } catch (error) {
-      console.error('[LeanProvider] Error creating payment link', error);
-      throw error;
-    }
+    }, 'createPaymentLink', refreshToken);
   }
 
   /**
@@ -762,5 +739,64 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
     };
 
     return statusMap[leanStatus?.toLowerCase()] || 'pending';
+  }
+
+  /**
+   * Health Check: Get health status and metrics for the Lean provider
+   */
+  async getLeanHealthStatus(): Promise<{
+    provider: string;
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    circuitBreaker: {
+      state: 'closed' | 'open' | 'half-open';
+      failures: number;
+      lastFailureTime: number | null;
+    };
+    retryConfig: RetryConfig;
+    lastSuccessTime?: number;
+    lastFailureTime?: number;
+    totalRequests?: number;
+    failedRequests?: number;
+    successRate?: number;
+    averageResponseTime?: number;
+  }> {
+    // Test API availability with a simple request
+    let apiAvailable = false;
+    let responseTime = 0;
+    
+    try {
+      const startTime = Date.now();
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/health`, {
+        method: 'GET',
+        headers: {
+          'lean-app-token': this.appToken,
+        },
+      });
+      responseTime = Date.now() - startTime;
+      apiAvailable = response.ok;
+    } catch (error) {
+      console.error('[LeanProvider] Health check failed:', error);
+      apiAvailable = false;
+    }
+
+    // Determine overall status based on circuit breaker and API availability
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    if (this.circuitBreaker.state === 'open') {
+      status = 'unhealthy';
+    } else if (this.circuitBreaker.state === 'half-open' || !apiAvailable) {
+      status = 'degraded';
+    }
+
+    return {
+      provider: 'lean',
+      status,
+      circuitBreaker: {
+        state: this.circuitBreaker.state,
+        failures: this.circuitBreaker.failures,
+        lastFailureTime: this.circuitBreaker.lastFailureTime || null,
+      },
+      retryConfig: this.retryConfig,
+      averageResponseTime: responseTime,
+    };
   }
 }

@@ -9672,6 +9672,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/open-banking/health
+  // Get health status for Open Banking providers
+  app.get('/api/open-banking/health', isAuthenticated, verifyTenantAccess, requirePermission('open_banking.view_connections'), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { provider } = req.query;
+      
+      const { openBankingManager } = await import('./open-banking/manager');
+      
+      if (provider) {
+        // Get health for specific provider
+        const health = await openBankingManager.getProviderHealth(provider as string, tenantId);
+        res.json(health);
+      } else {
+        // Get health for all providers
+        const healthStatuses = await openBankingManager.getAllProvidersHealth(tenantId);
+        res.json(healthStatuses);
+      }
+    } catch (error: any) {
+      console.error('[Open Banking] Health check error:', error);
+      res.status(500).json({ 
+        message: "Failed to get health status",
+        error: error.message 
+      });
+    }
+  });
+
+  // GET /api/open-banking/connections/:id/test
+  // Test a specific connection
+  app.get('/api/open-banking/connections/:id/test', isAuthenticated, verifyTenantAccess, requirePermission('open_banking.manage_connections'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      
+      const { openBankingManager } = await import('./open-banking/manager');
+      
+      // Verify connection belongs to tenant
+      const [connection] = await db
+        .select()
+        .from(openBankingConnections)
+        .where(
+          and(
+            eq(openBankingConnections.id, id),
+            eq(openBankingConnections.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+      
+      if (!connection) {
+        return res.status(404).json({ 
+          message: "Connection not found" 
+        });
+      }
+      
+      const result = await openBankingManager.testConnection(id);
+      res.json(result);
+    } catch (error: any) {
+      console.error('[Open Banking] Connection test error:', error);
+      res.status(500).json({ 
+        message: "Failed to test connection",
+        error: error.message 
+      });
+    }
+  });
+
+  // GET /api/open-banking/connections/:id/sync-history
+  // Get sync history for a connection
+  app.get('/api/open-banking/connections/:id/sync-history', isAuthenticated, verifyTenantAccess, requirePermission('open_banking.view_connections'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const { limit = 10 } = req.query;
+      
+      const { openBankingManager } = await import('./open-banking/manager');
+      
+      // Verify connection belongs to tenant
+      const [connection] = await db
+        .select()
+        .from(openBankingConnections)
+        .where(
+          and(
+            eq(openBankingConnections.id, id),
+            eq(openBankingConnections.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+      
+      if (!connection) {
+        return res.status(404).json({ 
+          message: "Connection not found" 
+        });
+      }
+      
+      const history = await openBankingManager.getSyncHistory(id, Number(limit));
+      res.json(history);
+    } catch (error: any) {
+      console.error('[Open Banking] Sync history error:', error);
+      res.status(500).json({ 
+        message: "Failed to get sync history",
+        error: error.message 
+      });
+    }
+  });
+
   // Zod validation schema for sync parameters
   const syncParamsSchema = z.object({
     startDate: z.string().optional(),
