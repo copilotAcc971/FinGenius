@@ -820,6 +820,111 @@ export type InsertNrvAssessment = z.infer<typeof insertNrvAssessmentSchema>;
 export type NrvAssessment = typeof nrvAssessments.$inferSelect;
 
 // ====================================
+// PHASE 10: INVENTORY MANAGEMENT (IAS 2 COMPLIANT)
+// ====================================
+
+// Stock Movements (FIFO/Weighted Average tracking)
+export const stockMovements = pgTable("stock_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  itemId: varchar("item_id").notNull().references(() => items.id),
+  movementType: varchar("movement_type", { length: 50 }).notNull(), // 'purchase', 'sale', 'adjustment', 'opening', 'return'
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitCost: decimal("unit_cost", { precision: 12, scale: 2 }).notNull(), // Cost per unit at time of movement
+  totalCost: decimal("total_cost", { precision: 15, scale: 2 }).notNull(), // Total cost for batch
+  costingMethod: varchar("costing_method", { length: 50 }).notNull(), // 'FIFO', 'WAC', 'standard_cost'
+  referenceId: varchar("reference_id", { length: 255 }), // Links to invoice/PO/adjustment
+  referenceType: varchar("reference_type", { length: 50 }), // 'invoice', 'purchase_order', 'stock_adjustment', 'opening'
+  notes: text("notes"),
+  journalEntryId: varchar("journal_entry_id").references(() => journalEntries.id), // Auto-created J/E for stock movement
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("stock_movements_tenant_item_idx").on(table.tenantId, table.itemId),
+  index("stock_movements_reference_idx").on(table.referenceId),
+  index("stock_movements_created_idx").on(table.createdAt),
+]);
+
+export const insertStockMovementSchema = createInsertSchema(stockMovements, {
+  quantity: decimalString,
+  unitCost: decimalString,
+  totalCost: decimalString,
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+});
+
+export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
+export type StockMovement = typeof stockMovements.$inferSelect;
+
+// Inventory Valuations (FIFO/WAC tracking per period)
+export const inventoryValuations = pgTable("inventory_valuations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  itemId: varchar("item_id").notNull().references(() => items.id),
+  periodDate: date("period_date").notNull(), // Month-end date
+  costingMethod: varchar("costing_method", { length: 50 }).notNull(), // 'FIFO', 'WAC'
+  quantityOnHand: decimal("quantity_on_hand", { precision: 10, scale: 2 }).notNull(),
+  unitValue: decimal("unit_value", { precision: 12, scale: 2 }).notNull(), // FIFO or WAC per unit
+  totalValuation: decimal("total_valuation", { precision: 15, scale: 2 }).notNull(),
+  costOfGoodsSold: decimal("cost_of_goods_sold", { precision: 15, scale: 2 }).notNull(),
+  nrvWriteDown: decimal("nrv_write_down", { precision: 12, scale: 2 }).default("0"),
+  finalValuation: decimal("final_valuation", { precision: 15, scale: 2 }).notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("draft"), // 'draft', 'approved', 'finalized'
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("inventory_valuations_tenant_period_idx").on(table.tenantId, table.periodDate),
+  unique("unique_valuation_item_period").on(table.tenantId, table.itemId, table.periodDate),
+]);
+
+export const insertInventoryValuationSchema = createInsertSchema(inventoryValuations, {
+  quantityOnHand: decimalString,
+  unitValue: decimalString,
+  totalValuation: decimalString,
+  costOfGoodsSold: decimalString,
+  nrvWriteDown: decimalString,
+  finalValuation: decimalString,
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+});
+
+export type InsertInventoryValuation = z.infer<typeof insertInventoryValuationSchema>;
+export type InventoryValuation = typeof inventoryValuations.$inferSelect;
+
+// Opening Stock (beginning inventory for accounting period)
+export const openingStock = pgTable("opening_stock", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  itemId: varchar("item_id").notNull().references(() => items.id),
+  fiscalYearStart: date("fiscal_year_start").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitCost: decimal("unit_cost", { precision: 12, scale: 2 }).notNull(),
+  totalValue: decimal("total_value", { precision: 15, scale: 2 }).notNull(),
+  costingMethod: varchar("costing_method", { length: 50 }).notNull(), // 'FIFO', 'WAC', 'standard_cost'
+  stockMovementId: varchar("stock_movement_id").references(() => stockMovements.id),
+  journalEntryId: varchar("journal_entry_id").references(() => journalEntries.id),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  unique("unique_opening_stock_item_year").on(table.tenantId, table.itemId, table.fiscalYearStart),
+]);
+
+export const insertOpeningStockSchema = createInsertSchema(openingStock, {
+  quantity: decimalString,
+  unitCost: decimalString,
+  totalValue: decimalString,
+}).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+});
+
+export type InsertOpeningStock = z.infer<typeof insertOpeningStockSchema>;
+export type OpeningStock = typeof openingStock.$inferSelect;
+
+// ====================================
 // IAS 21 FX TRANSLATION RUNS
 // ====================================
 
