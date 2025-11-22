@@ -489,6 +489,8 @@ export function BankReconciliationDialog({ open, onOpenChange, reconciliation }:
                           size="icon"
                           onClick={() => remove(index)}
                           data-testid={`button-remove-item-${index}`}
+                          aria-label={`Remove reconciliation item ${index + 1}`}
+                          title="Remove item"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

@@ -314,6 +314,8 @@ export function AttachmentManager({
                   onClick={() => downloadAttachment(attachment)}
                   disabled={disabled}
                   data-testid={`button-download-${attachment.id}`}
+                  aria-label={`Download ${attachment.fileName}`}
+                  title="Download file"
                 >
                   <Download className="h-4 w-4" />
                 </Button>
@@ -323,6 +325,8 @@ export function AttachmentManager({
                   onClick={() => setDeleteConfirm(attachment.id)}
                   disabled={disabled}
                   data-testid={`button-delete-${attachment.id}`}
+                  aria-label={`Delete ${attachment.fileName}`}
+                  title="Delete attachment"
                 >
                   <X className="h-4 w-4" />
                 </Button>

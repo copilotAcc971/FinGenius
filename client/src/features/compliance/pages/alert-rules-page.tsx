@@ -169,6 +169,8 @@ export default function AlertRulesPage() {
             size="icon"
             onClick={() => handleEdit(row.original)}
             data-testid={`button-edit-${row.original.id}`}
+            aria-label={`Edit alert rule ${row.original.ruleName}`}
+            title="Edit rule"
           >
             <Edit className="h-4 w-4" />
           </Button>
@@ -177,6 +179,8 @@ export default function AlertRulesPage() {
             size="icon"
             onClick={() => deleteMutation.mutate(row.original.id)}
             data-testid={`button-delete-${row.original.id}`}
+            aria-label={`Delete alert rule ${row.original.ruleName}`}
+            title="Delete rule"
           >
             <Trash2 className="h-4 w-4 text-red-600" />
           </Button>

@@ -545,6 +545,8 @@ export default function WorkflowForm() {
                             onClick={() => handleMoveStepUp(index)}
                             disabled={index === 0}
                             data-testid={`button-move-up-${index + 1}`}
+                            aria-label={`Move step ${index + 1} up`}
+                            title="Move up"
                           >
                             <ChevronUp className="w-4 h-4" />
                           </Button>
@@ -555,6 +557,8 @@ export default function WorkflowForm() {
                             onClick={() => handleMoveStepDown(index)}
                             disabled={index === fields.length - 1}
                             data-testid={`button-move-down-${index + 1}`}
+                            aria-label={`Move step ${index + 1} down`}
+                            title="Move down"
                           >
                             <ChevronDown className="w-4 h-4" />
                           </Button>
@@ -565,6 +569,8 @@ export default function WorkflowForm() {
                             onClick={() => handleRemoveStep(index)}
                             disabled={fields.length === 1}
                             data-testid={`button-remove-step-${index + 1}`}
+                            aria-label={`Remove step ${index + 1}`}
+                            title="Remove step"
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>

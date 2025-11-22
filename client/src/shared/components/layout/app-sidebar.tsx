@@ -338,6 +338,8 @@ export function AppSidebar() {
                             className="h-8 w-8 shrink-0"
                             onClick={(e) => handleToggleFavorite(item.url, e)}
                             data-testid={`button-unfavorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                            aria-label={`Remove ${item.title} from favorites`}
+                            title="Remove from favorites"
                           >
                             <Star className="h-4 w-4 fill-current" />
                           </Button>
@@ -433,6 +435,8 @@ export function AppSidebar() {
                           className="h-8 w-8 shrink-0"
                           onClick={(e) => handleToggleFavorite(item.url, e)}
                           data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                          aria-label={favorites.includes(item.url) ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+                          title={favorites.includes(item.url) ? "Remove from favorites" : "Add to favorites"}
                         >
                           {favorites.includes(item.url) ? (
                             <Star className="h-4 w-4 fill-current" />
@@ -476,6 +480,8 @@ export function AppSidebar() {
                           className="h-8 w-8 shrink-0"
                           onClick={(e) => handleToggleFavorite(item.url, e)}
                           data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                          aria-label={favorites.includes(item.url) ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+                          title={favorites.includes(item.url) ? "Remove from favorites" : "Add to favorites"}
                         >
                           {favorites.includes(item.url) ? (
                             <Star className="h-4 w-4 fill-current" />
@@ -519,6 +525,8 @@ export function AppSidebar() {
                           className="h-8 w-8 shrink-0"
                           onClick={(e) => handleToggleFavorite(item.url, e)}
                           data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                          aria-label={favorites.includes(item.url) ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+                          title={favorites.includes(item.url) ? "Remove from favorites" : "Add to favorites"}
                         >
                           {favorites.includes(item.url) ? (
                             <Star className="h-4 w-4 fill-current" />
@@ -562,6 +570,8 @@ export function AppSidebar() {
                           className="h-8 w-8 shrink-0"
                           onClick={(e) => handleToggleFavorite(item.url, e)}
                           data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                          aria-label={favorites.includes(item.url) ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+                          title={favorites.includes(item.url) ? "Remove from favorites" : "Add to favorites"}
                         >
                           {favorites.includes(item.url) ? (
                             <Star className="h-4 w-4 fill-current" />
@@ -605,6 +615,8 @@ export function AppSidebar() {
                           className="h-8 w-8 shrink-0"
                           onClick={(e) => handleToggleFavorite(item.url, e)}
                           data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                          aria-label={favorites.includes(item.url) ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+                          title={favorites.includes(item.url) ? "Remove from favorites" : "Add to favorites"}
                         >
                           {favorites.includes(item.url) ? (
                             <Star className="h-4 w-4 fill-current" />
@@ -648,6 +660,8 @@ export function AppSidebar() {
                           className="h-8 w-8 shrink-0"
                           onClick={(e) => handleToggleFavorite(item.url, e)}
                           data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                          aria-label={favorites.includes(item.url) ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+                          title={favorites.includes(item.url) ? "Remove from favorites" : "Add to favorites"}
                         >
                           {favorites.includes(item.url) ? (
                             <Star className="h-4 w-4 fill-current" />
@@ -691,6 +705,8 @@ export function AppSidebar() {
                           className="h-8 w-8 shrink-0"
                           onClick={(e) => handleToggleFavorite(item.url, e)}
                           data-testid={`button-favorite-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                          aria-label={favorites.includes(item.url) ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+                          title={favorites.includes(item.url) ? "Remove from favorites" : "Add to favorites"}
                         >
                           {favorites.includes(item.url) ? (
                             <Star className="h-4 w-4 fill-current" />

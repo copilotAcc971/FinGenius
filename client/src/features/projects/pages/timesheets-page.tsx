@@ -207,6 +207,8 @@ export default function Timesheets() {
               size="icon"
               onClick={() => setCurrentWeek(prev => subWeeks(prev, 1))}
               data-testid="button-prev-week"
+              aria-label="Previous week"
+              title="Previous week"
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -218,6 +220,8 @@ export default function Timesheets() {
               size="icon"
               onClick={() => setCurrentWeek(prev => addWeeks(prev, 1))}
               data-testid="button-next-week"
+              aria-label="Next week"
+              title="Next week"
             >
               <ChevronRight className="h-4 w-4" />
             </Button>

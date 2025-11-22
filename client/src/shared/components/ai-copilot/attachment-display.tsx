@@ -243,6 +243,8 @@ export function AttachmentDisplay({
                     className="h-7 w-7"
                     onClick={() => setSelectedAttachment(attachment)}
                     data-testid={`button-view-${attachment.id}`}
+                    aria-label={`View details for ${attachment.fileName}`}
+                    title="View details"
                   >
                     <Eye className="h-3 w-3" />
                   </Button>
@@ -264,6 +266,8 @@ export function AttachmentDisplay({
                   className="h-7 w-7"
                   onClick={() => onRemove(attachment.id)}
                   data-testid={`button-remove-${attachment.id}`}
+                  aria-label={`Remove ${attachment.fileName}`}
+                  title="Remove attachment"
                 >
                   <X className="h-3 w-3" />
                 </Button>

@@ -79,6 +79,8 @@ export function VoiceNoteInterface({
                   onClick={onClearQueue}
                   disabled={disabled || audioQueue.length === 0}
                   data-testid="button-clear-queue"
+                  aria-label="Clear audio queue"
+                  title="Clear queue"
                 >
                   <Trash2 className="h-3 w-3" />
                 </Button>

@@ -89,7 +89,13 @@ export default function RoleManagement() {
                     <div className="flex gap-2">
                       {!role.isSystem && (
                         <>
-                          <Button size="icon" variant="ghost" data-testid={`button-edit-role-${role.id}`}>
+                          <Button 
+                            size="icon" 
+                            variant="ghost" 
+                            data-testid={`button-edit-role-${role.id}`}
+                            aria-label={`Edit role ${role.name}`}
+                            title="Edit role"
+                          >
                             <Edit className="w-4 h-4" />
                           </Button>
                           <Button 
@@ -101,6 +107,8 @@ export default function RoleManagement() {
                                 deleteRoleMutation.mutate(role.id);
                               }
                             }}
+                            aria-label={`Delete role ${role.name}`}
+                            title="Delete role"
                           >
                             <Trash className="w-4 h-4" />
                           </Button>

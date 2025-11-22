@@ -217,7 +217,7 @@ export default function ItemFormPage() {
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center gap-4">
         <Link href="/inventory/items">
-          <Button variant="ghost" size="icon" data-testid="button-back">
+          <Button variant="ghost" size="icon" data-testid="button-back" aria-label="Back to items" title="Go back">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>

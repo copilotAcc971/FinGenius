@@ -212,7 +212,13 @@ export default function PurchaseOrders() {
                   <TableCell className={getColumnClassName(purchaseOrderColumns[6])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${po.id}`}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          data-testid={`button-actions-${po.id}`}
+                          aria-label={`Actions for purchase order ${po.poNumber}`}
+                          title="More options"
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>

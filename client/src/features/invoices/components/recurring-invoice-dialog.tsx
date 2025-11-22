@@ -567,6 +567,8 @@ export function RecurringInvoiceDialog({ open, onOpenChange, recurringInvoice }:
                       onClick={() => removeLineItem(index)}
                       disabled={lineItems.length === 1}
                       data-testid={`button-remove-line-item-${index}`}
+                      aria-label={`Remove line item ${index + 1}`}
+                      title="Remove line item"
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>

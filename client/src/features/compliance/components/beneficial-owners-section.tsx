@@ -242,6 +242,8 @@ export function BeneficialOwnersSection({ customerId, tenantId }: BeneficialOwne
                         size="icon"
                         onClick={() => handleEdit(owner)}
                         data-testid={`button-edit-owner-${owner.id}`}
+                        aria-label={`Edit beneficial owner ${owner.fullName}`}
+                        title="Edit owner"
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -250,6 +252,8 @@ export function BeneficialOwnersSection({ customerId, tenantId }: BeneficialOwne
                         size="icon"
                         onClick={() => deleteMutation.mutate(owner.id)}
                         data-testid={`button-delete-owner-${owner.id}`}
+                        aria-label={`Delete beneficial owner ${owner.fullName}`}
+                        title="Delete owner"
                       >
                         <Trash2 className="h-4 w-4 text-red-600" />
                       </Button>

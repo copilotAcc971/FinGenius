@@ -292,7 +292,7 @@ export default function ProjectDetail() {
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => setLocation("/projects")} data-testid="button-back">
+            <Button variant="ghost" size="icon" onClick={() => setLocation("/projects")} data-testid="button-back" aria-label="Back to projects" title="Go back">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>

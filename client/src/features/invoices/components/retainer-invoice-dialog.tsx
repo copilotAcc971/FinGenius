@@ -524,6 +524,8 @@ export function RetainerInvoiceDialog({ open, onOpenChange, retainerInvoice }: R
                       onClick={() => removeLineItem(index)}
                       disabled={lineItems.length === 1}
                       data-testid={`button-remove-item-${index}`}
+                      aria-label={`Remove item ${index + 1}`}
+                      title="Remove item"
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>

@@ -502,6 +502,8 @@ export function JournalEntryDialog({ open, onOpenChange, journalEntry }: Journal
                           onClick={() => remove(index)}
                           disabled={fields.length <= 2}
                           data-testid={`button-remove-leg-${index}`}
+                          aria-label={`Remove journal entry leg ${index + 1}`}
+                          title="Remove leg"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
