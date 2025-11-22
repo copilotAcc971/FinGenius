@@ -190,7 +190,13 @@ export default function Taxes() {
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${tax.id}`}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          data-testid={`button-actions-${tax.id}`}
+                          aria-label={`Actions for tax ${tax.name}`}
+                          title="More options"
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>

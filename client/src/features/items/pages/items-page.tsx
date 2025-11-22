@@ -207,6 +207,8 @@ export default function ItemsPage() {
                 variant="ghost"
                 size="icon"
                 data-testid={`button-edit-${row.original.id}`}
+                aria-label={`Edit item ${row.original.name}`}
+                title="Edit item"
               >
                 <Edit className="h-4 w-4" />
               </Button>
@@ -221,6 +223,8 @@ export default function ItemsPage() {
                 setDeleteDialogOpen(true);
               }}
               data-testid={`button-delete-${row.original.id}`}
+              aria-label={`Delete item ${row.original.name}`}
+              title="Delete item"
             >
               <Trash2 className="h-4 w-4 text-destructive" />
             </Button>

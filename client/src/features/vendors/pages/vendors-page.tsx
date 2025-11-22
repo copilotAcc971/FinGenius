@@ -189,7 +189,14 @@ export default function Vendors() {
                   <TableCell className={getColumnClassName(vendorColumns[5])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid={`button-actions-${vendor.id}`} disabled={vendor.isPending}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          data-testid={`button-actions-${vendor.id}`} 
+                          disabled={vendor.isPending}
+                          aria-label={`Actions for vendor ${vendor.name}`}
+                          title="More options"
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
