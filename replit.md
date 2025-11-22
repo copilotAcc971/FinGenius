@@ -1,7 +1,7 @@
 # Multi-Tenant AI-Powered Accounting Application
 
 ## Overview
-This project is a multi-tenant AI-powered accounting application designed to achieve 100% feature parity with Zoho Books for customer and invoice management. Its core purpose is to provide robust accounting functionalities, including tax compliance, AI-driven document data extraction, secure payment processing, comprehensive financial reporting, and Open Banking integration, initially targeting the UAE market. The application emphasizes financial integrity, scalability, security, and multi-tenancy to support businesses effectively.
+This project is a multi-tenant AI-powered accounting application aiming for 100% feature parity with Zoho Books for customer and invoice management. It provides robust accounting functionalities, including tax compliance, AI-driven document data extraction, secure payment processing, comprehensive financial reporting, and Open Banking integration, initially for the UAE market. The application focuses on financial integrity, scalability, security, and multi-tenancy to support businesses effectively. The business vision is to provide a robust, AI-powered accounting solution that adheres to international financial standards and offers significant market potential, starting with the UAE.
 
 ## User Preferences
 - Focus on matching Zoho Books 100% exactly for customer and invoice forms.
@@ -16,125 +16,54 @@ This project is a multi-tenant AI-powered accounting application designed to ach
 ## System Architecture
 The application employs a multi-tenant architecture with a "verified-tenant pattern," enforcing `tenantId` from middleware for all operations. All critical financial calculations are performed server-side to guarantee financial integrity and accuracy.
 
-### AI/MCP Architecture (Phase 8+)
-- **Model Context Protocol (MCP)**: Vendor-agnostic protocol for AI provider integration
-- **Pre-configured MCPs**:
-  - Kimi AI (free tier, vision)
-  - Qwen (Alibaba, free tier, multimodal)
-  - DeepSeek (reasoning, free tier)
-  - OpenAI (optional, if API key provided)
-  - Custom MCPs via API key input
-- **OIDC Integration**: One-click authentication for providers supporting OIDC
-- **Cost Tracking**: Per-provider token counting and cost calculation
-- **Authority-Aware RBAC**: AI prompts dynamically inject user permissions
-
 ### UI/UX Decisions
 - **Brand Identity:** Monochrome design system inspired by Notion/Vercel/NYT, using black, white, and gray shades with sophisticated typography.
 - **Typography:** WCAG AA compliant 8-tier typography system with semantic color tokens for dark mode adaptation.
 - **Components:** Shadcn UI components with React Hook Form + Zod for validation and TanStack Query for data fetching.
-- **Navigation:** Global Cmd/Ctrl+K command palette, contextual breadcrumbs, OrganizationSwitcher, and a collapsible sidebar with RBAC-based filtering.
 - **User Experience:** Comprehensive empty states, advanced table skeleton loading, StatusBadges, instant tenant initialization, toast notifications, reduced motion support, mobile responsiveness, and full accessibility.
 - **Advanced Tables:** Enterprise-grade data tables (TanStack Table v8) with sorting, global search, advanced filtering, column visibility, row selection, bulk actions, CSV/Excel export, pagination, and localStorage persistence.
-- **Forms:** Enhanced accounting forms with collapsible sections (Accordion UI), AttachmentManager, ApprovalStatusBanner, AuditTrailDisplay, and conditional e-invoicing fields (UAE Peppol/KSA ZATCA).
+- **Forms:** Enhanced accounting forms with collapsible sections (Accordion UI), AttachmentManager, ApprovalStatusBanner, AuditTrailDisplay, and conditional e-invoicing fields.
 
 ### Technical Implementations & Feature Specifications
 - **Multi-tenancy & Financial Integrity:** Enforced at all application layers with server-side `tenantId` and server-side execution of all financial calculations.
-- **Core Accounting:** Modules for Company Profile, Customers, Vendors, Items, Taxes, Invoices (with auto-numbering, audit trail, soft delete, tax compliance), Bills (AI extraction), Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices.
-- **Tax Calculation Service** (NEW): Real tax calculation logic supporting VAT, GST, Sales Tax with IFRS compliance and audit validation.
-- **Currency Conversion Service** (NEW): Multi-currency support with IAS 21 compliance, FX gain/loss calculation, and proper decimal precision handling.
+- **Core Accounting:** Modules for Company Profile, Customers, Vendors, Items, Taxes, Invoices, Bills, Quotes, Sales Orders, Credit Notes, Customer Payments, Recurring Invoices, Retainer Invoices. Includes auto-numbering, audit trail, soft delete, and tax compliance.
+- **Tax Calculation Service:** Real tax calculation logic supporting VAT, GST, Sales Tax with IFRS compliance.
+- **Currency Conversion Service:** Multi-currency support with IAS 21 compliance, FX gain/loss calculation, and proper decimal precision handling.
 - **AI-Powered Document Extraction:** MCP-based model calling with vision support for line item extraction, classification, and account mapping from documents.
-- **Optimistic UI:** Production-ready optimistic UI for instant feedback on create, update, and delete operations across key modules, with automatic rollback.
-- **Advanced Accounting:** Includes Chart of Accounts, Journal Entries (double-entry validation, atomic transactions, historical balance tracking), Fixed Assets, Purchase Orders, Bank Reconciliation, Products/Inventory (FIFO/Weighted Average costing), Tax Management, and multi-currency support (IFRS IAS 21 compliant).
-- **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with 180 granular permissions, default/custom roles, multi-role assignments, and UI/route protection.
-  - **Tagging Strategy**: 49 endpoints tagged for RBAC application (documented in RBAC_TAGGING_REPORT.md)
-  - **Route Factory Template**: Standardized middleware for uniform RBAC enforcement (server/middleware/route-factory.ts)
+- **Optimistic UI:** Production-ready optimistic UI for instant feedback on create, update, and delete operations.
+- **Advanced Accounting:** Chart of Accounts, Journal Entries (double-entry validation, atomic transactions), Fixed Assets, Purchase Orders, Bank Reconciliation, Products/Inventory (FIFO/Weighted Average costing), Tax Management, and multi-currency support.
+- **Role-Based Access Control (RBAC):** Enterprise-grade RBAC with 180 granular permissions, default/custom roles, multi-role assignments, and UI/route protection. Uses a route factory template for uniform enforcement.
 - **Approval Workflow Engine:** Multi-stage routing for journal entries with workflow matching, multi-approver support, and auto-posting.
-- **Enhanced Financial Reporting:** Interactive reports (P&L, Balance Sheet, Cash Flow, Trial Balance), a custom report builder, and comprehensive CSV/Excel export. Scheduled reports with email delivery.
+- **Enhanced Financial Reporting:** Interactive reports (P&L, Balance Sheet, Cash Flow, Trial Balance), custom report builder, CSV/Excel export, and scheduled reports.
 - **IFRS Compliance:** Adherence to IAS 1, IAS 2, IAS 7, and IAS 21 standards.
 - **Employee Expense Management:** Expense submission with receipt upload, approval workflows, reimbursement, and automatic journal entries.
 - **Inventory Management:** Full module including stock adjustments, opening stock, composite items, inventory valuation reports, and automatic journal entries compliant with IAS 2.
 - **Open Banking Integration:** Provider-agnostic architecture, currently with Lean Technologies (UAE), including OAuth2, bank connection management, daily transaction sync (with AI reconciliation), payment initiation, and secure webhook handling.
-- **E-Invoicing (Phase 7 - COMPLETE ✅)**:
-    - **UAE Peppol (PINT-AE):** Official spec-compliant UBL 2.1 XML generation, TLV QR codes (mandatory all invoices), ASP transmission via DCTCE 5-corner, 14-day deadline tracking, tax in AED, TIN capture, credit notes support, export transaction handling.
-    - **KSA ZATCA (Phase 2 - COMPLETE ✅):** Official Phase 2 FATOORAH integration, B2B real-time clearance (MUST before issuance), B2C 24-hour reporting deadline, UUID/hash/hash-chaining, TLV QR codes (mandatory all types), SHA-256 cryptographic hashing, PKI digital signature framework, 6-year archival, wave-based rollout support.
-- **AI Copilot:** MCP-based AI assistant with live voice conversation, chat, and voice notes, strictly authority-aware RBAC system, web search, document processing, RAG, and push notifications.
-    - **Authority-Aware RBAC System:** Dynamic context injection of user roles and permissions into AI prompts, "plan & confirm" protocol for mutating actions, permission validation before function execution, segregation of duties (draft vs. post functions), and authority-aware denial responses.
-- **SOX Audit Logging:** Immutable audit trail system for SOX §802 compliance, with centralized audit service, sensitive data redaction, before/after state capture, and comprehensive coverage of financial routes.
-- **AML/KYC Compliance:** Comprehensive anti-money laundering and know-your-customer system with database, risk scoring, sanctions screening, transaction monitoring, and CDD/EDD workflows.
-- **Compliance Reporting Dashboard:** Centralized monitoring for SOX, AML/KYC, PSD2, GDPR, PCI-DSS with real-time status, charts, dynamic audit checklists, deadlines tracking, and training requirements.
+- **E-Invoicing:** UAE Peppol (PINT-AE) and KSA ZATCA (Phase 2) compliant, including UBL 2.1 XML generation, TLV QR codes, ASP transmission, real-time clearance, digital signatures, and archival.
+- **AI Copilot:** MCP-based AI assistant with live voice conversation, chat, voice notes, web search, document processing, RAG, and push notifications, featuring an authority-aware RBAC system for dynamic permission injection and action validation.
+- **SOX Audit Logging:** Immutable audit trail system for SOX §802 compliance, with centralized audit service, sensitive data redaction, and before/after state capture.
+- **AML/KYC Compliance:** Comprehensive system with database, risk scoring, sanctions screening, transaction monitoring, and CDD/EDD workflows.
+- **Compliance Reporting Dashboard:** Centralized monitoring for SOX, AML/KYC, PSD2, GDPR, PCI-DSS with real-time status, charts, and dynamic audit checklists.
 - **Dual Cloud Storage:** Simultaneous document storage across local, Google Drive, and OneDrive with user preferences.
-- **Inbound Document Webhooks:** Direct document receipt via email, WhatsApp/SMS, and API endpoints with HMAC verification and an MCP-based extraction pipeline with vision support.
-- **Credit Passport & Bankability Score:** Real-time financial health analysis for loan eligibility, including a financial metrics engine, weighted bankability scoring, blocking factor analysis, actionable recommendations, and professional PDF export.
-- **Comprehensive Alerts & Reminders System:** Proactive monitoring for financial events and deadlines, including cash deficiency forecasting, aged AR/AP alerts, pending approvals aggregator, month-end closing checklist, suggested accruals detector, compliance deadline tracker, and anomaly detection.
+- **Inbound Document Webhooks:** Direct document receipt via email, WhatsApp/SMS, and API endpoints with an MCP-based extraction pipeline.
+- **Credit Passport & Bankability Score:** Real-time financial health analysis for loan eligibility, including financial metrics engine, weighted scoring, and actionable recommendations.
+- **Comprehensive Alerts & Reminders System:** Proactive monitoring for financial events and deadlines, including cash deficiency forecasting, aged AR/AP alerts, and anomaly detection.
 - **Background Jobs & Automation:** Daily alert engine, weekly Credit Passport calculation, daily Open Banking transaction sync, daily FX rates update, nightly RAG indexing, and hourly upload cleanup.
 
+### AI/MCP Architecture
+- **Model Context Protocol (MCP)**: Vendor-agnostic protocol for AI provider integration.
+- **Pre-configured MCPs**: Kimi AI, Qwen (Alibaba), DeepSeek, OpenAI (optional), and custom MCPs.
+- **OIDC Integration**: One-click authentication for OIDC-supporting providers.
+- **Cost Tracking**: Per-provider token counting and cost calculation.
+- **Authority-Aware RBAC**: AI prompts dynamically inject user permissions.
+
 ## External Dependencies
-- **MCP Providers (Model Context Protocol)**:
-  - Kimi AI: Free tier vision model
-  - Qwen (Alibaba): Free tier multimodal
-  - DeepSeek: Free tier reasoning
-  - OpenAI: Optional if API key provided
-  - Custom: User can configure additional MCP providers
-- **Microsoft Graph API:** Outlook email integration and OneDrive cloud storage.
-- **Stripe:** Secure payment processing.
+- **MCP Providers (Model Context Protocol)**: Kimi AI, Qwen (Alibaba), DeepSeek, OpenAI (optional), and custom user-configured providers.
+- **Microsoft Graph API:** For Outlook email integration and OneDrive cloud storage.
+- **Stripe:** For secure payment processing.
 - **Lean Technologies:** Primary Open Banking provider for UAE.
-- **UAE Central Bank FX Rates:** Source for daily foreign exchange rates (currently from a GitHub mirror).
-- **Twilio:** WhatsApp and SMS webhook integration.
-- **Google Drive:** Cloud storage integration via Replit connector.
+- **UAE Central Bank FX Rates:** Source for daily foreign exchange rates.
+- **Twilio:** For WhatsApp and SMS webhook integration.
+- **Google Drive:** Cloud storage integration.
 - **DuckDuckGo:** Web search integration for AI Copilot.
 - **pgvector:** Used for Retrieval-Augmented Generation (RAG).
-
-## Phase 1 - Remediation Status (Active)
-
-### ✅ Completed in This Session (Foundation - 20/305 Issues)
-1. **RBAC Tagging System** - 49 endpoints documented for systematic RBAC application
-2. **Tax Calculator Service** - Real tax logic with VAT/GST/Sales Tax support (197 lines)
-3. **Currency Converter Service** - Multi-currency with IFRS IAS 21 compliance (221 lines)
-4. **Route Factory Template** - Standardized middleware pattern for uniform endpoint protection (322 lines)
-5. **Audit Logger** - SOX-compliant logging across 62+ operations
-6. **Debug Cleanup** - Removed 9 console.log statements, restored 239 orphaned lines
-7. **Application Health** - Build passing, running on port 5000, no errors
-
-### 🔄 Ready to Deploy (Phase 3: RBAC Enforcement - 49 Endpoints)
-1. Apply route factory to customer/vendor endpoints (8)
-2. Apply route factory to invoice/bill endpoints (13)
-3. Apply route factory to payment endpoints (3)
-4. Apply route factory to journal entry endpoints (4)
-5. Apply route factory to chart of accounts (3)
-6. Apply route factory to items/taxes (8)
-7. Apply route factory to financial reports (3)
-8. Apply route factory to company profile (4)
-
-### ✅ Phase 5 & 7 Complete (40/305 Issues)
-**Phase 5**: Compliance & audit - SOX §802, AML/KYC, audit trail completion ✅
-**Phase 7**: E-Invoicing - UAE Peppol & KSA ZATCA Phase 2 compliance ✅
-  - Full E2E testing environment with mock ASP and FATOORAH sandbox
-  - ASP test suite: 5 comprehensive tests
-  - FATOORAH test suite: 6 comprehensive tests (B2B clearance + B2C reporting)
-  - Test utilities and helper functions
-  - Documentation: TESTING_SETUP.md and .env.sandbox
-
-### ⏳ Future Phases (Phase 6, 8-12: 216 Issues Remaining)
-**Phase 6 (Next)**: Open Banking - Lean Technologies integration (30 issues)
-**Phase 8**: AI/MCP - Vendor-agnostic architecture with OIDC (50 issues)
-**Phase 9**: Advanced Accounting - Fixed assets, purchase orders (30 issues)
-**Phase 10**: Inventory Management - FIFO/Weighted Average costing (25 issues)
-**Phase 11**: AI Copilot - Authority-aware RBAC system (40 issues)
-**Phase 12**: Alerts & Reminders - Proactive financial monitoring (31 issues)
-**RBAC Enforcement**: Apply route factory to 49 endpoints (16% - ready to deploy)
-**Auth0 Integration**: Production authentication (after all phases)
-
-### 📊 Audit Summary
-- **Total Issues Found**: 305 critical findings
-- **Completed**: 40 (13%)
-  - Phase 5: Transaction monitoring, risk scoring, sanctions screening, audit logging
-  - Phase 7: UAE Peppol (UBL 2.1, TLV QR, ASP transmission) + KSA ZATCA (B2B clearance, B2C 24h reporting)
-- **In Progress/Ready**: 49 (16% - RBAC enforcement, can deploy after Phase 6)
-- **Remaining**: 216 (71% - Phases 6, 8-12, Auth0)
-- **Strategy**: Official specifications only; foundation-complete with financial integrity guarantees
-- **References**: 
-  - `305_ISSUES_STATUS.md` - Complete breakdown by category
-  - `RBAC_TAGGING_REPORT.md` - Endpoint list for RBAC
-  - `PHASE_7_EINVOICING_COMPLETION.md` - E-invoicing compliance details
-  - Official specs embedded in all e-invoicing code comments
-
