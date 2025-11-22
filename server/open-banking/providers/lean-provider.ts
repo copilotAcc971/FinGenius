@@ -15,6 +15,21 @@ import {
   TransactionOptions,
 } from './base-provider';
 
+// Retry configuration
+interface RetryConfig {
+  maxRetries: number;
+  initialDelay: number;
+  maxDelay: number;
+  backoffMultiplier: number;
+}
+
+// Circuit breaker configuration
+interface CircuitBreakerState {
+  failures: number;
+  lastFailureTime: number;
+  state: 'closed' | 'open' | 'half-open';
+}
+
 export class LeanProvider implements IOpenBankingPaymentProvider {
   provider: OpenBankingProvider = 'lean';
   
@@ -24,6 +39,28 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
   private baseUrl: string;
   private sandboxMode: boolean;
   private webhookSecret: string;
+  
+  // Retry configuration with exponential backoff
+  private retryConfig: RetryConfig = {
+    maxRetries: 3,
+    initialDelay: 1000, // 1 second
+    maxDelay: 16000,    // 16 seconds
+    backoffMultiplier: 2,
+  };
+  
+  // Circuit breaker state
+  private circuitBreaker: CircuitBreakerState = {
+    failures: 0,
+    lastFailureTime: 0,
+    state: 'closed',
+  };
+  
+  // Circuit breaker configuration
+  private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
+  private readonly CIRCUIT_BREAKER_RESET_TIME = 60000; // 1 minute
+  
+  // Request timeout (30 seconds)
+  private readonly REQUEST_TIMEOUT = 30000;
 
   constructor() {
     // Load environment variables
@@ -46,7 +83,163 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
       hasClientId: !!this.clientId,
       hasClientSecret: !!this.clientSecret,
       hasWebhookSecret: !!this.webhookSecret,
+      retryConfig: this.retryConfig,
+      requestTimeout: this.REQUEST_TIMEOUT,
     });
+  }
+
+  /**
+   * Helper: Create a fetch with timeout
+   */
+  private async fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, this.REQUEST_TIMEOUT);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      return response;
+    } catch (error: any) {
+      clearTimeout(timeout);
+      if (error.name === 'AbortError') {
+        throw new Error(`Request timeout after ${this.REQUEST_TIMEOUT}ms`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Helper: Check circuit breaker state
+   */
+  private checkCircuitBreaker(): void {
+    const now = Date.now();
+    
+    // Reset circuit breaker if enough time has passed
+    if (this.circuitBreaker.state === 'open' && 
+        now - this.circuitBreaker.lastFailureTime > this.CIRCUIT_BREAKER_RESET_TIME) {
+      console.log('[LeanProvider] Circuit breaker: Resetting to half-open');
+      this.circuitBreaker.state = 'half-open';
+      this.circuitBreaker.failures = 0;
+    }
+    
+    // Throw error if circuit is open
+    if (this.circuitBreaker.state === 'open') {
+      throw new Error('Circuit breaker is OPEN: Too many failures. Service is temporarily unavailable.');
+    }
+  }
+
+  /**
+   * Helper: Update circuit breaker on failure
+   */
+  private updateCircuitBreakerOnFailure(): void {
+    this.circuitBreaker.failures++;
+    this.circuitBreaker.lastFailureTime = Date.now();
+    
+    if (this.circuitBreaker.failures >= this.CIRCUIT_BREAKER_THRESHOLD) {
+      console.error('[LeanProvider] Circuit breaker: Opening circuit after', this.circuitBreaker.failures, 'failures');
+      this.circuitBreaker.state = 'open';
+    }
+  }
+
+  /**
+   * Helper: Update circuit breaker on success
+   */
+  private updateCircuitBreakerOnSuccess(): void {
+    if (this.circuitBreaker.state === 'half-open') {
+      console.log('[LeanProvider] Circuit breaker: Closing circuit after successful request');
+      this.circuitBreaker.state = 'closed';
+    }
+    this.circuitBreaker.failures = 0;
+  }
+
+  /**
+   * Helper: Sleep for exponential backoff
+   */
+  private async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Helper: Execute request with exponential backoff retry
+   */
+  private async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    context: string,
+    refreshToken?: string
+  ): Promise<T> {
+    // Check circuit breaker first
+    this.checkCircuitBreaker();
+    
+    let lastError: Error | null = null;
+    let delay = this.retryConfig.initialDelay;
+    
+    for (let attempt = 0; attempt <= this.retryConfig.maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          console.log(`[LeanProvider] ${context}: Retry attempt ${attempt} after ${delay}ms delay`);
+          await this.sleep(delay);
+        }
+        
+        const result = await operation();
+        
+        // Success - update circuit breaker
+        this.updateCircuitBreakerOnSuccess();
+        
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        
+        // Check if it's a 401 and we have a refresh token
+        if (error.message?.includes('authentication failed') && refreshToken && attempt === 0) {
+          console.log('[LeanProvider] Got 401, attempting token refresh...');
+          try {
+            // Try to refresh the token
+            const newTokens = await this.refreshAccessToken(refreshToken);
+            console.log('[LeanProvider] Token refreshed successfully');
+            // Return the new tokens so the caller can retry with the new access token
+            throw new Error(`TOKEN_REFRESHED:${JSON.stringify(newTokens)}`);
+          } catch (refreshError: any) {
+            console.error('[LeanProvider] Token refresh failed:', refreshError);
+            // Continue with the original error
+          }
+        }
+        
+        // Check if it's a rate limit error (429)
+        const isRateLimit = error.message?.includes('rate limit');
+        
+        // Check if error is retryable
+        const isRetryable = 
+          isRateLimit ||
+          error.message?.includes('timeout') ||
+          error.message?.includes('ECONNRESET') ||
+          error.message?.includes('ETIMEDOUT') ||
+          error.message?.includes('ENOTFOUND') ||
+          error.message?.includes('network');
+        
+        if (!isRetryable || attempt === this.retryConfig.maxRetries) {
+          console.error(`[LeanProvider] ${context}: Failed after ${attempt + 1} attempts`, error);
+          this.updateCircuitBreakerOnFailure();
+          throw error;
+        }
+        
+        // For rate limits, use longer delay
+        if (isRateLimit) {
+          delay = Math.min(delay * 4, this.retryConfig.maxDelay);
+        } else {
+          // Regular exponential backoff
+          delay = Math.min(delay * this.retryConfig.backoffMultiplier, this.retryConfig.maxDelay);
+        }
+      }
+    }
+    
+    // This should never be reached, but just in case
+    this.updateCircuitBreakerOnFailure();
+    throw lastError || new Error(`${context}: Operation failed`);
   }
 
   /**
@@ -188,10 +381,11 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
 
   /**
    * Data API: Get all bank accounts for the connected entity
+   * With automatic retry, token refresh, and circuit breaker protection
    */
-  async getAccounts(accessToken: string): Promise<BankAccount[]> {
-    try {
-      const response = await fetch(`${this.baseUrl}/data/v2/accounts`, {
+  async getAccounts(accessToken: string, refreshToken?: string): Promise<BankAccount[]> {
+    return this.executeWithRetry(async () => {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/data/v2/accounts`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -229,10 +423,7 @@ export class LeanProvider implements IOpenBankingPaymentProvider {
         balance: account.balance?.current,
         availableBalance: account.balance?.available,
       }));
-    } catch (error) {
-      console.error('[LeanProvider] Error getting accounts', error);
-      throw error;
-    }
+    }, 'getAccounts', refreshToken);
   }
 
   /**

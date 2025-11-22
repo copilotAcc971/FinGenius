@@ -89,7 +89,7 @@ These are immediate wins that dramatically improve user experience:
 - [ ] 1. Wire up Command Palette (Cmd+K) component to App.tsx
 - [ ] 2. Implement global search across customers, invoices, bills, vendors
 - [ ] 3. Add keyboard shortcuts (Cmd+S: Save, Cmd+N: New, Del: Delete)
-- [ ] 4. Add Breadcrumb navigation for context awareness
+- [ ] 4. Add Breadcrumb navigation for context 
 
 ### Visual Feedback
 - [x] 4. Empty states for all tables/pages with helpful CTAs (70% done)
@@ -159,6 +159,7 @@ Critical accounting features that must work correctly:
 ## 🤖 PRIORITY 5: AI/MCP INTEGRATION
 Vendor-agnostic AI system:
 
+- [ ] integrate gemini 3
 - [ ] MCP provider configuration system
 - [ ] OIDC authentication flows
 - [ ] Kimi AI, Qwen, DeepSeek connectors
@@ -168,6 +169,7 @@ Vendor-agnostic AI system:
 - [ ] Conversation history persistence
 - [ ] Document processing pipeline
 - [ ] Authority-aware RBAC injection
+      
 
 ---
 
