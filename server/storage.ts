@@ -501,6 +501,8 @@ export interface IStorage {
   updateJournalEntryWithLegs(id: string, tenantId: string, payload: JournalEntryPayload): Promise<JournalEntry>;
   deleteJournalEntry(id: string, tenantId: string): Promise<void>;
   getNextJournalEntryNumber(tenantId: string, tx?: typeof db): Promise<string>;
+  postJournalEntry(id: string, tenantId: string, userId: string): Promise<JournalEntry>;
+  reverseJournalEntry(originalEntryId: string, tenantId: string, userId: string, options?: { reversalDate?: string; description?: string; reason?: string }): Promise<JournalEntry>;
   
   // Transaction-enabled journal entry methods (Phase 3)
   createJournalEntry(
@@ -5079,6 +5081,158 @@ export class DatabaseStorage implements IStorage {
       .where(eq(journalEntrySequences.tenantId, tenantId));
 
     return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
+  }
+
+  async postJournalEntry(id: string, tenantId: string, userId: string): Promise<JournalEntry> {
+    return await db.transaction(async (tx) => {
+      // Verify ownership and status
+      const [entry] = await tx
+        .select()
+        .from(journalEntries)
+        .where(
+          and(
+            eq(journalEntries.id, id),
+            eq(journalEntries.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!entry) {
+        throw new Error("Journal entry not found");
+      }
+
+      if (entry.status === 'posted') {
+        throw new Error("Journal entry is already posted");
+      }
+
+      // Fetch legs to validate balance
+      const legs = await tx
+        .select()
+        .from(journalEntryLegs)
+        .where(eq(journalEntryLegs.journalEntryId, id));
+
+      // Validate debits equal credits
+      let totalDebits = 0;
+      let totalCredits = 0;
+
+      for (const leg of legs) {
+        if (leg.debit) {
+          totalDebits += parseFloat(leg.debit);
+        }
+        if (leg.credit) {
+          totalCredits += parseFloat(leg.credit);
+        }
+      }
+
+      if (Math.abs(totalDebits - totalCredits) > 0.01) {
+        throw new Error(`Journal entry is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
+      }
+
+      // Update status to posted
+      const [postedEntry] = await tx
+        .update(journalEntries)
+        .set({
+          status: 'posted',
+          postedAt: new Date(),
+          postedBy: userId,
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(journalEntries.id, id),
+            eq(journalEntries.tenantId, tenantId)
+          )
+        )
+        .returning();
+
+      return postedEntry;
+    });
+  }
+
+  async reverseJournalEntry(
+    originalEntryId: string,
+    tenantId: string,
+    userId: string,
+    options?: { reversalDate?: string; description?: string; reason?: string }
+  ): Promise<JournalEntry> {
+    return await db.transaction(async (tx) => {
+      // Fetch original entry
+      const [originalEntry] = await tx
+        .select()
+        .from(journalEntries)
+        .where(
+          and(
+            eq(journalEntries.id, originalEntryId),
+            eq(journalEntries.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!originalEntry) {
+        throw new Error("Original journal entry not found");
+      }
+
+      // Fetch original legs
+      const originalLegs = await tx
+        .select()
+        .from(journalEntryLegs)
+        .where(eq(journalEntryLegs.journalEntryId, originalEntryId));
+
+      if (originalLegs.length === 0) {
+        throw new Error("Original journal entry has no lines");
+      }
+
+      // Generate entry number for reversal
+      const entryNumber = await this._getNextJournalEntryNumberImpl(tenantId, tx);
+
+      // Create reversal entry
+      const [reversalEntry] = await tx
+        .insert(journalEntries)
+        .values({
+          id: crypto.randomUUID(),
+          tenantId,
+          entryNumber,
+          entryDate: options?.reversalDate || new Date().toISOString().split('T')[0],
+          description: options?.description || `Reversal of ${originalEntry.entryNumber}: ${originalEntry.description || ''}`,
+          notes: options?.reason ? `Reversal reason: ${options.reason}` : `Reversal of journal entry ${originalEntry.entryNumber}`,
+          status: 'draft',
+          reversalOfId: originalEntryId,
+          sourceType: 'reversal',
+          sourceId: originalEntryId,
+          createdBy: userId,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        })
+        .returning();
+
+      // Create reversal legs (swap debits and credits)
+      const reversalLegs = originalLegs.map((leg, index) => ({
+        id: crypto.randomUUID(),
+        journalEntryId: reversalEntry.id,
+        tenantId,
+        accountId: leg.accountId,
+        debit: leg.credit, // Swap credit to debit
+        credit: leg.debit, // Swap debit to credit
+        description: `Reversal of: ${leg.description || originalEntry.description || ''}`,
+        lineNumber: index + 1,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }));
+
+      await tx.insert(journalEntryLegs).values(reversalLegs);
+
+      // Mark original entry as reversed
+      await tx
+        .update(journalEntries)
+        .set({
+          reversedById: reversalEntry.id,
+          reversedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(journalEntries.id, originalEntryId));
+
+      return reversalEntry;
+    });
   }
 
   // Transaction-enabled journal entry methods (Phase 3)

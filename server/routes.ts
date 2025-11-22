@@ -6439,6 +6439,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
+   * Post a journal entry to make it permanent
+   * 
+   * @testid button-post-journal-entry
+   * @route POST /api/journal-entries/:id/post
+   */
+  app.post("/api/journal-entries/:id/post", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+
+      // Use storage to post the journal entry
+      const postedEntry = await storage.postJournalEntry(id, tenantId, userId);
+
+      // Log audit trail
+      await enhancedAuditLogger.logFinancialTransaction({
+        tenantId,
+        userId,
+        action: 'post_journal_entry',
+        entityType: 'journal_entry',
+        entityId: id,
+        changes: {
+          before: { status: 'draft' },
+          after: { status: 'posted' }
+        },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        wasSuccessful: true
+      });
+
+      res.json(postedEntry);
+    } catch (error: any) {
+      console.error("Error posting journal entry:", error);
+      res.status(400).json({ 
+        error: error.message || "Failed to post journal entry" 
+      });
+    }
+  });
+
+  /**
+   * Create a reversal entry for an existing journal entry
+   * 
+   * @testid button-reverse-journal-entry
+   * @route POST /api/journal-entries/:id/reverse
+   */
+  app.post("/api/journal-entries/:id/reverse", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenantId!;
+      const userId = req.user.claims.sub;
+
+      // Parse optional reversal options from body
+      const { reversalDate, description, reason } = req.body;
+
+      // Create reversal entry
+      const reversalEntry = await storage.reverseJournalEntry(
+        id,
+        tenantId,
+        userId,
+        {
+          reversalDate,
+          description,
+          reason
+        }
+      );
+
+      // Log audit trail
+      await enhancedAuditLogger.logFinancialTransaction({
+        tenantId,
+        userId,
+        action: 'create_reversal_journal_entry',
+        entityType: 'journal_entry',
+        entityId: reversalEntry.id,
+        changes: {
+          before: null,
+          after: {
+            reversalEntry,
+            originalEntryId: id,
+            reason
+          }
+        },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        wasSuccessful: true
+      });
+
+      res.json(reversalEntry);
+    } catch (error: any) {
+      console.error("Error creating reversal journal entry:", error);
+      res.status(400).json({ 
+        error: error.message || "Failed to create reversal journal entry" 
+      });
+    }
+  });
+
+  /**
    * Reject a journal entry in workflow
    * 
    * @testid button-reject-journal-entry
