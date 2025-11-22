@@ -11979,6 +11979,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ====== PHASE 6: OPEN BANKING ROUTES (Lean Technologies) ======
+  // NOTE: Full implementation pending storage layer completion
+  // Stub endpoints added for API contract
+
+  app.get('/api/bank-connections', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    res.json({ message: 'Phase 6 implementation in progress', connections: [] });
+  });
+
+  app.get('/api/bank-accounts', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    res.json({ message: 'Phase 6 implementation in progress', accounts: [] });
+  });
+
+  app.get('/api/bank-transactions', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    res.json({ message: 'Phase 6 implementation in progress', transactions: [] });
+  });
+
+  app.get('/api/reconciliation/dashboard', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    res.json({ message: 'Phase 6 implementation in progress', dashboard: {} });
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

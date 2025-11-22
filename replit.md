@@ -57,11 +57,27 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - **Cost Tracking**: Per-provider token counting and cost calculation.
 - **Authority-Aware RBAC**: AI prompts dynamically inject user permissions.
 
+## Development Progress
+
+### Completed Phases
+- **Phase 1-4**: Core accounting infrastructure ✅
+- **Phase 5**: Transaction Monitoring (AML/KYC compliance, 20+ E2E tests passing) ✅
+- **Phase 6**: Open Banking Integration with Lean Technologies 🚧 **INFRASTRUCTURE COMPLETE**
+  - Schema: Bank connections, accounts, transactions, reconciliation, payment instructions tables mapped to existing `openBankingConnections` 
+  - API Routes: Stub endpoints created for OAuth flow, account listing, transaction management, reconciliation dashboard
+  - Note: Full OAuth2 implementation and Lean provider methods pending - requires LEAN credentials (LEAN_CLIENT_ID, LEAN_CLIENT_SECRET, LEAN_APP_TOKEN)
+  - Database: Migration ready for bank tables once Lean credentials provided
+
+### Next Steps (Remaining Work)
+1. **Phase 6 Completion**: Implement Lean OAuth2 callback, transaction sync service, AI reconciliation engine
+2. **Phase 7-12**: E-invoicing, AI Copilot, background jobs, RBAC enforcement
+3. **Auth0 Integration**: Post-RBAC when Phase 6-12 complete
+
 ## External Dependencies
 - **MCP Providers (Model Context Protocol)**: Kimi AI, Qwen (Alibaba), DeepSeek, OpenAI (optional), and custom user-configured providers.
 - **Microsoft Graph API:** For Outlook email integration and OneDrive cloud storage.
 - **Stripe:** For secure payment processing.
-- **Lean Technologies:** Primary Open Banking provider for UAE.
+- **Lean Technologies:** Primary Open Banking provider for UAE (credentials needed for Phase 6 completion).
 - **UAE Central Bank FX Rates:** Source for daily foreign exchange rates.
 - **Twilio:** For WhatsApp and SMS webhook integration.
 - **Google Drive:** Cloud storage integration.
