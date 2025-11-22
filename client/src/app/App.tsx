@@ -17,6 +17,8 @@ import { useTenant } from "@/shared/hooks/useTenant";
 import { TenantGate } from "@/shared/components/common/TenantGate";
 import { GlobalTenantEvents } from "@/shared/components/common/GlobalTenantEvents";
 import { AICopilotWidget } from "@/shared/components/ai-copilot/ai-copilot-widget";
+import { KeyboardShortcutsModal } from "@/shared/components/ui/keyboard-shortcuts-modal";
+import { useKeyboardShortcuts } from "@/shared/hooks/useKeyboardShortcuts";
 
 import NotFound from "@/shared/pages/not-found-page";
 import Landing from "@/features/auth/pages/landing-page";
@@ -137,6 +139,7 @@ function Router() {
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
   const { currentTenant } = useTenant();
+  useKeyboardShortcuts();
 
   const sidebarStyle = {
     "--sidebar-width": "16rem",
@@ -167,6 +170,7 @@ function AppContent() {
       <TenantGate>
         <RBACProvider tenantId={currentTenant?.id || null}>
           <CommandPalette />
+          <KeyboardShortcutsModal />
           <SidebarProvider style={sidebarStyle as React.CSSProperties}>
             <div className="flex h-screen w-full">
               {/* WCAG 2.2 Level AA: Semantic nav element for sidebar */}

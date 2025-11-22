@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Search, MoreHorizontal, Edit, Trash2 } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Edit, Trash2, Users } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
+import { EmptyState } from "@/shared/components/ui/empty-state";
 import {
   Table,
   TableBody,
@@ -138,24 +139,19 @@ export default function Customers() {
       {isLoading ? (
         <TableSkeleton rows={8} columns={customerColumns} minHeight="600px" />
       ) : filteredCustomers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg">
-          <p className="text-lg font-medium mb-2">No customers found</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            {searchTerm ? "Try adjusting your search" : "Get started by adding your first customer"}
-          </p>
-          {!searchTerm && (
-            <Button
-              onClick={() => {
-                setEditingCustomer(null);
-                setShowDialog(true);
-              }}
-              data-testid="button-add-first-customer"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Customer
-            </Button>
-          )}
-        </div>
+        <EmptyState
+          icon={Users}
+          title={searchTerm ? "No customers match your search" : "No customers yet"}
+          description={searchTerm ? "Try adjusting your search terms" : "Get started by creating your first customer"}
+          action={!searchTerm ? {
+            label: "Add Customer",
+            onClick: () => {
+              setEditingCustomer(null);
+              setShowDialog(true);
+            }
+          } : undefined}
+          data_testid="empty-state-customers"
+        />
       ) : (
         <div className="border rounded-lg">
           <Table>
