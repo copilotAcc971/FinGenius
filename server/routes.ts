@@ -613,19 +613,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/customers/:id', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('customers.update'), async (req: any, res) => {
     try {
       const { id } = req.params;
+      const tenantId = req.tenantId!;
       
       // Get before state for audit trail
-      const before = await storage.getCustomerById(id, req.tenantId);
+      const before = await storage.getCustomerById(id, tenantId);
       
       // Validate the update payload
       const parsed = updateCustomerSchema.parse(req.body);
       
       // Now perform the update (tenantId already verified by middleware)
-      const updated = await storage.updateCustomer(id, req.tenantId, parsed);
+      const updated = await storage.updateCustomer(id, tenantId, parsed);
       
       // LOG SUCCESS
       await auditLogger.logFinancialTransaction({
-        tenantId: req.tenantId!,
+        tenantId: tenantId!,
         userId: req.user!.claims.sub,
         action: 'update',
         entityType: 'customer',
@@ -635,6 +636,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: req.get('user-agent'),
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
+      
+      // CRITICAL WIRING: Recalculate risk score and re-screen on update
+      if (updated) {
+        // Re-calculate risk score on update
+        const riskAssessment = riskScoringService.calculateCustomerRiskScore(updated);
+        
+        // Save updated risk profile
+        await storage.createCustomerRiskProfile({
+          tenantId,
+          customerId: id,
+          riskScore: riskAssessment.riskScore,
+          riskLevel: riskAssessment.riskLevel,
+          riskFactors: riskAssessment.factors,
+          lastAssessmentDate: new Date(),
+          assessmentNotes: `Risk re-assessment on customer update - ${riskAssessment.riskLevel} risk`,
+        }).catch(err => console.error('[RiskScoring] Failed to save updated risk profile:', err));
+        
+        // Re-screen against sanctions
+        await sanctionsScreeningService.screenEntity({
+          tenantId,
+          entityType: 'customer',
+          entityId: id,
+          name: updated.displayName,
+          country: updated.billingAddress?.country,
+          taxId: updated.taxId,
+        }).catch(err => console.error('[SanctionsScreening] Failed to re-screen customer:', err));
+      }
       
       res.json(updated);
     } catch (error: any) {
@@ -816,6 +844,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: req.get('user-agent'),
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
+      
+      // CRITICAL WIRING: Recalculate risk score and re-screen on vendor update
+      if (updated) {
+        // Convert vendor to customer-like structure for risk scoring
+        const vendorAsCustomer = {
+          ...updated,
+          customerType: 'business' as const,
+          company: updated.companyName || updated.name,
+          billingAddress: updated.address,
+        } as any;
+        
+        // Re-calculate risk score on update
+        const riskAssessment = riskScoringService.calculateCustomerRiskScore(vendorAsCustomer);
+        
+        // Save updated risk profile
+        await storage.createCustomerRiskProfile({
+          tenantId: vendor.tenantId,
+          customerId: id,
+          riskScore: riskAssessment.riskScore,
+          riskLevel: riskAssessment.riskLevel,
+          riskFactors: riskAssessment.factors,
+          lastAssessmentDate: new Date(),
+          assessmentNotes: `Vendor supply chain risk re-assessment on update - ${riskAssessment.riskLevel} risk`,
+        }).catch(err => console.error('[RiskScoring] Failed to save updated vendor risk profile:', err));
+        
+        // Re-screen against sanctions
+        await sanctionsScreeningService.screenEntity({
+          tenantId: vendor.tenantId,
+          entityType: 'vendor',
+          entityId: id,
+          entityName: updated.name,
+          entityData: {
+            company: updated.companyName || updated.name,
+            address: updated.address,
+          },
+          screeningType: 'full',
+        }).catch(err => console.error('[SanctionsScreening] Failed to re-screen vendor:', err));
+      }
       
       res.json(updated);
     } catch (error: any) {
@@ -5353,6 +5419,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
       
+      // CRITICAL WIRING: Monitor journal entry creation for AML compliance
+      const totalDebit = validated.legs?.reduce((sum: number, leg: any) => sum + (parseFloat(leg.debitAmount || 0) || 0), 0) || 0;
+      await transactionMonitoringService.monitorTransaction(tenantId, {
+        id: journalEntry.id,
+        type: 'journal_entry',
+        operation: 'create',
+        amount: totalDebit,
+        date: journalEntry.entryDate || new Date(),
+        description: journalEntry.description,
+        metadata: {
+          userId: req.user.claims.sub,
+          status: journalEntry.status,
+          journalEntryNumber: journalEntry.journalEntryNumber,
+        },
+      }).catch(err => console.error('[TransactionMonitoring] Failed to monitor journal entry creation:', err));
+      
       res.status(201).json(journalEntry);
       
       // Broadcast real-time dashboard metrics update
@@ -5466,6 +5548,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: req.get('user-agent'),
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log:', err));
+      
+      // CRITICAL WIRING: Monitor journal entry deletion (reversal) for AML compliance
+      if (before) {
+        const totalDebit = before.totalDebit || 0;
+        await transactionMonitoringService.monitorTransaction(tenantId, {
+          id: before.id,
+          type: 'journal_entry',
+          operation: 'delete',
+          amount: totalDebit,
+          date: before.entryDate || new Date(),
+          description: `Reversal: ${before.description}`,
+          metadata: {
+            userId: req.user.claims.sub,
+            status: 'reversed',
+            originalStatus: before.status,
+          },
+        }).catch(err => console.error('[TransactionMonitoring] Failed to monitor journal entry deletion:', err));
+      }
       
       res.status(204).send();
       
@@ -5689,6 +5789,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: req.get('user-agent'),
         wasSuccessful: true,
       }).catch(err => console.error('[Audit] Failed to log journal entry approval:', err));
+      
+      // CRITICAL WIRING: Monitor journal entry posting (approval) for AML compliance
+      const approvedEntry = result.journalEntry;
+      if (approvedEntry && approvedEntry.status === 'posted') {
+        const journalEntryFull = await storage.getJournalEntry(id, tenantId);
+        const totalAmount = journalEntryFull?.totalDebit || 0;
+        await transactionMonitoringService.monitorTransaction(tenantId, {
+          id: approvedEntry.id,
+          type: 'journal_entry',
+          operation: 'post',
+          amount: totalAmount,
+          date: journalEntryFull?.entryDate || new Date(),
+          description: `Posted: ${journalEntryFull?.description}`,
+          metadata: {
+            userId,
+            status: 'posted',
+            approvedBy: userId,
+          },
+        }).catch(err => console.error('[TransactionMonitoring] Failed to monitor journal entry posting:', err));
+      }
       
       // Broadcast real-time dashboard metrics update
       broadcastMetricsUpdate(tenantId).catch(err => 
