@@ -150,7 +150,7 @@ export default function Customers() {
               setShowDialog(true);
             }
           } : undefined}
-          data_testid="empty-state-customers"
+          dataTestId="empty-state-customers"
         />
       ) : (
         <div className="border rounded-lg">

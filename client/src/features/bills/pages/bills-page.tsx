@@ -220,7 +220,7 @@ export default function Bills() {
             label: "Add Bill",
             onClick: handleAddBill
           }}
-          data_testid="empty-state-bills"
+          dataTestId="empty-state-bills"
         />
       ) : (
         <div className="border rounded-lg">

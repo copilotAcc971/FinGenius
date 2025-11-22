@@ -87,7 +87,7 @@ export default function Expenses() {
             label: "Add Expense",
             onClick: () => {}
           }}
-          data_testid="empty-state-expenses"
+          dataTestId="empty-state-expenses"
         />
       ) : (
         <div className="border rounded-lg">

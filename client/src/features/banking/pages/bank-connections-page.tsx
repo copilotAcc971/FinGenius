@@ -160,7 +160,7 @@ export default function BankConnections() {
             label: "Connect Your First Bank",
             onClick: () => setShowConnectDialog(true)
           }}
-          data_testid="empty-state-bank-connections"
+          dataTestId="empty-state-bank-connections"
         />
       ) : (
         <div className="border rounded-lg">

@@ -216,7 +216,7 @@ export default function CustomerPayments() {
             label: "Record Payment",
             onClick: handleAddNew
           }}
-          data_testid="empty-state-customer-payments"
+          dataTestId="empty-state-customer-payments"
         />
       ) : (
         <div className="border rounded-lg">

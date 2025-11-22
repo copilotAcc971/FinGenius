@@ -117,7 +117,7 @@ export default function Documents() {
             label: "Upload Document",
             onClick: () => {}
           }}
-          data_testid="empty-state-documents"
+          dataTestId="empty-state-documents"
         />
       ) : (
         <div className="border rounded-lg">

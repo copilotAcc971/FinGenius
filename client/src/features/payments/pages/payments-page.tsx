@@ -101,7 +101,7 @@ export default function Payments() {
           icon={Wallet}
           title="No payments yet"
           description="Payments will appear here when you pay bills or expenses"
-          data_testid="empty-state-payments"
+          dataTestId="empty-state-payments"
         />
       ) : (
         <div className="border rounded-lg">

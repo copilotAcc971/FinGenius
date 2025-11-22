@@ -207,7 +207,7 @@ export default function CreditNotesPage() {
             label: "Create Credit Note",
             onClick: handleCreate
           }}
-          data_testid="empty-state-credit-notes"
+          dataTestId="empty-state-credit-notes"
         />
       )}
 

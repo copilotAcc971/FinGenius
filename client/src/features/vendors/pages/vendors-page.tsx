@@ -150,7 +150,7 @@ export default function Vendors() {
               setShowDialog(true);
             }
           } : undefined}
-          data_testid="empty-state-vendors"
+          dataTestId="empty-state-vendors"
         />
       ) : (
         <div className="border rounded-lg">

@@ -219,7 +219,7 @@ export default function Invoices() {
               setShowDialog(true);
             }
           }}
-          data_testid="empty-state-invoices"
+          dataTestId="empty-state-invoices"
         />
       ) : (
         <div className="border rounded-lg">

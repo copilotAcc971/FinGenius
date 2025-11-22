@@ -12,7 +12,7 @@ interface EmptyStateProps {
   };
   children?: ReactNode;
   className?: string;
-  data_testid?: string;
+  dataTestId: string; // Required for unique identification
 }
 
 export function EmptyState({
@@ -22,12 +22,12 @@ export function EmptyState({
   action,
   children,
   className = "",
-  data_testid,
+  dataTestId,
 }: EmptyStateProps) {
   return (
     <div
       className={`flex flex-col items-center justify-center py-12 text-center ${className}`}
-      data-testid={data_testid || "empty-state"}
+      data-testid={dataTestId}
     >
       {Icon && (
         <Icon className="h-12 w-12 text-secondary mb-4" aria-hidden="true" />

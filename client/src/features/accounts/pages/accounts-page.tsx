@@ -168,7 +168,7 @@ export default function Accounts() {
               setShowDialog(true);
             }
           } : undefined}
-          data_testid="empty-state-accounts"
+          dataTestId="empty-state-accounts"
         />
       ) : (
         <div className="border rounded-lg">

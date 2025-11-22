@@ -178,7 +178,7 @@ export default function Assets() {
               setShowDialog(true);
             }
           } : undefined}
-          data_testid="empty-state-assets"
+          dataTestId="empty-state-assets"
         />
       ) : (
         <div className="border rounded-lg">
