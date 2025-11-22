@@ -2,16 +2,29 @@ import * as React from "react"
 
 import { cn } from "@/shared/lib/utils/utils"
 
+interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
+  caption?: string;
+  ariaLabel?: string;
+}
+
 const Table = React.forwardRef<
   HTMLTableElement,
-  React.HTMLAttributes<HTMLTableElement>
->(({ className, ...props }, ref) => (
+  TableProps
+>(({ className, caption, ariaLabel, ...props }, ref) => (
   <div className="relative w-full overflow-auto">
     <table
       ref={ref}
       className={cn("w-full caption-bottom text-sm", className)}
+      role="table"
+      aria-label={ariaLabel}
       {...props}
-    />
+    >
+      {caption && (
+        <caption className="sr-only text-sm font-medium mb-2">
+          {caption}
+        </caption>
+      )}
+    </table>
   </div>
 ))
 Table.displayName = "Table"
@@ -66,16 +79,25 @@ const TableRow = React.forwardRef<
 ))
 TableRow.displayName = "TableRow"
 
+interface TableHeadProps extends React.ThHTMLAttributes<HTMLTableCellElement> {
+  scope?: 'col' | 'row';
+  sortable?: boolean;
+  sorted?: 'ascending' | 'descending' | 'none';
+}
+
 const TableHead = React.forwardRef<
   HTMLTableCellElement,
-  React.ThHTMLAttributes<HTMLTableCellElement>
->(({ className, ...props }, ref) => (
+  TableHeadProps
+>(({ className, scope = 'col', sortable, sorted, ...props }, ref) => (
   <th
     ref={ref}
     className={cn(
-      "h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
+      "h-12 px-4 text-left align-middle font-medium text-foreground [&:has([role=checkbox])]:pr-0",
       className
     )}
+    scope={scope}
+    role="columnheader"
+    aria-sort={sortable ? (sorted || 'none') : undefined}
     {...props}
   />
 ))

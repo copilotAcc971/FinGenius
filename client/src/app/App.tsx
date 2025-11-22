@@ -169,10 +169,11 @@ function AppContent() {
           <CommandPalette />
           <SidebarProvider style={sidebarStyle as React.CSSProperties}>
             <div className="flex h-screen w-full">
-              {/* WCAG 2.2 Level A: Semantic nav element for sidebar */}
+              {/* WCAG 2.2 Level AA: Semantic nav element for sidebar */}
               <nav 
                 aria-label="Main navigation" 
                 className="flex h-screen"
+                role="navigation"
                 data-testid="nav-main-sidebar"
               >
                 <AppSidebar />
