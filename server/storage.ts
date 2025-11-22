@@ -1377,16 +1377,60 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteCustomer(id: string, tenantId: string): Promise<void> {
-    const customer = await this.getCustomer(id, tenantId);
-    if (!customer) {
-      throw new Error("Customer not found");
-    }
-    await db.delete(customers).where(
-      and(
-        eq(customers.id, id),
-        eq(customers.tenantId, tenantId)
-      )
-    );
+    // Import helper function
+    const { hasOpenCustomerTransactions } = await import('./db-helpers');
+
+    await db.transaction(async (tx) => {
+      // Get the customer first
+      const [customer] = await tx
+        .select()
+        .from(customers)
+        .where(
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!customer) {
+        throw new Error("Customer not found");
+      }
+
+      // Check for open transactions
+      const hasOpenTransactions = await hasOpenCustomerTransactions(id, tenantId, tx);
+      if (hasOpenTransactions) {
+        throw new Error("Cannot delete customer with open invoices or payments. Please close or delete related transactions first.");
+      }
+
+      // Soft delete the customer (add deletedAt if the field exists)
+      // Note: If customers table doesn't have deletedAt, we should add it via migration
+      const hasDeletedAt = 'deletedAt' in customers;
+      
+      if (hasDeletedAt) {
+        await tx
+          .update(customers)
+          .set({
+            deletedAt: new Date(),
+            updatedAt: new Date()
+          })
+          .where(
+            and(
+              eq(customers.id, id),
+              eq(customers.tenantId, tenantId)
+            )
+          );
+      } else {
+        // Hard delete if no soft delete field (not ideal)
+        console.warn('Customer table does not support soft delete. Using hard delete.');
+        await tx.delete(customers).where(
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, tenantId)
+          )
+        );
+      }
+    });
   }
 
   // Vendor operations
@@ -1431,16 +1475,60 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteVendor(id: string, tenantId: string): Promise<void> {
-    const vendor = await this.getVendor(id, tenantId);
-    if (!vendor) {
-      throw new Error("Vendor not found");
-    }
-    await db.delete(vendors).where(
-      and(
-        eq(vendors.id, id),
-        eq(vendors.tenantId, tenantId)
-      )
-    );
+    // Import helper function
+    const { hasOpenVendorTransactions } = await import('./db-helpers');
+
+    await db.transaction(async (tx) => {
+      // Get the vendor first
+      const [vendor] = await tx
+        .select()
+        .from(vendors)
+        .where(
+          and(
+            eq(vendors.id, id),
+            eq(vendors.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!vendor) {
+        throw new Error("Vendor not found");
+      }
+
+      // Check for open transactions
+      const hasOpenTransactions = await hasOpenVendorTransactions(id, tenantId, tx);
+      if (hasOpenTransactions) {
+        throw new Error("Cannot delete vendor with open bills or payments. Please close or delete related transactions first.");
+      }
+
+      // Soft delete the vendor (add deletedAt if the field exists)
+      // Note: If vendors table doesn't have deletedAt, we should add it via migration
+      const hasDeletedAt = 'deletedAt' in vendors;
+      
+      if (hasDeletedAt) {
+        await tx
+          .update(vendors)
+          .set({
+            deletedAt: new Date(),
+            updatedAt: new Date()
+          })
+          .where(
+            and(
+              eq(vendors.id, id),
+              eq(vendors.tenantId, tenantId)
+            )
+          );
+      } else {
+        // Hard delete if no soft delete field (not ideal)
+        console.warn('Vendor table does not support soft delete. Using hard delete.');
+        await tx.delete(vendors).where(
+          and(
+            eq(vendors.id, id),
+            eq(vendors.tenantId, tenantId)
+          )
+        );
+      }
+    });
   }
 
   // Account operations
@@ -2073,20 +2161,71 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteInvoice(id: string, tenantId: string): Promise<boolean> {
+    // Import helper functions
+    const { 
+      hasInvoicePayments, 
+      softDeleteInvoiceLineItems, 
+      recalculateInvoicePaymentStatus,
+      recalculateCustomerBalance 
+    } = await import('./db-helpers');
+
     return await db.transaction(async (tx) => {
-      // Use getInvoiceById which filters soft-deleted invoices
-      const existingInvoice = await this.getInvoiceById(id, tenantId);
+      // Get invoice with proper checks
+      const [existingInvoice] = await tx
+        .select()
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.id, id),
+            eq(invoices.tenantId, tenantId),
+            isNull(invoices.deletedAt)
+          )
+        )
+        .limit(1);
       
       if (!existingInvoice) {
         // Already deleted or doesn't exist
         return false;
       }
       
-      // Soft delete
+      // Check if invoice has any payments
+      const hasPayments = await hasInvoicePayments(id, tenantId, tx);
+      if (hasPayments) {
+        // Instead of blocking deletion, we'll soft delete but mark related payments
+        // This allows for proper audit trail
+        console.warn(`Invoice ${id} has existing payments. Soft deleting with payment reconciliation needed.`);
+        
+        // Mark any related payments for review
+        await tx
+          .update(customerPayments)
+          .set({
+            notes: sql`COALESCE(notes, '') || ' [Related invoice deleted on ' || CURRENT_DATE || ']'`,
+            updatedAt: new Date()
+          })
+          .where(
+            and(
+              eq(customerPayments.invoiceId, id),
+              isNull(customerPayments.deletedAt)
+            )
+          );
+      }
+      
+      // Soft delete invoice line items
+      await softDeleteInvoiceLineItems(id, tx);
+      
+      // Soft delete the invoice
       await tx
         .update(invoices)
-        .set({ deletedAt: new Date() })
+        .set({ 
+          deletedAt: new Date(),
+          updatedAt: new Date()
+        })
         .where(eq(invoices.id, id));
+      
+      // Recalculate customer balance after deleting invoice
+      if (existingInvoice.customerId) {
+        await recalculateCustomerBalance(existingInvoice.customerId, tx);
+      }
       
       // Log deletion with before state
       await tx.insert(invoiceAuditLogs).values({
@@ -2096,6 +2235,7 @@ export class DatabaseStorage implements IStorage {
         action: "deleted",
         changes: {
           before: existingInvoice,
+          metadata: hasPayments ? { hadPayments: true } : undefined
         },
       });
       
@@ -2317,14 +2457,54 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteBill(id: string, tenantId: string): Promise<void> {
-    const bill = await this.getBill(id);
-    if (!bill || bill.tenantId !== tenantId) {
-      throw new Error("Bill not found");
-    }
-    
+    // Import helper functions at the top of the method
+    const { 
+      hasBillPayments, 
+      softDeleteBillLineItems, 
+      recalculateBillPaymentStatus,
+      recalculateVendorBalance 
+    } = await import('./db-helpers');
+
     await db.transaction(async (tx) => {
-      await tx.delete(billLineItems).where(eq(billLineItems.billId, id));
-      await tx.delete(bills).where(eq(bills.id, id));
+      // Get the bill first to verify it exists and check vendor
+      const [bill] = await tx
+        .select()
+        .from(bills)
+        .where(
+          and(
+            eq(bills.id, id),
+            eq(bills.tenantId, tenantId),
+            isNull(bills.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!bill) {
+        throw new Error("Bill not found or already deleted");
+      }
+
+      // Check if bill has any payments
+      const hasPayments = await hasBillPayments(id, tenantId, tx);
+      if (hasPayments) {
+        throw new Error("Cannot delete bill with existing payments. Please delete or reassign payments first.");
+      }
+
+      // Soft delete bill line items
+      await softDeleteBillLineItems(id, tx);
+
+      // Soft delete the bill
+      await tx
+        .update(bills)
+        .set({ 
+          deletedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(bills.id, id));
+
+      // Recalculate vendor balance after deleting bill
+      if (bill.vendorId) {
+        await recalculateVendorBalance(bill.vendorId, tx);
+      }
     });
   }
 
@@ -3961,6 +4141,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteCustomerPayment(id: string, tenantId: string): Promise<void> {
+    // Import helper functions
+    const { 
+      recalculateInvoicePaymentStatus,
+      recalculateCustomerBalance 
+    } = await import('./db-helpers');
+
     await db.transaction(async (tx) => {
       // Get the payment first to check if it's linked to an invoice
       const [payment] = await tx
@@ -3974,7 +4160,7 @@ export class DatabaseStorage implements IStorage {
         .limit(1);
 
       if (!payment) {
-        throw new Error('Payment not found');
+        throw new Error('Payment not found or already deleted');
       }
 
       // Soft delete the payment
@@ -3986,31 +4172,15 @@ export class DatabaseStorage implements IStorage {
         })
         .where(eq(customerPayments.id, id));
 
-      // If payment was linked to an invoice, restore the balance
+      // If payment was linked to an invoice, recalculate its status
       if (payment.invoiceId) {
-        const [invoice] = await tx
-          .select()
-          .from(invoices)
-          .where(and(
-            eq(invoices.id, payment.invoiceId),
-            eq(invoices.tenantId, tenantId),
-            isNull(invoices.deletedAt)
-          ))
-          .limit(1);
+        // Recalculate the invoice payment status and outstanding amount
+        await recalculateInvoicePaymentStatus(payment.invoiceId, tx);
+      }
 
-        if (invoice) {
-          const currentTotal = parseFloat(invoice.total);
-          const paymentAmount = parseFloat(payment.amount);
-          const restoredBalance = currentTotal + paymentAmount;
-
-          await tx
-            .update(invoices)
-            .set({
-              status: restoredBalance > 0 ? 'sent' : invoice.status,
-              updatedAt: new Date(),
-            })
-            .where(eq(invoices.id, payment.invoiceId));
-        }
+      // Always recalculate customer balance
+      if (payment.customerId) {
+        await recalculateCustomerBalance(payment.customerId, tx);
       }
     });
   }
