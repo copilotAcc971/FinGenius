@@ -10,6 +10,7 @@ import { sendInvoiceEmail } from "./email-service";
 import { generateInvoicePDF } from "./pdf-service";
 import { TaxCalculator } from "./services/tax-calculator";
 import CurrencyConverter from "./services/currency-converter";
+import { FinancialCalculationsService } from "./services/financial-calculations.service";
 import { registerCronJob, unregisterCronJob, validateCronExpression } from "./cron";
 import googleDriveRoutes from "./google-drive-routes";
 import aiCopilotUploadRoutes from "./routes/ai-copilot-uploads";
@@ -2119,31 +2120,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Calculate taxes using TaxCalculator service
-      const lineItemsForTax = parsed.lineItems.map(item => ({
-        quantity: item.quantity,
-        unitPrice: parseFloat(item.unitPrice || '0'),
-        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
-      }));
-      
-      const taxCalc = TaxCalculator.calculateInvoiceTax(
-        lineItemsForTax,
-        5, // Default UAE VAT rate
-        false // Tax-exclusive
+      // CRITICAL: Calculate totals server-side - NEVER trust client values
+      const serverCalculation = await FinancialCalculationsService.calculateInvoiceTotal(
+        parsed.lineItems.map(item => ({
+          quantity: item.quantity,
+          unitPrice: item.unitPrice || item.rate || '0',
+          rate: item.rate || item.unitPrice || '0',
+          taxRate: item.taxRate,
+          discount: item.discount,
+          discountType: item.discountType
+        })),
+        parsed.invoice.taxId || null,
+        parsed.invoice.discount || 0,
+        parsed.invoice.discountType || 'fixed',
+        parsed.invoice.currency || 'USD',
+        req.tenantId
       );
       
-      // Merge calculated taxes into parsed invoice
-      const invoiceWithTax = {
+      // Validate client totals against server calculations if provided
+      if (parsed.invoice.subtotal || parsed.invoice.taxAmount || parsed.invoice.total) {
+        const validation = await FinancialCalculationsService.validateClientTotals({
+          lineItems: parsed.lineItems,
+          subtotal: parsed.invoice.subtotal,
+          taxAmount: parsed.invoice.taxAmount,
+          total: parsed.invoice.total,
+          taxId: parsed.invoice.taxId,
+          discount: parsed.invoice.discount,
+          discountType: parsed.invoice.discountType,
+          currency: parsed.invoice.currency
+        }, req.tenantId);
+        
+        if (!validation.isValid) {
+          // Log discrepancy for audit
+          await auditLogger.logFinancialTransaction({
+            tenantId: req.tenantId,
+            userId: req.user.claims.sub,
+            action: 'validation_failed',
+            entityType: 'invoice',
+            entityId: 'pre-creation',
+            changes: { 
+              clientTotals: validation.clientTotals,
+              serverTotals: validation.calculatedTotals,
+              discrepancies: validation.discrepancies
+            },
+            ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+            userAgent: req.get('user-agent'),
+            wasSuccessful: false,
+            errorMessage: 'Client totals do not match server calculations'
+          }).catch(err => console.error('Audit log failed:', err));
+        }
+      }
+      
+      // ALWAYS use server-calculated values
+      const invoiceWithServerTotals = {
         ...parsed,
         invoice: {
           ...parsed.invoice,
-          subtotal: taxCalc.subtotal.toFixed(2),
-          taxAmount: taxCalc.totalTax.toFixed(2),
-          total: taxCalc.total.toFixed(2)
+          subtotal: serverCalculation.subtotal,
+          taxAmount: serverCalculation.taxAmount,
+          total: serverCalculation.total
         }
       };
       
-      const invoice = await storage.createInvoiceWithItems(invoiceWithTax);
+      const invoice = await storage.createInvoiceWithItems(invoiceWithServerTotals);
       
       // SOX-compliant audit logging
       await auditLogger.logFinancialTransaction({
@@ -2216,7 +2255,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const updated = await storage.updateInvoiceWithItems(id, req.tenantId, parsed);
+      // CRITICAL: Recalculate totals server-side on update - NEVER trust client values
+      const serverCalculation = await FinancialCalculationsService.calculateInvoiceTotal(
+        parsed.lineItems.map(item => ({
+          quantity: item.quantity,
+          unitPrice: item.unitPrice || item.rate || '0',
+          rate: item.rate || item.unitPrice || '0',
+          taxRate: item.taxRate,
+          discount: item.discount,
+          discountType: item.discountType
+        })),
+        parsed.invoice.taxId || null,
+        parsed.invoice.discount || 0,
+        parsed.invoice.discountType || 'fixed',
+        parsed.invoice.currency || 'USD',
+        req.tenantId
+      );
+      
+      // Log if client totals don't match server calculations
+      if (parsed.invoice.total && parsed.invoice.total !== serverCalculation.total) {
+        await auditLogger.logFinancialTransaction({
+          tenantId: req.tenantId,
+          userId: req.user.claims.sub,
+          action: 'update_validation_mismatch',
+          entityType: 'invoice',
+          entityId: id,
+          changes: { 
+            clientTotal: parsed.invoice.total,
+            serverTotal: serverCalculation.total,
+            difference: (parseFloat(parsed.invoice.total) - parseFloat(serverCalculation.total)).toFixed(2)
+          },
+          ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+          userAgent: req.get('user-agent'),
+          wasSuccessful: true,
+          errorMessage: 'Client total overridden by server calculation'
+        }).catch(err => console.error('Audit log failed:', err));
+      }
+      
+      // ALWAYS use server-calculated values
+      const invoiceWithServerTotals = {
+        ...parsed,
+        invoice: {
+          ...parsed.invoice,
+          subtotal: serverCalculation.subtotal,
+          taxAmount: serverCalculation.taxAmount,
+          total: serverCalculation.total
+        }
+      };
+      
+      const updated = await storage.updateInvoiceWithItems(id, req.tenantId, invoiceWithServerTotals);
       
       // SOX-compliant audit logging - capture before/after state
       await auditLogger.logFinancialTransaction({
@@ -3792,23 +3879,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const validated = insertCustomerPaymentSchema.parse({ ...req.body, tenantId });
       
-      // IFRS IAS 21 compliant currency conversion
+      // CRITICAL: Use server-side currency conversion ONLY - never trust client rates
       let paymentData = validated;
       const baseCurrency = 'USD'; // Default base currency
+      
       if (validated.currency && validated.currency !== baseCurrency && validated.amount) {
-        try {
-          const conversion = CurrencyConverter.convert(
-            parseFloat(validated.amount),
-            validated.currency,
-            baseCurrency
-          );
-          paymentData = {
-            ...validated,
-            baseCurrencyAmount: conversion.roundedTarget.toString()
-          };
-        } catch (err: any) {
-          console.warn(`[CurrencyConverter] Failed to convert ${validated.currency} to ${baseCurrency}:`, err.message);
+        // Fetch exchange rate from server-side service ONLY
+        const serverConversion = await FinancialCalculationsService.convertCurrency(
+          validated.amount,
+          validated.currency,
+          baseCurrency,
+          tenantId,
+          validated.paymentDate ? new Date(validated.paymentDate) : undefined
+        );
+        
+        // Log if client provided exchange rate doesn't match server rate
+        if (req.body.exchangeRate) {
+          const clientRate = parseFloat(req.body.exchangeRate);
+          const serverRate = parseFloat(serverConversion.exchangeRate);
+          if (Math.abs(clientRate - serverRate) > 0.0001) {
+            await auditLogger.logFinancialTransaction({
+              tenantId: tenantId,
+              userId: userId,
+              action: 'exchange_rate_override_attempt',
+              entityType: 'customer_payment',
+              entityId: 'pre-creation',
+              changes: { 
+                clientRate: clientRate,
+                serverRate: serverRate,
+                difference: (clientRate - serverRate).toFixed(6)
+              },
+              ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+              userAgent: req.get('user-agent'),
+              wasSuccessful: false,
+              errorMessage: 'Client exchange rate overridden by server rate'
+            }).catch(err => console.error('Audit log failed:', err));
+          }
         }
+        
+        paymentData = {
+          ...validated,
+          baseCurrencyAmount: serverConversion.convertedAmount,
+          exchangeRate: serverConversion.exchangeRate // Use server rate ONLY
+        };
       }
       
       // Use atomic transaction to ensure payment and journal entry are created together
@@ -5380,6 +5493,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate payload structure
       const validated = journalEntryPayloadSchema.parse(req.body);
       
+      // CRITICAL: Validate that debits equal credits (double-entry bookkeeping integrity)
+      const balanceValidation = FinancialCalculationsService.validateJournalEntryBalance(validated.legs);
+      
+      if (!balanceValidation.isBalanced) {
+        // Log imbalanced journal entry attempt for audit
+        await auditLogger.logFinancialTransaction({
+          tenantId: tenantId,
+          userId: req.user.claims.sub,
+          action: 'validation_failed',
+          entityType: 'journal_entry',
+          entityId: 'pre-creation',
+          changes: { 
+            totalDebits: balanceValidation.totalDebits,
+            totalCredits: balanceValidation.totalCredits,
+            difference: balanceValidation.difference,
+            legs: validated.legs
+          },
+          ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+          userAgent: req.get('user-agent'),
+          wasSuccessful: false,
+          errorMessage: 'Journal entry is not balanced - debits must equal credits'
+        }).catch(err => console.error('Audit log failed:', err));
+        
+        return res.status(400).json({
+          message: "Journal entry is not balanced",
+          error: {
+            totalDebits: balanceValidation.totalDebits,
+            totalCredits: balanceValidation.totalCredits,
+            difference: balanceValidation.difference
+          }
+        });
+      }
+      
       // SECURITY: Inject server tenantId into journal entry data (NEVER trust client)
       const payloadWithTenant = {
         journalEntry: {
@@ -6005,28 +6151,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Parse body WITHOUT tenantId
       const validated = billPayloadSchema.parse(req.body);
       
-      // Calculate taxes using TaxCalculator service
-      const lineItemsForTax = validated.lineItems.map(item => ({
-        quantity: item.quantity,
-        unitPrice: parseFloat(item.unitPrice || '0'),
-        taxRate: item.taxRate ? parseFloat(item.taxRate) : 5 // Default UAE VAT rate
-      }));
-      
-      const taxCalc = TaxCalculator.calculateInvoiceTax(
-        lineItemsForTax,
-        5, // Default UAE VAT rate
-        false // Tax-exclusive
+      // CRITICAL: Calculate totals server-side - NEVER trust client values
+      const serverCalculation = await FinancialCalculationsService.calculateBillTotal(
+        validated.lineItems.map(item => ({
+          quantity: item.quantity,
+          unitPrice: item.unitPrice || item.rate || '0',
+          rate: item.rate || item.unitPrice || '0',
+          taxRate: item.taxRate,
+          discount: item.discount,
+          discountType: item.discountType
+        })),
+        validated.bill.taxId || null,
+        validated.bill.discount || 0,
+        validated.bill.discountType || 'fixed',
+        validated.bill.currency || 'USD',
+        tenantId
       );
       
-      // Inject server tenantId into bill data (NEVER trust client)
+      // Validate client totals against server calculations if provided
+      if (validated.bill.subtotal || validated.bill.taxAmount || validated.bill.total) {
+        const validation = await FinancialCalculationsService.validateClientTotals({
+          lineItems: validated.lineItems,
+          subtotal: validated.bill.subtotal,
+          taxAmount: validated.bill.taxAmount,
+          total: validated.bill.total,
+          taxId: validated.bill.taxId,
+          discount: validated.bill.discount,
+          discountType: validated.bill.discountType,
+          currency: validated.bill.currency
+        }, tenantId);
+        
+        if (!validation.isValid) {
+          // Log discrepancy for audit
+          await auditLogger.logFinancialTransaction({
+            tenantId: tenantId,
+            userId: req.user.claims.sub,
+            action: 'validation_failed',
+            entityType: 'bill',
+            entityId: 'pre-creation',
+            changes: { 
+              clientTotals: validation.clientTotals,
+              serverTotals: validation.calculatedTotals,
+              discrepancies: validation.discrepancies
+            },
+            ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+            userAgent: req.get('user-agent'),
+            wasSuccessful: false,
+            errorMessage: 'Client totals do not match server calculations'
+          }).catch(err => console.error('Audit log failed:', err));
+        }
+      }
+      
+      // ALWAYS use server-calculated values
       const billWithTenant = {
         ...validated,
         bill: {
           ...validated.bill,
           tenantId: tenantId,
-          subtotal: taxCalc.subtotal.toFixed(2),
-          taxAmount: taxCalc.totalTax.toFixed(2),
-          total: taxCalc.total.toFixed(2)
+          subtotal: serverCalculation.subtotal,
+          taxAmount: serverCalculation.taxAmount,
+          total: serverCalculation.total
         }
       };
       
@@ -6102,16 +6286,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Get before state for audit trail
       const before = await storage.getBillById(id, tenantId);
+      if (!before) {
+        return res.status(404).json({ message: "Bill not found or has been deleted" });
+      }
       
       // Parse body WITHOUT trusting tenantId
       const validated = billPayloadSchema.parse(req.body);
       
-      // Force server tenantId (same pattern as POST)
+      // CRITICAL: Recalculate totals server-side on update - NEVER trust client values
+      const serverCalculation = await FinancialCalculationsService.calculateBillTotal(
+        validated.lineItems.map(item => ({
+          quantity: item.quantity,
+          unitPrice: item.unitPrice || item.rate || '0',
+          rate: item.rate || item.unitPrice || '0',
+          taxRate: item.taxRate,
+          discount: item.discount,
+          discountType: item.discountType
+        })),
+        validated.bill.taxId || null,
+        validated.bill.discount || 0,
+        validated.bill.discountType || 'fixed',
+        validated.bill.currency || 'USD',
+        tenantId
+      );
+      
+      // Log if client totals don't match server calculations
+      if (validated.bill.total && validated.bill.total !== serverCalculation.total) {
+        await auditLogger.logFinancialTransaction({
+          tenantId: tenantId,
+          userId: req.user.claims.sub,
+          action: 'update_validation_mismatch',
+          entityType: 'bill',
+          entityId: id,
+          changes: { 
+            clientTotal: validated.bill.total,
+            serverTotal: serverCalculation.total,
+            difference: (parseFloat(validated.bill.total) - parseFloat(serverCalculation.total)).toFixed(2)
+          },
+          ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
+          userAgent: req.get('user-agent'),
+          wasSuccessful: true,
+          errorMessage: 'Client total overridden by server calculation'
+        }).catch(err => console.error('Audit log failed:', err));
+      }
+      
+      // ALWAYS use server-calculated values
       const billWithTenant = {
         ...validated,
         bill: {
           ...validated.bill,
           tenantId: tenantId,
+          subtotal: serverCalculation.subtotal,
+          taxAmount: serverCalculation.taxAmount,
+          total: serverCalculation.total
         }
       };
       
