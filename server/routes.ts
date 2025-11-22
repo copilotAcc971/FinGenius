@@ -3569,10 +3569,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const validated = insertCustomerPaymentSchema.parse({ ...req.body, tenantId });
       
+      // IFRS IAS 21 compliant currency conversion
+      let paymentData = validated;
+      const baseCurrency = 'USD'; // Default base currency
+      if (validated.currency && validated.currency !== baseCurrency && validated.amount) {
+        try {
+          const conversion = CurrencyConverter.convert(
+            parseFloat(validated.amount),
+            validated.currency,
+            baseCurrency
+          );
+          paymentData = {
+            ...validated,
+            baseCurrencyAmount: conversion.roundedTarget.toString()
+          };
+        } catch (err: any) {
+          console.warn(`[CurrencyConverter] Failed to convert ${validated.currency} to ${baseCurrency}:`, err.message);
+        }
+      }
+      
       // Use atomic transaction to ensure payment and journal entry are created together
       const result = await withTransaction(async (tx) => {
         // 1. Create customer payment record
-        const payment = await storage.createCustomerPayment(validated, tx);
+        const payment = await storage.createCustomerPayment(paymentData, tx);
         
         // 2. Fetch payment data and create journal entry
         const paymentEntryData = await fetchCustomerPaymentEntryData(payment.id, tenantId, storage, tx);
@@ -6443,10 +6462,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const validated = insertPaymentSchema.parse({ ...req.body, tenantId });
 
+      // IFRS IAS 21 compliant currency conversion
+      let paymentData = validated;
+      const baseCurrency = 'USD'; // Default base currency
+      if (validated.currency && validated.currency !== baseCurrency && validated.amount) {
+        try {
+          const conversion = CurrencyConverter.convert(
+            parseFloat(validated.amount),
+            validated.currency,
+            baseCurrency
+          );
+          paymentData = {
+            ...validated,
+            baseCurrencyAmount: conversion.roundedTarget.toString()
+          };
+        } catch (err: any) {
+          console.warn(`[CurrencyConverter] Failed to convert ${validated.currency} to ${baseCurrency}:`, err.message);
+        }
+      }
+
       // Use atomic transaction to ensure payment and journal entry are created together
       const result = await withTransaction(async (tx) => {
         // 1. Create vendor payment record
-        const payment = await storage.createPayment(validated, tx);
+        const payment = await storage.createPayment(paymentData, tx);
 
         // 2. Fetch payment data and create journal entry
         const paymentEntryData = await fetchVendorPaymentEntryData(payment.id, tenantId, storage, tx);
@@ -8670,10 +8708,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const openBankingService = new OpenBankingService(tenantId);
       const decryptedTokens = await openBankingService.getDecryptedTokens(connectionId);
 
+      // IFRS IAS 21 compliant currency conversion for open banking
+      const paymentAmount = parseFloat(amount);
+      const paymentCurrency = currency || 'AED';
+      const baseCurrency = 'USD';
+      let baseCurrencyAmount = paymentAmount; // Default to payment amount if same currency
+      
+      if (paymentCurrency !== baseCurrency) {
+        try {
+          const conversion = CurrencyConverter.convert(paymentAmount, paymentCurrency, baseCurrency);
+          baseCurrencyAmount = conversion.roundedTarget;
+        } catch (err: any) {
+          console.warn(`[CurrencyConverter] Failed to convert ${paymentCurrency} to ${baseCurrency}:`, err.message);
+        }
+      }
+
       // Initiate payment
       const paymentResult = await provider.makePayment(decryptedTokens.accessToken, {
-        amount: parseFloat(amount),
-        currency: currency || 'AED',
+        amount: paymentAmount,
+        currency: paymentCurrency,
         recipientAccountId,
         reference: reference || `Payment from Copilot Accountant`,
         metadata: { invoiceId, billId },
@@ -8686,7 +8739,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         provider: connection.provider,
         providerPaymentId: paymentResult.paymentId,
         amount: amount.toString(),
-        currency: currency || 'AED',
+        currency: paymentCurrency,
+        baseCurrencyAmount: baseCurrencyAmount.toString(),
         recipientAccountId,
         reference: reference || `Payment from Copilot Accountant`,
         status: paymentResult.status,
