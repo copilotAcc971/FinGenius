@@ -11,6 +11,7 @@ import { generateInvoicePDF } from "./pdf-service";
 import { TaxCalculator } from "./services/tax-calculator";
 import CurrencyConverter from "./services/currency-converter";
 import { FinancialCalculationsService } from "./services/financial-calculations.service";
+import { BusinessRulesService, BusinessRulesError } from "./services/business-rules.service";
 import { registerCronJob, unregisterCronJob, validateCronExpression } from "./cron";
 import googleDriveRoutes from "./google-drive-routes";
 import aiCopilotUploadRoutes from "./routes/ai-copilot-uploads";
@@ -2120,6 +2121,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      // BUSINESS RULE: Check credit limit before creating invoice
+      if (parsed.invoice.customerId) {
+        try {
+          await BusinessRulesService.checkCreditLimit(
+            parsed.invoice.customerId,
+            parsed.invoice.total || '0',
+            req.tenantId
+          );
+        } catch (error: any) {
+          if (error instanceof BusinessRulesError) {
+            return res.status(403).json({ 
+              message: error.message,
+              code: error.code 
+            });
+          }
+          throw error;
+        }
+      }
+      
       // CRITICAL: Calculate totals server-side - NEVER trust client values
       const serverCalculation = await FinancialCalculationsService.calculateInvoiceTotal(
         parsed.lineItems.map(item => ({
@@ -2243,6 +2263,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Invoice not found or has been deleted" });
       }
       
+      // BUSINESS RULE: Check if invoice can be edited
+      if (!BusinessRulesService.canEditInvoice(existing)) {
+        return res.status(403).json({ 
+          message: "Cannot modify invoice after it has been sent",
+          code: "INVOICE_NOT_EDITABLE" 
+        });
+      }
+      
       const parsed = invoicePayloadSchema.parse({
         invoice: { ...req.body.invoice, tenantId: req.tenantId },
         lineItems: req.body.lineItems || [],
@@ -2360,6 +2388,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tenant = await storage.getTenant(invoice.tenantId);
       if (!tenant || tenant.ownerId !== userId) {
         return res.status(403).json({ message: "Access denied" });
+      }
+      
+      // BUSINESS RULE: Check if invoice can be deleted
+      if (!BusinessRulesService.canDeleteInvoice(invoice)) {
+        return res.status(403).json({ 
+          message: "Cannot delete invoice after it has been sent",
+          code: "INVOICE_NOT_DELETABLE" 
+        });
       }
       
       const success = await storage.deleteInvoice(id, invoice.tenantId);
@@ -3370,6 +3406,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertSalesOrderLineItemSchema.parse({ ...item, tenantId })
       );
       
+      // BUSINESS RULE: Check credit limit before creating sales order
+      if (validatedOrder.customerId) {
+        try {
+          await BusinessRulesService.checkCreditLimit(
+            validatedOrder.customerId,
+            validatedOrder.total || '0',
+            tenantId
+          );
+        } catch (error: any) {
+          if (error instanceof BusinessRulesError) {
+            return res.status(403).json({ 
+              message: error.message,
+              code: error.code 
+            });
+          }
+          throw error;
+        }
+      }
+      
       // Calculate taxes using TaxCalculator service
       const lineItemsForTax = validatedLineItems.map(item => ({
         quantity: item.quantity,
@@ -3878,6 +3933,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tenantId = req.tenantId!;
       const userId = req.user.claims.sub;
       const validated = insertCustomerPaymentSchema.parse({ ...req.body, tenantId });
+      
+      // BUSINESS RULE: Validate payment constraints
+      if (validated.invoiceId) {
+        try {
+          // Check payment amount doesn't exceed balance
+          await BusinessRulesService.validatePaymentAmount(
+            'invoice',
+            validated.invoiceId,
+            validated.amount,
+            tenantId
+          );
+          
+          // Check for duplicate payments
+          await BusinessRulesService.checkDuplicatePayment(
+            validated.invoiceId,
+            validated.amount,
+            validated.paymentDate,
+            tenantId
+          );
+          
+          // Validate payment date
+          await BusinessRulesService.validatePaymentDate(
+            validated.invoiceId,
+            validated.paymentDate,
+            tenantId
+          );
+        } catch (error: any) {
+          if (error instanceof BusinessRulesError) {
+            return res.status(403).json({ 
+              message: error.message,
+              code: error.code 
+            });
+          }
+          throw error;
+        }
+      }
       
       // CRITICAL: Use server-side currency conversion ONLY - never trust client rates
       let paymentData = validated;
@@ -5601,6 +5692,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Get before state for audit trail
       const before = await storage.getJournalEntry(id, tenantId);
+      if (!before) {
+        return res.status(404).json({ message: "Journal entry not found" });
+      }
+      
+      // BUSINESS RULE: Check if journal entry can be edited
+      if (!BusinessRulesService.canEditJournalEntry(before)) {
+        return res.status(403).json({ 
+          message: "Cannot edit posted journal entries",
+          code: "JOURNAL_ENTRY_POSTED" 
+        });
+      }
       
       // Validate payload structure
       const validated = journalEntryPayloadSchema.parse(req.body);
@@ -5664,6 +5766,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Get before state for audit trail
       const before = await storage.getJournalEntry(id, tenantId);
+      if (!before) {
+        return res.status(404).json({ message: "Journal entry not found" });
+      }
+      
+      // BUSINESS RULE: Check if journal entry can be deleted
+      if (!BusinessRulesService.canDeleteJournalEntry(before)) {
+        return res.status(403).json({ 
+          message: "Cannot delete posted journal entries",
+          code: "JOURNAL_ENTRY_POSTED" 
+        });
+      }
       
       await storage.deleteJournalEntry(id, tenantId);
       
@@ -6290,6 +6403,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Bill not found or has been deleted" });
       }
       
+      // BUSINESS RULE: Check if bill can be edited
+      if (!BusinessRulesService.canEditBill(before)) {
+        return res.status(403).json({ 
+          message: "Cannot modify bill with existing payments",
+          code: "BILL_NOT_EDITABLE" 
+        });
+      }
+      
       // Parse body WITHOUT trusting tenantId
       const validated = billPayloadSchema.parse(req.body);
       
@@ -6413,6 +6534,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Get before state for audit trail
       const before = await storage.getBillById(id, tenantId);
+      if (!before) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+      
+      // BUSINESS RULE: Check if bill can be deleted (no existing payments)
+      const canDelete = await BusinessRulesService.canDeleteBill(id, tenantId);
+      if (!canDelete) {
+        return res.status(403).json({ 
+          message: "Cannot delete bill with existing payments",
+          code: "BILL_HAS_PAYMENTS" 
+        });
+      }
       
       await storage.deleteBill(id, tenantId);
       

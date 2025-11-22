@@ -571,6 +571,9 @@ export const customers = pgTable("customers", {
   // Tax compliance
   taxRegistrationNumber: varchar("tax_registration_number", { length: 100 }),
   
+  // Credit management
+  creditLimit: decimal("credit_limit", { precision: 10, scale: 2 }).default("50000.00"),
+  
   // Keep existing fields
   address: text("address"),
   notes: text("notes"),
