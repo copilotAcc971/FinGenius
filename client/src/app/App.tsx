@@ -154,16 +154,42 @@ function AppContent() {
 
   return (
     <>
+      {/* WCAG 2.2 Level A: Skip to Main Content Link */}
+      <a 
+        href="#main-content" 
+        className="skip-to-main" 
+        data-testid="link-skip-to-main"
+        aria-label="Skip to main content"
+      >
+        Skip to main content
+      </a>
+      
       <TenantGate>
         <RBACProvider tenantId={currentTenant?.id || null}>
           <CommandPalette />
           <SidebarProvider style={sidebarStyle as React.CSSProperties}>
             <div className="flex h-screen w-full">
-              <AppSidebar />
+              {/* WCAG 2.2 Level A: Semantic nav element for sidebar */}
+              <nav 
+                aria-label="Main navigation" 
+                className="flex h-screen"
+                data-testid="nav-main-sidebar"
+              >
+                <AppSidebar />
+              </nav>
+              
               <div className="flex flex-col flex-1 overflow-hidden">
-                <header className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background">
+                <header 
+                  className="flex h-16 items-center justify-between gap-4 border-b px-6 bg-background"
+                  role="banner"
+                  aria-label="Page header"
+                >
                   <div className="flex items-center gap-4">
-                    <SidebarTrigger data-testid="button-sidebar-toggle" />
+                    <SidebarTrigger 
+                      data-testid="button-sidebar-toggle"
+                      aria-label="Toggle sidebar navigation"
+                      aria-expanded="false"
+                    />
                     <OrganizationSwitcher />
                   </div>
                   <div className="flex items-center gap-4">
@@ -171,10 +197,23 @@ function AppContent() {
                     <UserMenu />
                   </div>
                 </header>
-                <div className="border-b bg-background px-6 py-3">
+                
+                {/* WCAG 2.2 Level A: Semantic region for breadcrumbs */}
+                <div 
+                  className="border-b bg-background px-6 py-3"
+                  role="navigation"
+                  aria-label="Breadcrumb navigation"
+                >
                   <Breadcrumbs />
                 </div>
-                <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
+                
+                {/* WCAG 2.2 Level A: Semantic main element with id for skip link */}
+                <main 
+                  id="main-content"
+                  className="flex-1 overflow-y-auto p-6 bg-muted/20"
+                  role="main"
+                  aria-label="Main content area"
+                >
                   <div className="mx-auto max-w-7xl">
                     <Router />
                   </div>
@@ -202,4 +241,9 @@ export default function App() {
       </TooltipProvider>
     </QueryClientProvider>
   );
+}
+
+// Add lang attribute to html root element for semantic HTML
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = 'en-US';
 }

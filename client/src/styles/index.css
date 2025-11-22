@@ -243,13 +243,30 @@
     outline: none;
   }
 
-  /* Ensure all interactive elements have visible focus */
+  /* WCAG 2.2 Level A: Ensure all interactive elements have visible focus */
   button:focus-visible,
   a:focus-visible,
   input:focus-visible,
   select:focus-visible,
-  textarea:focus-visible {
+  textarea:focus-visible,
+  [role="button"]:focus-visible,
+  [role="menuitem"]:focus-visible,
+  [role="link"]:focus-visible,
+  [role="tab"]:focus-visible {
     @apply ring-2 ring-ring ring-offset-2;
+  }
+  
+  /* Enhanced focus visibility for better accessibility */
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 3px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  
+  /* Keyboard navigation support */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 }
 
@@ -361,8 +378,38 @@
     touch-action: manipulation;
   }
 
-  /* Skip to main content link (accessibility) */
+  /* WCAG 2.2 Level A: Skip to main content link (accessibility) */
   .skip-to-main {
-    @apply absolute -top-full left-0 z-50 bg-black text-white px-4 py-2 focus:top-0;
+    @apply absolute -top-full left-0 z-50 bg-black text-white px-4 py-2 focus:top-0 font-semibold;
+    /* Visible on focus for keyboard users */
+    &:focus-visible {
+      top: 0;
+      outline: 3px solid white;
+      outline-offset: 2px;
+    }
+  }
+  
+  /* WCAG 2.2 Level A: Screen reader only content */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+  
+  /* WCAG 2.2 Level A: Focus visible for all interactive elements */
+  [tabindex]:focus-visible,
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 }

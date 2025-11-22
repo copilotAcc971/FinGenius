@@ -38,6 +38,7 @@ export function OrganizationSwitcher() {
           variant="default"
           onClick={() => setShowCreateDialog(true)}
           data-testid="button-create-first-organization"
+          aria-label="Create a new organization"
         >
           <Plus className="mr-2 h-4 w-4" />
           Create Your First Organization
@@ -58,6 +59,8 @@ export function OrganizationSwitcher() {
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            aria-label="Switch organization"
+            aria-haspopup="listbox"
             className="w-[200px] justify-between"
             data-testid="button-organization-switcher"
           >
