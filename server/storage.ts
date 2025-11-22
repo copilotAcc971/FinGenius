@@ -873,7 +873,30 @@ export interface IStorage {
   updateComplianceDeadline(id: string, tenantId: string, data: Partial<InsertComplianceDeadline>): Promise<ComplianceDeadline>;
   getComplianceTraining(tenantId: string, filters?: { userId?: string }): Promise<ComplianceTraining[]>;
   updateComplianceTraining(id: string, tenantId: string, data: Partial<InsertComplianceTraining>): Promise<ComplianceTraining>;
+  
+  // ====================================
+  // PHASE 6: OPEN BANKING (Lean Technologies)
+  // ====================================
   getBankConnections(tenantId: string): Promise<any[]>;
+  createBankConnection(data: any): Promise<any>;
+  updateBankConnection(id: string, tenantId: string, data: Partial<any>): Promise<any>;
+  getBankAccounts(tenantId: string): Promise<any[]>;
+  getBankAccountsByConnection(connectionId: string, tenantId: string): Promise<any[]>;
+  getBankTransactions(tenantId: string, filters?: {
+    accountId?: string;
+    from?: Date;
+    to?: Date;
+    isReconciled?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<any[]>;
+  getReconciliationDashboard(tenantId: string): Promise<{
+    totalConnections: number;
+    connectedAccounts: number;
+    unmatchedTransactions: number;
+    lastSyncTime?: Date;
+    connectionsByStatus: Record<string, number>;
+  }>;
 
   // ====================================
   // AUTHORITY MATRIX & FUNCTION PERMISSIONS (AI Copilot RBAC)
@@ -9871,6 +9894,125 @@ export class DatabaseStorage implements IStorage {
       .from(openBankingConnections)
       .where(eq(openBankingConnections.tenantId, tenantId))
       .orderBy(desc(openBankingConnections.createdAt));
+  }
+
+  async createBankConnection(data: any): Promise<any> {
+    const [connection] = await db
+      .insert(openBankingConnections)
+      .values(data)
+      .returning();
+    return connection;
+  }
+
+  async updateBankConnection(id: string, tenantId: string, data: Partial<any>): Promise<any> {
+    const [connection] = await db
+      .update(openBankingConnections)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(
+        eq(openBankingConnections.id, id),
+        eq(openBankingConnections.tenantId, tenantId)
+      ))
+      .returning();
+    return connection;
+  }
+
+  async getBankAccounts(tenantId: string): Promise<any[]> {
+    return await db
+      .select()
+      .from(bankAccounts)
+      .where(eq(bankAccounts.tenantId, tenantId))
+      .orderBy(desc(bankAccounts.createdAt));
+  }
+
+  async getBankAccountsByConnection(connectionId: string, tenantId: string): Promise<any[]> {
+    return await db
+      .select()
+      .from(bankAccounts)
+      .where(and(
+        eq(bankAccounts.connectionId, connectionId),
+        eq(bankAccounts.tenantId, tenantId)
+      ))
+      .orderBy(desc(bankAccounts.createdAt));
+  }
+
+  async getBankTransactions(tenantId: string, filters?: {
+    accountId?: string;
+    from?: Date;
+    to?: Date;
+    isReconciled?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<any[]> {
+    const conditions = [eq(bankTransactions.tenantId, tenantId)];
+    
+    if (filters?.accountId) {
+      conditions.push(eq(bankTransactions.accountId, filters.accountId));
+    }
+    if (filters?.from) {
+      conditions.push(gte(bankTransactions.transactionDate, filters.from));
+    }
+    if (filters?.to) {
+      conditions.push(lte(bankTransactions.transactionDate, filters.to));
+    }
+    if (filters?.isReconciled !== undefined) {
+      conditions.push(eq(bankTransactions.isReconciled, filters.isReconciled));
+    }
+
+    let query = db
+      .select()
+      .from(bankTransactions)
+      .where(and(...conditions))
+      .orderBy(desc(bankTransactions.transactionDate));
+
+    if (filters?.limit) {
+      query = query.limit(filters.limit);
+    }
+    if (filters?.offset) {
+      query = query.offset(filters.offset);
+    }
+
+    return await query;
+  }
+
+  async getReconciliationDashboard(tenantId: string): Promise<{
+    totalConnections: number;
+    connectedAccounts: number;
+    unmatchedTransactions: number;
+    lastSyncTime?: Date;
+    connectionsByStatus: Record<string, number>;
+  }> {
+    const connections = await db
+      .select()
+      .from(openBankingConnections)
+      .where(eq(openBankingConnections.tenantId, tenantId));
+
+    const accounts = await db
+      .select()
+      .from(bankAccounts)
+      .where(eq(bankAccounts.tenantId, tenantId));
+
+    const unmatchedTxns = await db
+      .select()
+      .from(bankTransactions)
+      .where(and(
+        eq(bankTransactions.tenantId, tenantId),
+        eq(bankTransactions.isReconciled, false)
+      ));
+
+    const statusCounts = connections.reduce((acc: Record<string, number>, conn: any) => {
+      acc[conn.status || 'unknown'] = (acc[conn.status || 'unknown'] || 0) + 1;
+      return acc;
+    }, {});
+
+    return {
+      totalConnections: connections.length,
+      connectedAccounts: accounts.length,
+      unmatchedTransactions: unmatchedTxns.length,
+      lastSyncTime: connections.length > 0 
+        ? new Date(Math.max(...connections.map((c: any) => c.lastSyncedAt?.getTime() || 0)))
+        : undefined,
+      connectionsByStatus: statusCounts,
+    };
   }
 
   // ====================================

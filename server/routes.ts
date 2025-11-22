@@ -11980,23 +11980,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ====== PHASE 6: OPEN BANKING ROUTES (Lean Technologies) ======
-  // NOTE: Full implementation pending storage layer completion
-  // Stub endpoints added for API contract
 
+  // Get all bank connections for tenant
   app.get('/api/bank-connections', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
-    res.json({ message: 'Phase 6 implementation in progress', connections: [] });
+    try {
+      const tenantId = req.tenantId!;
+      const connections = await storage.getBankConnections(tenantId);
+      res.json({ success: true, data: connections });
+    } catch (error: any) {
+      console.error('[OpenBanking] Get connections error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch bank connections' });
+    }
   });
 
+  // Get bank accounts (optionally filtered by connection)
   app.get('/api/bank-accounts', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
-    res.json({ message: 'Phase 6 implementation in progress', accounts: [] });
+    try {
+      const tenantId = req.tenantId!;
+      const { connectionId } = req.query;
+      
+      const accounts = connectionId
+        ? await storage.getBankAccountsByConnection(connectionId, tenantId)
+        : await storage.getBankAccounts(tenantId);
+      
+      res.json({ success: true, data: accounts });
+    } catch (error: any) {
+      console.error('[OpenBanking] Get accounts error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch bank accounts' });
+    }
   });
 
+  // Get bank transactions with optional filtering
   app.get('/api/bank-transactions', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
-    res.json({ message: 'Phase 6 implementation in progress', transactions: [] });
+    try {
+      const tenantId = req.tenantId!;
+      const { accountId, from, to, status = 'unmatched', limit = '50', offset = '0' } = req.query;
+      
+      const transactions = await storage.getBankTransactions(tenantId, {
+        accountId,
+        from: from ? new Date(from as string) : undefined,
+        to: to ? new Date(to as string) : undefined,
+        isReconciled: status === 'unmatched' ? false : true,
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+      });
+      
+      res.json({ success: true, data: transactions });
+    } catch (error: any) {
+      console.error('[OpenBanking] Get transactions error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch bank transactions' });
+    }
   });
 
+  // Get reconciliation dashboard
   app.get('/api/reconciliation/dashboard', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
-    res.json({ message: 'Phase 6 implementation in progress', dashboard: {} });
+    try {
+      const tenantId = req.tenantId!;
+      const dashboard = await storage.getReconciliationDashboard(tenantId);
+      res.json({ success: true, data: dashboard });
+    } catch (error: any) {
+      console.error('[Reconciliation] Dashboard error:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch reconciliation dashboard' });
+    }
   });
 
   // ====== LEAN WEBHOOK HANDLER ======
