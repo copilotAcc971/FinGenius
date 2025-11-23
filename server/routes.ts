@@ -13742,6 +13742,130 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // IAS 2 Compliant Inventory Costing Routes
+  app.get('/api/inventory/valuation', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId, method } = req.query;
+      
+      if (!itemId) {
+        return res.status(400).json({ error: 'itemId is required' });
+      }
+      
+      // Import the service
+      const { InventoryCostingService } = await import('./services/inventory-costing.service');
+      const costingService = new InventoryCostingService(storage);
+      
+      const valuation = await costingService.getInventoryValuation(tenantId, itemId as string, method as 'FIFO' | 'weighted_average' || 'FIFO');
+      res.json(valuation);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/inventory/:itemId/cost-layers', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId } = req.params;
+      const { unconsumed } = req.query;
+      
+      const layers = await storage.getCostLayers(tenantId, itemId, unconsumed === 'true');
+      res.json(layers);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/inventory/:itemId/cost-history', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId } = req.params;
+      const { startDate, endDate } = req.query;
+      
+      const history = await storage.getInventoryCostHistory(
+        tenantId,
+        itemId,
+        startDate ? new Date(startDate as string) : undefined,
+        endDate ? new Date(endDate as string) : undefined
+      );
+      res.json(history);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/inventory/recalculate-costs', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId, method } = req.body;
+      
+      if (!itemId || !method) {
+        return res.status(400).json({ error: 'itemId and method are required' });
+      }
+      
+      if (!['FIFO', 'weighted_average'].includes(method)) {
+        return res.status(400).json({ error: 'method must be FIFO or weighted_average' });
+      }
+      
+      await storage.recalculateInventoryCosts(tenantId, itemId, method);
+      res.json({ success: true, message: 'Costs recalculated successfully' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/inventory/cost-comparison', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId } = req.query;
+      
+      if (!itemId) {
+        return res.status(400).json({ error: 'itemId is required' });
+      }
+      
+      // Import the service
+      const { InventoryCostingService } = await import('./services/inventory-costing.service');
+      const costingService = new InventoryCostingService(storage);
+      
+      // Get valuations for both methods
+      const [fifoValuation, weightedAvgValuation] = await Promise.all([
+        costingService.getInventoryValuation(tenantId, itemId as string, 'FIFO'),
+        costingService.getInventoryValuation(tenantId, itemId as string, 'weighted_average')
+      ]);
+      
+      res.json({
+        fifo: fifoValuation,
+        weightedAverage: weightedAvgValuation,
+        variance: {
+          totalValue: (parseFloat(fifoValuation.totalValue) - parseFloat(weightedAvgValuation.totalValue)).toFixed(4),
+          unitCost: (parseFloat(fifoValuation.unitCost) - parseFloat(weightedAvgValuation.unitCost)).toFixed(4)
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/inventory/calculate-cogs', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId!;
+      const { itemId, quantity, method } = req.body;
+      
+      if (!itemId || !quantity || !method) {
+        return res.status(400).json({ error: 'itemId, quantity, and method are required' });
+      }
+      
+      // Import the service
+      const { InventoryCostingService } = await import('./services/inventory-costing.service');
+      const costingService = new InventoryCostingService(storage);
+      
+      const cogs = await costingService.getCostOfGoodsSold(tenantId, itemId, quantity, method);
+      res.json(cogs);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ====== INTERACTIVE REPORTING ENDPOINTS ======
   // Trend data for 30-day financial chart
   app.get('/api/reports/trend', isAuthenticated, verifyTenantAccess, async (req: any, res) => {

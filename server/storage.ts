@@ -223,6 +223,15 @@ import {
   financialStatementNotes,
   type FinancialStatementNote,
   type InsertFinancialStatementNote,
+  inventoryCostLayers,
+  type InventoryCostLayer,
+  type InsertInventoryCostLayer,
+  inventoryCostHistory,
+  type InventoryCostHistory,
+  type InsertInventoryCostHistory,
+  stockMovements,
+  type StockMovement,
+  type InsertStockMovement,
   nrvAssessments,
   type NrvAssessment,
   type InsertNrvAssessment,
@@ -288,6 +297,14 @@ import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc, or, lt } from "drizzle-orm";
 import { seedPermissions, seedRolesForTenant } from "./scripts/seed-rbac";
 
+// Types for inventory costing
+export interface CostLayerConsumption {
+  layerId: string;
+  quantityConsumed: string;
+  unitCost: string;
+  totalCost: string;
+}
+
 export interface IStorage {
   // User operations
   getUser(id: string): Promise<User | undefined>;
@@ -352,6 +369,17 @@ export interface IStorage {
   createOpeningStock(stock: InsertOpeningStock & { tenantId: string }): Promise<OpeningStock>;
   calculateFifoValuation(tenantId: string, itemId: string, periodDate: Date): Promise<{ unitValue: number; quantity: number; totalValue: number }>;
   calculateWacValuation(tenantId: string, itemId: string, periodDate: Date): Promise<{ unitValue: number; quantity: number; totalValue: number }>;
+  
+  // Inventory Costing operations (IAS 2 compliant)
+  createCostLayer(layer: InsertInventoryCostLayer & { tenantId: string }): Promise<InventoryCostLayer>;
+  getCostLayers(tenantId: string, itemId: string, unconsumed?: boolean): Promise<InventoryCostLayer[]>;
+  updateCostLayer(id: string, tenantId: string, data: Partial<InsertInventoryCostLayer>): Promise<InventoryCostLayer>;
+  consumeCostLayers(tenantId: string, itemId: string, quantity: string): Promise<CostLayerConsumption[]>;
+  getInventoryCostHistory(tenantId: string, itemId: string, startDate?: Date, endDate?: Date): Promise<InventoryCostHistory[]>;
+  createInventoryCostHistory(history: InsertInventoryCostHistory & { tenantId: string }): Promise<InventoryCostHistory>;
+  updateWeightedAverage(tenantId: string, itemId: string, quantity: string, unitCost: string): Promise<{ averageCost: string; totalQuantity: string; totalValue: string }>;
+  getWeightedAverageCost(tenantId: string, itemId: string): Promise<{ averageCost: string; totalQuantity: string; totalValue: string }>;
+  recalculateInventoryCosts(tenantId: string, itemId: string, method: 'FIFO' | 'weighted_average'): Promise<void>;
 
   // Tax operations
   getTaxes(tenantId: string): Promise<Tax[]>;
@@ -1816,6 +1844,257 @@ export class DatabaseStorage implements IStorage {
       quantity,
       totalValue: totalCost,
     };
+  }
+
+  // Inventory Costing operations (IAS 2 compliant)
+  async createCostLayer(layer: InsertInventoryCostLayer & { tenantId: string }): Promise<InventoryCostLayer> {
+    const [created] = await db.insert(inventoryCostLayers).values(layer).returning();
+    return created;
+  }
+
+  async getCostLayers(tenantId: string, itemId: string, unconsumed?: boolean): Promise<InventoryCostLayer[]> {
+    const conditions = [
+      eq(inventoryCostLayers.tenantId, tenantId),
+      eq(inventoryCostLayers.itemId, itemId)
+    ];
+    
+    if (unconsumed === true) {
+      conditions.push(eq(inventoryCostLayers.isFullyConsumed, false));
+    }
+    
+    return await db
+      .select()
+      .from(inventoryCostLayers)
+      .where(and(...conditions))
+      .orderBy(asc(inventoryCostLayers.purchaseDate)); // FIFO order
+  }
+
+  async updateCostLayer(id: string, tenantId: string, data: Partial<InsertInventoryCostLayer>): Promise<InventoryCostLayer> {
+    const [updated] = await db
+      .update(inventoryCostLayers)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(
+        eq(inventoryCostLayers.id, id),
+        eq(inventoryCostLayers.tenantId, tenantId)
+      ))
+      .returning();
+    
+    if (!updated) {
+      throw new Error("Cost layer not found");
+    }
+    
+    return updated;
+  }
+
+  async consumeCostLayers(tenantId: string, itemId: string, quantity: string): Promise<CostLayerConsumption[]> {
+    return await db.transaction(async (tx) => {
+      const Decimal = (await import('decimal.js')).default;
+      const requestedQty = new Decimal(quantity);
+      
+      // Get available layers in FIFO order
+      const layers = await tx
+        .select()
+        .from(inventoryCostLayers)
+        .where(and(
+          eq(inventoryCostLayers.tenantId, tenantId),
+          eq(inventoryCostLayers.itemId, itemId),
+          eq(inventoryCostLayers.isFullyConsumed, false)
+        ))
+        .orderBy(asc(inventoryCostLayers.purchaseDate));
+      
+      let remainingQty = requestedQty;
+      const consumptions: CostLayerConsumption[] = [];
+      
+      for (const layer of layers) {
+        if (remainingQty.lte(0)) break;
+        
+        const availableQty = new Decimal(layer.quantityRemaining);
+        const qtyToConsume = Decimal.min(remainingQty, availableQty);
+        const newRemaining = availableQty.sub(qtyToConsume);
+        
+        // Update the layer
+        await tx
+          .update(inventoryCostLayers)
+          .set({
+            quantityRemaining: newRemaining.toFixed(4),
+            isFullyConsumed: newRemaining.lte(0),
+            updatedAt: new Date()
+          })
+          .where(eq(inventoryCostLayers.id, layer.id));
+        
+        consumptions.push({
+          layerId: layer.id,
+          quantityConsumed: qtyToConsume.toFixed(4),
+          unitCost: layer.unitCost,
+          totalCost: qtyToConsume.mul(new Decimal(layer.unitCost)).toFixed(4)
+        });
+        
+        remainingQty = remainingQty.sub(qtyToConsume);
+      }
+      
+      if (remainingQty.gt(0)) {
+        throw new Error(`Insufficient inventory. Requested: ${quantity}, Available: ${requestedQty.sub(remainingQty).toFixed(4)}`);
+      }
+      
+      return consumptions;
+    });
+  }
+
+  async getInventoryCostHistory(tenantId: string, itemId: string, startDate?: Date, endDate?: Date): Promise<InventoryCostHistory[]> {
+    const conditions = [
+      eq(inventoryCostHistory.tenantId, tenantId),
+      eq(inventoryCostHistory.itemId, itemId)
+    ];
+    
+    if (startDate) {
+      conditions.push(gte(inventoryCostHistory.date, startDate));
+    }
+    if (endDate) {
+      conditions.push(lte(inventoryCostHistory.date, endDate));
+    }
+    
+    return await db
+      .select()
+      .from(inventoryCostHistory)
+      .where(and(...conditions))
+      .orderBy(desc(inventoryCostHistory.date));
+  }
+
+  async createInventoryCostHistory(history: InsertInventoryCostHistory & { tenantId: string }): Promise<InventoryCostHistory> {
+    const [created] = await db.insert(inventoryCostHistory).values(history).returning();
+    return created;
+  }
+
+  async updateWeightedAverage(tenantId: string, itemId: string, quantity: string, unitCost: string): Promise<{ averageCost: string; totalQuantity: string; totalValue: string }> {
+    const Decimal = (await import('decimal.js')).default;
+    
+    // Get current weighted average
+    const current = await this.getWeightedAverageCost(tenantId, itemId);
+    
+    const currentQty = new Decimal(current.totalQuantity);
+    const currentValue = new Decimal(current.totalValue);
+    const addedQty = new Decimal(quantity);
+    const addedCost = new Decimal(unitCost);
+    const addedValue = addedQty.mul(addedCost);
+    
+    const newTotalQty = currentQty.add(addedQty);
+    const newTotalValue = currentValue.add(addedValue);
+    const newAvgCost = newTotalQty.gt(0) ? newTotalValue.div(newTotalQty) : new Decimal(0);
+    
+    // Record in history
+    await this.createInventoryCostHistory({
+      tenantId,
+      itemId,
+      date: new Date(),
+      costingMethod: 'weighted_average',
+      weightedAverageCost: newAvgCost.toFixed(4),
+      totalQuantity: newTotalQty.toFixed(4),
+      totalValue: newTotalValue.toFixed(4),
+      movementType: 'purchase',
+      previousCost: current.averageCost,
+      newCost: newAvgCost.toFixed(4)
+    });
+    
+    return {
+      averageCost: newAvgCost.toFixed(4),
+      totalQuantity: newTotalQty.toFixed(4),
+      totalValue: newTotalValue.toFixed(4)
+    };
+  }
+
+  async getWeightedAverageCost(tenantId: string, itemId: string): Promise<{ averageCost: string; totalQuantity: string; totalValue: string }> {
+    // Get the latest cost history entry
+    const [latest] = await db
+      .select()
+      .from(inventoryCostHistory)
+      .where(and(
+        eq(inventoryCostHistory.tenantId, tenantId),
+        eq(inventoryCostHistory.itemId, itemId),
+        eq(inventoryCostHistory.costingMethod, 'weighted_average')
+      ))
+      .orderBy(desc(inventoryCostHistory.date))
+      .limit(1);
+    
+    if (latest && latest.weightedAverageCost) {
+      return {
+        averageCost: latest.weightedAverageCost,
+        totalQuantity: latest.totalQuantity,
+        totalValue: latest.totalValue
+      };
+    }
+    
+    // Calculate from current layers if no history
+    const Decimal = (await import('decimal.js')).default;
+    const layers = await this.getCostLayers(tenantId, itemId, true);
+    
+    let totalQty = new Decimal(0);
+    let totalVal = new Decimal(0);
+    
+    for (const layer of layers) {
+      const qty = new Decimal(layer.quantityRemaining);
+      const cost = new Decimal(layer.unitCost);
+      totalQty = totalQty.add(qty);
+      totalVal = totalVal.add(qty.mul(cost));
+    }
+    
+    const avgCost = totalQty.gt(0) ? totalVal.div(totalQty) : new Decimal(0);
+    
+    return {
+      averageCost: avgCost.toFixed(4),
+      totalQuantity: totalQty.toFixed(4),
+      totalValue: totalVal.toFixed(4)
+    };
+  }
+
+  async recalculateInventoryCosts(tenantId: string, itemId: string, method: 'FIFO' | 'weighted_average'): Promise<void> {
+    await db.transaction(async (tx) => {
+      // Get all movements in chronological order
+      const movements = await tx
+        .select()
+        .from(stockMovements)
+        .where(and(
+          eq(stockMovements.tenantId, tenantId),
+          eq(stockMovements.itemId, itemId)
+        ))
+        .orderBy(asc(stockMovements.movementDate));
+      
+      // Clear existing cost layers and history
+      await tx.delete(inventoryCostLayers).where(and(
+        eq(inventoryCostLayers.tenantId, tenantId),
+        eq(inventoryCostLayers.itemId, itemId)
+      ));
+      
+      await tx.delete(inventoryCostHistory).where(and(
+        eq(inventoryCostHistory.tenantId, tenantId),
+        eq(inventoryCostHistory.itemId, itemId)
+      ));
+      
+      // Rebuild cost layers from movements
+      for (const movement of movements) {
+        if (movement.movementType === 'in' && movement.unitCost) {
+          await tx.insert(inventoryCostLayers).values({
+            id: crypto.randomUUID(),
+            tenantId,
+            itemId,
+            purchaseDate: movement.movementDate,
+            quantity: movement.quantity,
+            quantityRemaining: movement.quantity,
+            unitCost: movement.unitCost,
+            totalCost: movement.totalCost || '0',
+            referenceType: movement.referenceType || 'recalculation',
+            referenceId: movement.referenceId || movement.id,
+            isFullyConsumed: false,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          });
+          
+          if (method === 'weighted_average' && movement.unitCost) {
+            // Record weighted average update
+            await this.updateWeightedAverage(tenantId, itemId, movement.quantity, movement.unitCost);
+          }
+        }
+      }
+    });
   }
 
   // Tax operations
