@@ -101,6 +101,29 @@ const Landing = lazy(() => import("@/features/auth/pages/landing-page").catch(()
   )
 })));
 
+// Income pages
+const InvoicesPage = lazy(() => import("@/features/income/pages/invoices-page").catch(() => ({
+  default: () => <div className="p-6">Unable to load Invoices page</div>
+})));
+
+const CustomersPage = lazy(() => import("@/features/income/pages/customers-page").catch(() => ({
+  default: () => <div className="p-6">Unable to load Customers page</div>
+})));
+
+// Expense pages  
+const BillsPage = lazy(() => import("@/features/expenses/pages/bills-page").catch(() => ({
+  default: () => <div className="p-6">Unable to load Bills page</div>
+})));
+
+const VendorsPage = lazy(() => import("@/features/expenses/pages/vendors-page").catch(() => ({
+  default: () => <div className="p-6">Unable to load Vendors page</div>
+})));
+
+// Settings pages
+const SettingsPage = lazy(() => import("@/features/settings/pages/settings-page").catch(() => ({
+  default: () => <div className="p-6">Unable to load Settings page</div>
+})));
+
 // Minimal sidebar
 const MinimalSidebar = () => (
   <div className="w-64 border-r bg-white">
@@ -108,8 +131,16 @@ const MinimalSidebar = () => (
       <h2 className="font-semibold mb-4">Navigation</h2>
       <nav className="space-y-2">
         <a href="/" className="block p-2 hover:bg-gray-100 rounded">Dashboard</a>
-        <a href="/income" className="block p-2 hover:bg-gray-100 rounded">Income</a>
-        <a href="/expenses" className="block p-2 hover:bg-gray-100 rounded">Expenses</a>
+        <div className="pt-2">
+          <div className="px-2 text-xs font-semibold text-gray-500">Income</div>
+          <a href="/income/invoices" className="block p-2 hover:bg-gray-100 rounded">Invoices</a>
+          <a href="/income/customers" className="block p-2 hover:bg-gray-100 rounded">Customers</a>
+        </div>
+        <div className="pt-2">
+          <div className="px-2 text-xs font-semibold text-gray-500">Expenses</div>
+          <a href="/expenses/bills" className="block p-2 hover:bg-gray-100 rounded">Bills</a>
+          <a href="/expenses/vendors" className="block p-2 hover:bg-gray-100 rounded">Vendors</a>
+        </div>
         <a href="/settings" className="block p-2 hover:bg-gray-100 rounded">Settings</a>
       </nav>
     </div>
@@ -194,6 +225,20 @@ function ProtectedLayout() {
             <Suspense fallback={<Loading />}>
               <Switch>
                 <Route path="/" component={Dashboard} />
+                <Route path="/dashboard" component={Dashboard} />
+                
+                {/* Income routes */}
+                <Route path="/income/invoices" component={InvoicesPage} />
+                <Route path="/income/customers" component={CustomersPage} />
+                
+                {/* Expense routes */}
+                <Route path="/expenses/bills" component={BillsPage} />
+                <Route path="/expenses/vendors" component={VendorsPage} />
+                
+                {/* Settings */}
+                <Route path="/settings" component={SettingsPage} />
+                <Route path="/settings/:page" component={SettingsPage} />
+                
                 <Route path="/tenant-select" component={TenantSelect} />
                 <Route component={MinimalDashboard} />
               </Switch>
