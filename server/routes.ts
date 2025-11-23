@@ -97,6 +97,7 @@ import {
   insertSalesOrderLineItemSchema,
   insertCreditNoteSchema,
   insertCreditNoteLineItemSchema,
+  creditNotePayloadSchema,
   insertCustomerPaymentSchema,
   insertRecurringInvoiceSchema,
   insertRecurringInvoiceLineItemSchema,
@@ -14183,6 +14184,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('[Fixed Assets] Error deleting asset:', error);
       res.status(500).json({ message: error.message || 'Failed to delete fixed asset' });
+    }
+  });
+
+  // ====== WORKFLOW INTEGRATION API ROUTES (Phase 3A) ======
+  // Get unpaid invoices for a customer
+  app.get('/api/workflows/customer/:customerId/unpaid-invoices', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { customerId } = req.params;
+
+      const unpaidInvoices = await storage.getUnpaidInvoices(tenantId, customerId);
+      res.json(unpaidInvoices);
+    } catch (error: any) {
+      console.error('[Workflows] Error fetching unpaid invoices:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch unpaid invoices' });
+    }
+  });
+
+  // Create payment directly from an invoice (with auto-application)
+  app.post('/api/workflows/invoice/:invoiceId/payment', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { invoiceId } = req.params;
+      const paymentData = req.body;
+
+      // Validate payment schema
+      const paymentSchema = insertCustomerPaymentSchema.omit({ paymentNumber: true });
+      const validated = paymentSchema.parse(paymentData);
+
+      const result = await storage.createPaymentFromInvoice(
+        invoiceId,
+        tenantId,
+        { ...validated, tenantId }
+      );
+
+      res.status(201).json(result);
+    } catch (error: any) {
+      console.error('[Workflows] Error creating payment from invoice:', error);
+      res.status(500).json({ message: error.message || 'Failed to create payment' });
+    }
+  });
+
+  // Create credit note directly from an invoice
+  app.post('/api/workflows/invoice/:invoiceId/credit-note', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const { invoiceId } = req.params;
+      const { creditNote, lineItems } = req.body;
+
+      // Validate credit note payload
+      const validated = creditNotePayloadSchema.parse({ creditNote, lineItems });
+
+      const result = await storage.createCreditNoteFromInvoice(
+        invoiceId,
+        tenantId,
+        { ...validated.creditNote, tenantId },
+        validated.lineItems
+      );
+
+      res.status(201).json(result);
+    } catch (error: any) {
+      console.error('[Workflows] Error creating credit note from invoice:', error);
+      res.status(500).json({ message: error.message || 'Failed to create credit note' });
     }
   });
 

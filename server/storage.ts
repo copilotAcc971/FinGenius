@@ -538,6 +538,11 @@ export interface IStorage {
   deleteCustomerPayment(id: string, tenantId: string): Promise<void>;
   getNextCustomerPaymentNumber(tenantId: string): Promise<string>;
 
+  // Workflow Integration operations (Phase 3A)
+  getUnpaidInvoices(tenantId: string, customerId: string): Promise<Invoice[]>;
+  createPaymentFromInvoice(invoiceId: string, tenantId: string, payment: InsertCustomerPayment): Promise<{ payment: CustomerPayment; application: CustomerPaymentApplication }>;
+  createCreditNoteFromInvoice(invoiceId: string, tenantId: string, creditNote: InsertCreditNote, lineItems: InsertCreditNoteLineItem[]): Promise<CreditNote>;
+
   // Recurring Invoice operations
   getRecurringInvoices(tenantId: string): Promise<RecurringInvoice[]>;
   getRecurringInvoiceById(id: string, tenantId: string): Promise<RecurringInvoice | null>;
@@ -4663,6 +4668,172 @@ export class DatabaseStorage implements IStorage {
         .where(eq(customerPaymentSequences.tenantId, tenantId));
       
       return `${sequence.prefix}${String(nextNumber).padStart(4, '0')}`;
+    });
+  }
+
+  // ====== WORKFLOW INTEGRATION (Phase 3A) ======
+  async getUnpaidInvoices(tenantId: string, customerId: string): Promise<Invoice[]> {
+    return await db
+      .select()
+      .from(invoices)
+      .where(and(
+        eq(invoices.tenantId, tenantId),
+        eq(invoices.customerId, customerId),
+        or(
+          eq(invoices.status, 'draft'),
+          eq(invoices.status, 'sent'),
+          eq(invoices.status, 'overdue')
+        ),
+        isNull(invoices.deletedAt)
+      ))
+      .orderBy(desc(invoices.dueDate));
+  }
+
+  async createPaymentFromInvoice(
+    invoiceId: string,
+    tenantId: string,
+    payment: InsertCustomerPayment
+  ): Promise<{ payment: CustomerPayment; application: CustomerPaymentApplication }> {
+    return await db.transaction(async (tx) => {
+      // Verify invoice exists and belongs to tenant
+      const [invoice] = await tx
+        .select()
+        .from(invoices)
+        .where(and(
+          eq(invoices.id, invoiceId),
+          eq(invoices.tenantId, tenantId),
+          isNull(invoices.deletedAt)
+        ))
+        .limit(1);
+
+      if (!invoice) {
+        throw new Error('Invoice not found');
+      }
+
+      // Create payment
+      const paymentNumber = await this.getNextCustomerPaymentNumber(tenantId);
+      const [createdPayment] = await tx
+        .insert(customerPayments)
+        .values({
+          ...payment,
+          invoiceId,
+          paymentNumber,
+          tenantId,
+        })
+        .returning();
+
+      // Automatically apply payment to invoice
+      const [application] = await tx
+        .insert(customerPaymentApplications)
+        .values({
+          tenantId,
+          paymentId: createdPayment.id,
+          invoiceId,
+          amountApplied: payment.amount,
+        })
+        .returning();
+
+      // Update invoice status based on payment amount
+      const remainingBalance = parseFloat(invoice.total) - parseFloat(payment.amount);
+      const newStatus = remainingBalance <= 0 ? 'paid' : invoice.status;
+
+      await tx
+        .update(invoices)
+        .set({
+          status: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(invoices.id, invoiceId));
+
+      return { payment: createdPayment, application };
+    });
+  }
+
+  async createCreditNoteFromInvoice(
+    invoiceId: string,
+    tenantId: string,
+    creditNote: InsertCreditNote,
+    lineItems: InsertCreditNoteLineItem[]
+  ): Promise<CreditNote> {
+    return await db.transaction(async (tx) => {
+      // Verify invoice exists
+      const [invoice] = await tx
+        .select()
+        .from(invoices)
+        .where(and(
+          eq(invoices.id, invoiceId),
+          eq(invoices.tenantId, tenantId),
+          isNull(invoices.deletedAt)
+        ))
+        .limit(1);
+
+      if (!invoice) {
+        throw new Error('Invoice not found');
+      }
+
+      // Generate credit note number
+      const lastNote = await tx
+        .select({ creditNoteNumber: creditNotes.creditNoteNumber })
+        .from(creditNotes)
+        .where(eq(creditNotes.tenantId, tenantId))
+        .orderBy(desc(creditNotes.createdAt))
+        .limit(1);
+      
+      const lastNumber = lastNote[0]?.creditNoteNumber;
+      const nextNumber = lastNumber 
+        ? parseInt(lastNumber.replace('CN-', '')) + 1 
+        : 1;
+      const creditNoteNumber = `CN-${nextNumber.toString().padStart(4, '0')}`;
+
+      // Calculate totals from line items
+      const lineItemsWithAmounts = lineItems.map(item => {
+        const quantity = parseFloat(item.quantity);
+        const unitPrice = parseFloat(item.unitPrice);
+        const discount = parseFloat(item.discount || "0");
+        const calculatedAmount = (quantity * unitPrice) - discount;
+        return { ...item, amount: calculatedAmount.toFixed(2) };
+      });
+
+      const subtotal = lineItemsWithAmounts.reduce((sum, item) => 
+        sum + parseFloat(item.amount), 0);
+
+      const taxCalculations = await Promise.all(
+        lineItemsWithAmounts.map(async (item) => {
+          if (!item.taxId) return 0;
+          const [tax] = await tx.select().from(taxes).where(eq(taxes.id, item.taxId));
+          if (!tax) return 0;
+          return parseFloat(item.amount) * (parseFloat(tax.rate) / 100);
+        })
+      );
+
+      const taxAmount = taxCalculations.reduce((sum, tax) => sum + tax, 0);
+      const total = subtotal + taxAmount;
+
+      // Create credit note linked to invoice
+      const [createdNote] = await tx
+        .insert(creditNotes)
+        .values({
+          ...creditNote,
+          invoiceId,
+          creditNoteNumber,
+          subtotal: subtotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          total: total.toFixed(2),
+          balanceRemaining: total.toFixed(2),
+          tenantId,
+        })
+        .returning();
+
+      // Insert line items
+      await tx.insert(creditNoteLineItems).values(
+        lineItemsWithAmounts.map(item => ({
+          ...item,
+          creditNoteId: createdNote.id,
+          tenantId,
+        }))
+      );
+
+      return createdNote;
     });
   }
 
