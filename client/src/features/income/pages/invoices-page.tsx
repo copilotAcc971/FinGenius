@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Plus, MoreHorizontal, Edit, Trash2, Mail, Download, Loader2, CheckCircle2, FileText } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Button } from "@/shared/components/ui/button";
@@ -37,6 +38,7 @@ const InvoiceDialog = lazy(() => import("@/features/invoices/components/invoice-
 export default function Invoices() {
   const [showDialog, setShowDialog] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [, navigate] = useLocation();
   const { currentTenant } = useTenant();
   const { toast } = useToast();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -249,7 +251,17 @@ export default function Invoices() {
                   data-testid={`row-invoice-${invoice.id}`}
                 >
                   <TableCell className={`${getColumnClassName(invoiceColumns[0])} font-medium font-mono`}>{invoice.invoiceNumber}</TableCell>
-                  <TableCell className={getColumnClassName(invoiceColumns[1])}>{getCustomerName(invoice.customerId)}</TableCell>
+                  <TableCell className={getColumnClassName(invoiceColumns[1])}>
+                    <button 
+                      onClick={() => navigate(`/income/customers?search=${getCustomerName(invoice.customerId)}`)}
+                      className="text-primary hover:underline cursor-pointer"
+                      data-testid={`link-customer-${invoice.customerId}`}
+                      aria-label={`View customer ${getCustomerName(invoice.customerId)}`}
+                      title={`View ${getCustomerName(invoice.customerId)}'s details`}
+                    >
+                      {getCustomerName(invoice.customerId)}
+                    </button>
+                  </TableCell>
                   <TableCell className={getColumnClassName(invoiceColumns[2])}>{new Date(invoice.invoiceDate).toLocaleDateString()}</TableCell>
                   <TableCell className={getColumnClassName(invoiceColumns[3])}>{new Date(invoice.dueDate).toLocaleDateString()}</TableCell>
                   <TableCell className={`${getColumnClassName(invoiceColumns[4])} font-mono`} data-testid={`text-amount-${invoice.id}`}>

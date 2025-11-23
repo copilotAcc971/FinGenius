@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Search, MoreHorizontal, Edit, Trash2, Users } from "lucide-react";
+import { useLocation } from "wouter";
+import { Plus, Search, MoreHorizontal, Edit, Trash2, Users, FileText } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -35,6 +36,7 @@ export default function Customers() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [, navigate] = useLocation();
   const { currentTenant } = useTenant();
   const { toast } = useToast();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -56,6 +58,16 @@ export default function Customers() {
     queryKey: ["/api/customers", { tenantId: currentTenant?.id }],
     enabled: !!currentTenant?.id,
   });
+
+  // Fetch invoices to show invoice count per customer
+  const { data: invoices = [] } = useQuery<any[]>({
+    queryKey: ["/api/invoices", { tenantId: currentTenant?.id }],
+    enabled: !!currentTenant?.id,
+  });
+
+  const getInvoiceCount = (customerId: string) => {
+    return invoices.filter(inv => inv.customerId === customerId).length;
+  };
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -163,6 +175,7 @@ export default function Customers() {
                 <TableHead className={getColumnClassName(customerColumns[1])}>Email</TableHead>
                 <TableHead className={getColumnClassName(customerColumns[2])}>Phone</TableHead>
                 <TableHead className={getColumnClassName(customerColumns[3])}>Company</TableHead>
+                <TableHead className="w-24 text-center">Invoices</TableHead>
                 <TableHead className={getColumnClassName(customerColumns[4])}></TableHead>
               </TableRow>
             </TableHeader>
@@ -171,13 +184,31 @@ export default function Customers() {
                 <TableRow key={customer.id} data-testid={`row-customer-${customer.id}`} className={customer.isPending ? "opacity-60" : ""}>
                   <TableCell className={`${getColumnClassName(customerColumns[0])} font-medium`}>
                     <div className="flex items-center gap-2">
-                      {customer.name}
+                      <button 
+                        onClick={() => navigate(`/income/invoices?customer=${customer.id}`)}
+                        className="text-primary hover:underline cursor-pointer"
+                        data-testid={`link-customer-invoices-${customer.id}`}
+                        aria-label={`View invoices for ${customer.name}`}
+                        title={`View ${customer.name}'s invoices`}
+                      >
+                        {customer.name}
+                      </button>
                       {customer.isPending && <PendingBadge />}
                     </div>
                   </TableCell>
                   <TableCell className={getColumnClassName(customerColumns[1])}>{customer.email || "-"}</TableCell>
                   <TableCell className={getColumnClassName(customerColumns[2])}>{customer.phone || "-"}</TableCell>
                   <TableCell className={getColumnClassName(customerColumns[3])}>{customer.company || "-"}</TableCell>
+                  <TableCell className="w-24 text-center">
+                    <button
+                      onClick={() => navigate(`/income/invoices?customer=${customer.id}`)}
+                      className="text-sm font-medium text-primary hover:underline"
+                      data-testid={`link-invoice-count-${customer.id}`}
+                      aria-label={`${getInvoiceCount(customer.id)} invoices`}
+                    >
+                      {getInvoiceCount(customer.id)}
+                    </button>
+                  </TableCell>
                   <TableCell className={getColumnClassName(customerColumns[4])}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

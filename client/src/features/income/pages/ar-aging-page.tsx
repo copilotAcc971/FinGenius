@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation, useSearch } from "wouter";
+import { useLocation as useWouterLocation, useSearch } from "wouter";
 import { FileText, Download, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -102,7 +102,7 @@ export default function ARAgingReport() {
   const { currentTenant } = useTenant();
   const { toast } = useToast();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const [location, navigate] = useLocation();
+  const [location, navigate] = useWouterLocation();
   const searchString = useSearch();
   
   // Parse query parameter for groupBy
@@ -422,7 +422,17 @@ export default function ARAgingReport() {
                     <TableBody>
                       {sortData(report.customers, sortColumn as keyof CustomerAgingRow).map((customer, idx) => (
                         <TableRow key={customer.customerId} data-testid={`row-customer-${idx}`}>
-                          <TableCell className="font-medium">{customer.customerName}</TableCell>
+                          <TableCell className="font-medium">
+                            <button
+                              onClick={() => navigate(`/income/customers?search=${customer.customerName}`)}
+                              className="text-primary hover:underline cursor-pointer"
+                              data-testid={`link-customer-aging-${customer.customerId}`}
+                              aria-label={`View customer ${customer.customerName}`}
+                              title={`View ${customer.customerName}'s details`}
+                            >
+                              {customer.customerName}
+                            </button>
+                          </TableCell>
                           <TableCell className="text-right font-mono">{formatCurrency(customer.current)}</TableCell>
                           <TableCell className="text-right font-mono">{formatCurrency(customer.days1to30)}</TableCell>
                           <TableCell className="text-right font-mono">{formatCurrency(customer.days31to60)}</TableCell>
@@ -489,15 +499,27 @@ export default function ARAgingReport() {
                         {paginatedInvoices.map((invoice, idx) => (
                           <TableRow key={invoice.invoiceId} data-testid={`row-invoice-${idx}`}>
                             <TableCell className="font-medium">
-                              <a 
-                                href={`/invoices?id=${invoice.invoiceId}`}
-                                className="text-primary hover:underline"
+                              <button
+                                onClick={() => navigate(`/income/invoices?id=${invoice.invoiceId}`)}
+                                className="text-primary hover:underline cursor-pointer"
                                 data-testid={`link-invoice-${invoice.invoiceId}`}
+                                aria-label={`View invoice ${invoice.invoiceNumber}`}
+                                title={`View invoice ${invoice.invoiceNumber}`}
                               >
                                 {invoice.invoiceNumber}
-                              </a>
+                              </button>
                             </TableCell>
-                            <TableCell>{invoice.customerName}</TableCell>
+                            <TableCell>
+                              <button
+                                onClick={() => navigate(`/income/customers?search=${invoice.customerName}`)}
+                                className="text-primary hover:underline cursor-pointer"
+                                data-testid={`link-customer-invoice-aging-${invoice.invoiceId}`}
+                                aria-label={`View customer ${invoice.customerName}`}
+                                title={`View ${invoice.customerName}'s details`}
+                              >
+                                {invoice.customerName}
+                              </button>
+                            </TableCell>
                             <TableCell>{new Date(invoice.invoiceDate).toLocaleDateString()}</TableCell>
                             <TableCell>{new Date(invoice.dueDate).toLocaleDateString()}</TableCell>
                             <TableCell className="text-right font-mono">

@@ -88,7 +88,7 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - All workflow methods include proper transaction handling and tenant isolation
 - Balance calculations and invoice status updates automated
 
-#### Phase 3B: Quick Create FAB (LATEST)
+#### Phase 3B: Quick Create FAB
 - Built floating action button (FAB) for rapid transaction creation
 - 8 quick-create options organized in 2 categories:
   - **Transactions**: Invoice, Payment, Credit Note, Expense, Bill, Journal Entry (6 actions)
@@ -98,6 +98,16 @@ The application employs a multi-tenant architecture with a "verified-tenant patt
 - Navigation routing integrated for seamless workflow
 - Dropdown triggers 45° icon rotation on open/close for visual feedback
 - Full test IDs for comprehensive automation testing
+
+#### Phase 3C: Cross-module Cross-references (LATEST)
+- Added bidirectional linking between Customers ↔ Invoices ↔ A/R Aging:
+  - **Customers page**: Shows invoice count per customer (clickable to view invoices)
+  - **Invoices page**: Customer names are now clickable (navigate to customer view)
+  - **A/R Aging page**: Both customer names and invoice numbers are clickable
+- Seamless navigation between related records across modules
+- Maintains context when navigating (pre-filters based on selected customer/invoice)
+- Full accessibility with aria-labels and semantic button elements
+- All cross-references have unique test IDs for automation testing
 
 #### Phase 11 & 12: Performance & Code Splitting ✅
 - Verified Performance Optimization remains operational
