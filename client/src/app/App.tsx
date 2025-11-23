@@ -5,7 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/shared/components/ui/toaster";
 import { TooltipProvider } from "@/shared/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/shared/components/ui/sidebar";
-import { AppSidebar } from "@/shared/components/layout/app-sidebar";
+import { AppSidebarHierarchical } from "@/components/layout/app-sidebar-hierarchical";
 import { OrganizationSwitcher } from "@/shared/components/layout/organization-switcher";
 import { UserMenu } from "@/shared/components/layout/user-menu";
 import { CommandPalette } from "@/shared/components/layout/command-palette";
@@ -325,7 +325,7 @@ function AppContent() {
                 role="navigation"
                 data-testid="nav-main-sidebar"
               >
-                <AppSidebar />
+                <AppSidebarHierarchical />
               </nav>
               
               <div className="flex flex-col flex-1 overflow-hidden">
