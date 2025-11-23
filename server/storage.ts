@@ -349,6 +349,7 @@ export interface IStorage {
   // Tenant operations
   getTenant(id: string): Promise<Tenant | undefined>;
   getTenantsByUserId(userId: string): Promise<Tenant[]>;
+  getUserTenantsWithRoles(userId: string): Promise<any[]>;
   getAllTenants(): Promise<Tenant[]>;
   createTenant(tenant: InsertTenant): Promise<Tenant>;
   updateTenant(id: string, userId: string, tenant: Partial<InsertTenant>): Promise<Tenant>;
@@ -1235,6 +1236,54 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tenants.ownerId, userId));
     
     return userTenants.map(t => t.tenant);
+  }
+
+  async getUserTenantsWithRoles(userId: string): Promise<any[]> {
+    const result = await db
+      .select({
+        tenant: tenants,
+        member: tenantMembers,
+        role: roles
+      })
+      .from(tenantMembers)
+      .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
+      .leftJoin(
+        tenantMemberRoles,
+        eq(tenantMembers.id, tenantMemberRoles.tenantMemberId)
+      )
+      .leftJoin(
+        roles,
+        and(
+          eq(roles.id, tenantMemberRoles.roleId),
+          eq(roles.tenantId, tenants.id)
+        )
+      )
+      .where(eq(tenantMembers.userId, userId));
+
+    // Group by tenant and collect roles
+    const tenantsMap = new Map<string, any>();
+    
+    for (const row of result) {
+      const tenantId = row.tenant.id;
+      if (!tenantsMap.has(tenantId)) {
+        tenantsMap.set(tenantId, {
+          ...row.tenant,
+          roles: []
+        });
+      }
+      
+      if (row.role) {
+        const tenant = tenantsMap.get(tenantId);
+        if (!tenant.roles.find((r: any) => r.id === row.role!.id)) {
+          tenant.roles.push({
+            id: row.role.id,
+            name: row.role.name
+          });
+        }
+      }
+    }
+    
+    return Array.from(tenantsMap.values());
   }
 
   async getAllTenants(): Promise<Tenant[]> {
@@ -11755,6 +11804,16 @@ export class MemStorage implements IStorage {
 
   async getTenantsByUserId(userId: string): Promise<Tenant[]> {
     return this.tenants.filter(t => t.ownerId === userId);
+  }
+
+  async getUserTenantsWithRoles(userId: string): Promise<any[]> {
+    // For MemStorage, simplified implementation - return tenants owned by user
+    // In a real app, this would need to track tenantMembers and roles
+    const userTenants = this.tenants.filter(t => t.ownerId === userId);
+    return userTenants.map(tenant => ({
+      ...tenant,
+      roles: [{ id: 'owner-role', name: 'Owner' }] // Simplified for MemStorage
+    }));
   }
 
   async getAllTenants(): Promise<Tenant[]> {

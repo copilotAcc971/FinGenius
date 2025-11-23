@@ -441,6 +441,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Dedicated endpoint for user tenant selection with role information
+  app.get('/api/auth/user-tenants', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const tenants = await storage.getUserTenantsWithRoles(userId);
+      res.json(tenants);
+    } catch (error) {
+      console.error("Error fetching user tenants with roles:", error);
+      res.status(500).json({ message: "Failed to fetch user tenants" });
+    }
+  });
+
   app.post('/api/tenants', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;

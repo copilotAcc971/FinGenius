@@ -1,9 +1,9 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { SidebarProvider, SidebarTrigger } from "@/shared/components/ui/sidebar";
 import { PageSkeleton } from "@/shared/components/layout/page-skeleton";
 import { useAuth } from "@/shared/hooks/useAuth";
-import { TenantProvider } from "@/shared/contexts/TenantContext";
+import { useTenant, TenantProvider } from "@/shared/contexts/TenantContext";
 import { RBACProvider } from "@/shared/contexts/rbac-context";
 import { Toaster } from "@/shared/components/ui/toaster";
 
@@ -73,6 +73,17 @@ const Dashboard = lazy(() => import("@/features/dashboard/pages/dashboard-page")
   default: MinimalDashboard
 })));
 
+const TenantSelect = lazy(() => import("@/features/auth/pages/tenant-select").catch(() => ({
+  default: () => (
+    <div className="flex h-screen items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-2xl font-bold mb-4">Select Organization</h1>
+        <p className="mb-4">Loading organizations...</p>
+      </div>
+    </div>
+  )
+})));
+
 const Landing = lazy(() => import("@/features/auth/pages/landing-page").catch(() => ({
   default: () => (
     <div className="flex h-screen items-center justify-center">
@@ -107,7 +118,9 @@ const MinimalSidebar = () => (
 
 function ProtectedLayout() {
   const { isAuthenticated, loading: authLoading } = useAuth();
+  const { currentTenant } = useTenant();
   const [mounted, setMounted] = useState(false);
+  const [, location] = useLocation();
 
   useEffect(() => {
     setMounted(true);
@@ -125,6 +138,27 @@ function ProtectedLayout() {
     return (
       <Suspense fallback={<Loading />}>
         <Landing />
+      </Suspense>
+    );
+  }
+
+  // Allow access to tenant-select page without a tenant
+  const isTenantSelectPage = location === "/tenant-select";
+  
+  // If authenticated but no tenant selected and not on tenant-select page, redirect there
+  if (!currentTenant && !isTenantSelectPage) {
+    return (
+      <Suspense fallback={<Loading />}>
+        <TenantSelect />
+      </Suspense>
+    );
+  }
+
+  // For tenant-select page, render without the sidebar layout
+  if (isTenantSelectPage) {
+    return (
+      <Suspense fallback={<Loading />}>
+        <TenantSelect />
       </Suspense>
     );
   }
@@ -160,6 +194,7 @@ function ProtectedLayout() {
             <Suspense fallback={<Loading />}>
               <Switch>
                 <Route path="/" component={Dashboard} />
+                <Route path="/tenant-select" component={TenantSelect} />
                 <Route component={MinimalDashboard} />
               </Switch>
             </Suspense>
