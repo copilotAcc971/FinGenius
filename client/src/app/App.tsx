@@ -46,11 +46,37 @@ const TrialBalancePage = lazy(() => import("@/pages/reports/trial-balance-page")
 // Auth Pages
 const Landing = lazy(() => import("@/features/auth/pages/landing-page"));
 
-// Accounts Pages
-const Accounts = lazy(() => import("@/features/accounts/pages/accounts-page"));
-const AccountBalances = lazy(() => import("@/features/accounts/pages/account-balances-page"));
-const JournalEntries = lazy(() => import("@/features/accounts/pages/journal-entries-page"));
-const JournalEntryDetailPage = lazy(() => import("@/features/accounts/pages/journal-entry-detail-page"));
+// Accounting Pages (formerly Accounts, Assets, Items, Inventory)
+const Accounts = lazy(() => import("@/features/accounting/pages/accounts-page"));
+const AccountBalances = lazy(() => import("@/features/accounting/pages/account-balances-page"));
+const JournalEntries = lazy(() => import("@/features/accounting/pages/journal-entries-page"));
+const JournalEntryDetailPage = lazy(() => import("@/features/accounting/pages/journal-entry-detail-page"));
+const Assets = lazy(() => import("@/features/accounting/pages/assets-page"));
+const FixedAssets = lazy(() => import("@/features/accounting/pages/fixed-assets-page"));
+const InventoryReportsPage = lazy(() => import("@/features/accounting/pages/inventory-reports-page"));
+const ItemFormPage = lazy(() => import("@/features/accounting/pages/item-form-page"));
+const Items = lazy(() => import("@/features/accounting/pages/items-page"));
+const StockAdjustmentsPage = lazy(() => import("@/features/accounting/pages/stock-adjustments-page"));
+const NrvAssessmentPage = lazy(() => import("@/features/accounting/pages/nrv-assessment-page"));
+
+// Income Pages (formerly Invoices, Customers, Quotes, Sales Orders, Credit Notes)
+const InvoicesPage = lazy(() => import("@/features/income/pages/invoices-page"));
+const RecurringInvoicesPage = lazy(() => import("@/features/income/pages/recurring-invoices-page"));
+const RetainerInvoicesPage = lazy(() => import("@/features/income/pages/retainer-invoices-page"));
+const Customers = lazy(() => import("@/features/income/pages/customers-page"));
+const ARAgingPage = lazy(() => import("@/features/income/pages/ar-aging-page"));
+const QuotesPage = lazy(() => import("@/features/income/pages/quotes-page"));
+const SalesOrdersPage = lazy(() => import("@/features/income/pages/sales-orders-page"));
+const CreditNotesPage = lazy(() => import("@/features/income/pages/credit-notes-page"));
+
+// Expenses Pages (formerly Bills, Vendors, Purchase Orders)
+const BillsPage = lazy(() => import("@/features/expenses/pages/bills-page"));
+const Vendors = lazy(() => import("@/features/expenses/pages/vendors-page"));
+const APAgingPage = lazy(() => import("@/features/expenses/pages/ap-aging-page"));
+const PurchaseOrdersPage = lazy(() => import("@/features/expenses/pages/purchase-orders-page"));
+const EmployeeExpenses = lazy(() => import("@/features/expenses/pages/employee-expenses-page"));
+const ExpensesPage = lazy(() => import("@/features/expenses/pages/expenses-page"));
+const ConsolidatedPurchases = lazy(() => import("@/features/expenses/pages/consolidated-purchases-page"));
 
 // Approvals Pages
 const ConsolidatedApprovals = lazy(() => import("@/features/approvals/pages/consolidated-approvals-page"));
@@ -58,17 +84,10 @@ const PendingApprovalsPage = lazy(() => import("@/features/approvals/pages/pendi
 const WorkflowForm = lazy(() => import("@/features/approvals/pages/workflow-form-page"));
 const WorkflowsPage = lazy(() => import("@/features/approvals/pages/workflows-page"));
 
-// Assets Pages
-const Assets = lazy(() => import("@/features/assets/pages/assets-page"));
-const FixedAssets = lazy(() => import("@/features/assets/pages/fixed-assets-page"));
-
 // Banking Pages
 const BankConnectionsPage = lazy(() => import("@/features/banking/pages/bank-connections-page"));
 const BankReconciliationsPage = lazy(() => import("@/features/banking/pages/bank-reconciliations-page"));
 const ConsolidatedBanking = lazy(() => import("@/features/banking/pages/consolidated-banking-page"));
-
-// Bills Pages
-const BillsPage = lazy(() => import("@/features/bills/pages/bills-page"));
 
 // Compliance Pages
 const AlertRulesPage = lazy(() => import("@/features/compliance/pages/alert-rules-page"));
@@ -78,36 +97,11 @@ const SanctionsScreeningPage = lazy(() => import("@/features/compliance/pages/sa
 const SARReportsPage = lazy(() => import("@/features/compliance/pages/sar-reports-page"));
 const TransactionAlertsPage = lazy(() => import("@/features/compliance/pages/transaction-alerts-page"));
 
-// Credit Notes Pages
-const CreditNotesPage = lazy(() => import("@/features/credit-notes/pages/credit-notes-page"));
-
-// Customers Pages
-const ARAgingPage = lazy(() => import("@/features/customers/pages/ar-aging-page"));
-const Customers = lazy(() => import("@/features/customers/pages/customers-page"));
-
 // Dashboard Pages
 const Dashboard = lazy(() => import("@/features/dashboard/pages/dashboard-page"));
 
 // Documents Pages
 const Documents = lazy(() => import("@/features/documents/pages/documents-page"));
-
-// Expenses Pages
-const EmployeeExpenses = lazy(() => import("@/features/expenses/pages/employee-expenses-page"));
-const ExpensesPage = lazy(() => import("@/features/expenses/pages/expenses-page"));
-
-// Inventory Pages
-const NrvAssessmentPage = lazy(() => import("@/features/inventory/pages/nrv-assessment-page"));
-
-// Invoices Pages
-const InvoicesPage = lazy(() => import("@/features/invoices/pages/invoices-page"));
-const RecurringInvoicesPage = lazy(() => import("@/features/invoices/pages/recurring-invoices-page"));
-const RetainerInvoicesPage = lazy(() => import("@/features/invoices/pages/retainer-invoices-page"));
-
-// Items Pages
-const InventoryReportsPage = lazy(() => import("@/features/items/pages/inventory-reports-page"));
-const ItemFormPage = lazy(() => import("@/features/items/pages/item-form-page"));
-const Items = lazy(() => import("@/features/items/pages/items-page"));
-const StockAdjustmentsPage = lazy(() => import("@/features/items/pages/stock-adjustments-page"));
 
 // Payments Pages
 const ConsolidatedPayments = lazy(() => import("@/features/payments/pages/consolidated-payments-page"));
@@ -120,15 +114,6 @@ const ProjectDetail = lazy(() => import("@/features/projects/pages/project-detai
 const ProjectsPage = lazy(() => import("@/features/projects/pages/projects-page"));
 const TimesheetsPage = lazy(() => import("@/features/projects/pages/timesheets-page"));
 const TimeTrackingPage = lazy(() => import("@/features/projects/pages/time-tracking-page"));
-
-// Purchase Orders Pages
-const PurchaseOrdersPage = lazy(() => import("@/features/purchase-orders/pages/purchase-orders-page"));
-
-// Purchases Pages
-const ConsolidatedPurchases = lazy(() => import("@/features/purchases/pages/consolidated-purchases-page"));
-
-// Quotes Pages
-const QuotesPage = lazy(() => import("@/features/quotes/pages/quotes-page"));
 
 // Reports Pages
 const ChartOfAccountsReportPage = lazy(() => import("@/features/reports/pages/chart-of-accounts-report-page"));
@@ -144,9 +129,6 @@ const ScheduledReportsPage = lazy(() => import("@/features/reports/pages/schedul
 // Sales Pages
 const ConsolidatedSales = lazy(() => import("@/features/sales/pages/consolidated-sales-page"));
 
-// Sales Orders Pages
-const SalesOrdersPage = lazy(() => import("@/features/sales-orders/pages/sales-orders-page"));
-
 // Settings Pages
 const CompanyProfile = lazy(() => import("@/features/settings/pages/company-profile-page"));
 const CurrenciesPage = lazy(() => import("@/features/settings/pages/currencies-page"));
@@ -156,10 +138,6 @@ const UserManagement = lazy(() => import("@/features/settings/pages/user-managem
 
 // Taxes Pages
 const Taxes = lazy(() => import("@/features/taxes/pages/taxes-page"));
-
-// Vendors Pages
-const APAgingPage = lazy(() => import("@/features/vendors/pages/ap-aging-page"));
-const Vendors = lazy(() => import("@/features/vendors/pages/vendors-page"));
 
 // Helper component to wrap routes with Suspense
 interface RouteProps {
@@ -191,31 +169,40 @@ function Router() {
           {/* Dashboard & Core Pages */}
           <SuspenseRoute path="/" component={Dashboard} />
           
-          {/* Customers */}
-          <SuspenseRoute path="/customers" component={Customers} />
-          <SuspenseRoute path="/customers/ar-aging" component={ARAgingPage} />
+          {/* Income Section */}
+          <SuspenseRoute path="/income/invoices" component={InvoicesPage} />
+          <SuspenseRoute path="/income/recurring-invoices" component={RecurringInvoicesPage} />
+          <SuspenseRoute path="/income/retainer-invoices" component={RetainerInvoicesPage} />
+          <SuspenseRoute path="/income/customers" component={Customers} />
+          <SuspenseRoute path="/income/ar-aging" component={ARAgingPage} />
+          <SuspenseRoute path="/income/quotes" component={QuotesPage} />
+          <SuspenseRoute path="/income/sales-orders" component={SalesOrdersPage} />
+          <SuspenseRoute path="/income/credit-notes" component={CreditNotesPage} />
           
-          {/* Vendors */}
-          <SuspenseRoute path="/vendors" component={Vendors} />
-          <SuspenseRoute path="/vendors/ap-aging" component={APAgingPage} />
+          {/* Expenses Section */}
+          <SuspenseRoute path="/expenses/bills" component={BillsPage} />
+          <SuspenseRoute path="/expenses/vendors" component={Vendors} />
+          <SuspenseRoute path="/expenses/ap-aging" component={APAgingPage} />
+          <SuspenseRoute path="/expenses/purchase-orders" component={PurchaseOrdersPage} />
+          <SuspenseRoute path="/expenses/employee-expenses" component={EmployeeExpenses} />
+          <SuspenseRoute path="/expenses/expenses" component={ExpensesPage} />
+          <SuspenseRoute path="/expenses/purchases" component={ConsolidatedPurchases} />
           
-          {/* Inventory & Items */}
-          <SuspenseRoute path="/items" component={Items} />
-          <SuspenseRoute path="/inventory/items" component={Items} />
-          <SuspenseRoute path="/inventory/items/new" component={ItemFormPage} />
-          <SuspenseRoute path="/inventory/items/:id/edit" component={ItemFormPage} />
-          <SuspenseRoute path="/inventory/adjustments" component={StockAdjustmentsPage} />
-          <SuspenseRoute path="/inventory/reports" component={InventoryReportsPage} />
-          <SuspenseRoute path="/inventory/nrv-assessments" component={NrvAssessmentPage} />
+          {/* Accounting Section */}
+          <SuspenseRoute path="/accounting/accounts" component={Accounts} />
+          <SuspenseRoute path="/accounting/account-balances" component={AccountBalances} />
+          <SuspenseRoute path="/accounting/journal-entries" component={JournalEntries} />
+          <SuspenseRoute path="/accounting/journal-entries/:id" component={JournalEntryDetailPage} />
+          <SuspenseRoute path="/accounting/fixed-assets" component={FixedAssets} />
+          <SuspenseRoute path="/accounting/items" component={Items} />
+          <SuspenseRoute path="/accounting/items/new" component={ItemFormPage} />
+          <SuspenseRoute path="/accounting/items/:id/edit" component={ItemFormPage} />
+          <SuspenseRoute path="/accounting/stock-adjustments" component={StockAdjustmentsPage} />
+          <SuspenseRoute path="/accounting/inventory-reports" component={InventoryReportsPage} />
+          <SuspenseRoute path="/accounting/nrv-assessment" component={NrvAssessmentPage} />
           
           {/* Taxes */}
           <SuspenseRoute path="/taxes" component={Taxes} />
-          
-          {/* Accounts & Journals */}
-          <SuspenseRoute path="/accounts" component={Accounts} />
-          <SuspenseRoute path="/account-balances" component={AccountBalances} />
-          <SuspenseRoute path="/journal-entries" component={JournalEntries} />
-          <SuspenseRoute path="/journal-entries/:id" component={JournalEntryDetailPage} />
           
           {/* Approvals & Workflows */}
           <SuspenseRoute path="/approvals" component={ConsolidatedApprovals} />
@@ -223,46 +210,18 @@ function Router() {
           <SuspenseRoute path="/workflows" component={WorkflowsPage} />
           <SuspenseRoute path="/workflows/:id" component={WorkflowForm} />
           
-          {/* Assets */}
-          <SuspenseRoute path="/assets" component={Assets} />
-          <SuspenseRoute path="/fixed-assets" component={FixedAssets} />
-          
           {/* Banking */}
           <SuspenseRoute path="/banking" component={ConsolidatedBanking} />
           <SuspenseRoute path="/banking/connections" component={BankConnectionsPage} />
           <SuspenseRoute path="/banking/reconciliations" component={BankReconciliationsPage} />
           
-          {/* Invoices */}
-          <SuspenseRoute path="/invoices" component={InvoicesPage} />
-          <SuspenseRoute path="/invoices/recurring" component={RecurringInvoicesPage} />
-          <SuspenseRoute path="/invoices/retainer" component={RetainerInvoicesPage} />
-          
-          {/* Bills */}
-          <SuspenseRoute path="/bills" component={BillsPage} />
-          
-          {/* Credit Notes */}
-          <SuspenseRoute path="/credit-notes" component={CreditNotesPage} />
-          
-          {/* Quotes */}
-          <SuspenseRoute path="/quotes" component={QuotesPage} />
-          
-          {/* Purchase Orders */}
-          <SuspenseRoute path="/purchase-orders" component={PurchaseOrdersPage} />
-          
           {/* Sales */}
           <SuspenseRoute path="/sales" component={ConsolidatedSales} />
-          
-          {/* Purchases */}
-          <SuspenseRoute path="/purchases" component={ConsolidatedPurchases} />
           
           {/* Payments */}
           <SuspenseRoute path="/payments" component={PaymentsPage} />
           <SuspenseRoute path="/payments/consolidated" component={ConsolidatedPayments} />
           <SuspenseRoute path="/payments/customer" component={CustomerPaymentsPage} />
-          
-          {/* Expenses */}
-          <SuspenseRoute path="/expenses" component={ExpensesPage} />
-          <SuspenseRoute path="/employee-expenses" component={EmployeeExpenses} />
           
           {/* Projects */}
           <SuspenseRoute path="/projects" component={ProjectsPage} />
