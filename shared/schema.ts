@@ -7017,44 +7017,6 @@ export const insertInventoryCostHistorySchema = createInsertSchema(inventoryCost
 export type InsertInventoryCostHistory = z.infer<typeof insertInventoryCostHistorySchema>;
 export type InventoryCostHistory = typeof inventoryCostHistory.$inferSelect;
 
-// Stock Movements table (if not already exists)
-export const stockMovements = pgTable("stock_movements", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
-  itemId: varchar("item_id").notNull().references(() => items.id),
-  movementDate: timestamp("movement_date").notNull(),
-  movementType: varchar("movement_type", { length: 50 }).notNull(), // 'in', 'out', 'adjustment'
-  quantity: decimal("quantity", { precision: 20, scale: 4 }).notNull(),
-  unitCost: decimal("unit_cost", { precision: 20, scale: 4 }),
-  totalCost: decimal("total_cost", { precision: 20, scale: 4 }),
-  referenceType: varchar("reference_type", { length: 50 }), // 'invoice', 'purchase_order', 'adjustment'
-  referenceId: varchar("reference_id"),
-  costingMethod: varchar("costing_method", { length: 50 }), // 'FIFO', 'weighted_average'
-  costLayersUsed: jsonb("cost_layers_used"), // For FIFO: array of {layerId, quantity, unitCost}
-  notes: text("notes"),
-  createdBy: varchar("created_by").references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [
-  index("stock_movements_tenant_idx").on(table.tenantId),
-  index("stock_movements_item_idx").on(table.itemId),
-  index("stock_movements_date_idx").on(table.movementDate),
-  index("stock_movements_type_idx").on(table.movementType),
-]);
-
-export const insertStockMovementSchema = createInsertSchema(stockMovements, {
-  quantity: decimalString,
-  unitCost: decimalString.optional(),
-  totalCost: decimalString.optional(),
-}).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
-export type StockMovement = typeof stockMovements.$inferSelect;
-
 // Relations for inventory costing tables
 export const inventoryCostLayersRelations = relations(inventoryCostLayers, ({ one }) => ({
   tenant: one(tenants, {
@@ -7075,20 +7037,5 @@ export const inventoryCostHistoryRelations = relations(inventoryCostHistory, ({ 
   item: one(items, {
     fields: [inventoryCostHistory.itemId],
     references: [items.id],
-  }),
-}));
-
-export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [stockMovements.tenantId],
-    references: [tenants.id],
-  }),
-  item: one(items, {
-    fields: [stockMovements.itemId],
-    references: [items.id],
-  }),
-  createdByUser: one(users, {
-    fields: [stockMovements.createdBy],
-    references: [users.id],
   }),
 }));
