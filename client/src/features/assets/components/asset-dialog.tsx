@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { insertAssetSchema, type Asset, type Account } from "@shared/schema";
+import { insertFixedAssetSchema, type FixedAsset, type Account } from "@shared/schema";
 import { z } from "zod";
 import { Button } from "@/shared/components/ui/button";
 import {
@@ -37,12 +37,12 @@ import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import { useTenant } from "@/shared/hooks/useTenant";
 
-const formSchema = insertAssetSchema.omit({ tenantId: true, accumulatedDepreciation: true });
+const formSchema = insertFixedAssetSchema.omit({ tenantId: true, accumulatedDepreciation: true });
 
 interface AssetDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  asset: Asset | null;
+  asset: FixedAsset | null;
 }
 
 export function AssetDialog({ open, onOpenChange, asset }: AssetDialogProps) {

@@ -59,6 +59,9 @@ import {
   projectInvoiceMilestones,
   projectCostAccounts,
   auditLogs,
+  dashboards,
+  dashboardWidgets,
+  dashboardPresets,
   type User,
   type UpsertUser,
   type Tenant,
@@ -292,6 +295,15 @@ import {
   openingStock,
   type OpeningStock,
   type InsertOpeningStock,
+  dashboards,
+  type Dashboard,
+  type InsertDashboard,
+  dashboardWidgets,
+  type DashboardWidget,
+  type InsertDashboardWidget,
+  dashboardPresets,
+  type DashboardPreset,
+  type InsertDashboardPreset,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, isNull, sum, gte, lte, sql, asc, or, lt } from "drizzle-orm";

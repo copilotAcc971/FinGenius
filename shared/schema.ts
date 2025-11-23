@@ -67,6 +67,27 @@ export const IFRS18_CATEGORY = ['operating_income', 'operating_expense', 'invest
 // RAG Document Type Enum
 export const DOCUMENT_TYPE = ['invoice', 'bill', 'journal_entry', 'memo', 'customer', 'vendor', 'account', 'other'] as const;
 
+// Dashboard Widget Type Enum
+export const DASHBOARD_WIDGET_TYPE = [
+  'cash_position',
+  'ar_aging',
+  'ap_aging',
+  'revenue_trend',
+  'expense_trend',
+  'profit_loss_snapshot',
+  'balance_sheet_snapshot',
+  'cash_flow_forecast',
+  'top_customers',
+  'top_vendors',
+  'recent_invoices',
+  'recent_bills',
+  'pending_approvals',
+  'bank_accounts',
+  'key_metrics'
+] as const;
+
+export const DASHBOARD_WIDGET_SIZE = ['small', 'medium', 'large'] as const;
+
 // Push Notification Type Enum
 export const PUSH_NOTIFICATION_TYPE = ['overdue_invoice', 'payment_received', 'approval_request', 'compliance_deadline', 'general'] as const;
 
@@ -7037,5 +7058,108 @@ export const inventoryCostHistoryRelations = relations(inventoryCostHistory, ({ 
   item: one(items, {
     fields: [inventoryCostHistory.itemId],
     references: [items.id],
+  }),
+}));
+
+// ====================================
+// DASHBOARD CUSTOMIZATION TABLES
+// ====================================
+
+// Dashboards table - stores user-created dashboards
+export const dashboards = pgTable("dashboards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  isDefault: boolean("is_default").default(false),
+  layout: varchar("layout", { length: 50 }).default('grid'), // 'grid', '2-column', '3-column'
+  isPublic: boolean("is_public").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("dashboards_tenant_idx").on(table.tenantId),
+  index("dashboards_user_idx").on(table.userId),
+  index("dashboards_default_idx").on(table.isDefault),
+]);
+
+export const insertDashboardSchema = createInsertSchema(dashboards).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertDashboard = z.infer<typeof insertDashboardSchema>;
+export type Dashboard = typeof dashboards.$inferSelect;
+
+// Dashboard Widgets table - stores widgets on dashboards
+export const dashboardWidgets = pgTable("dashboard_widgets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  dashboardId: varchar("dashboard_id").notNull().references(() => dashboards.id),
+  widgetType: varchar("widget_type", { length: 50 }).notNull(), // From DASHBOARD_WIDGET_TYPE
+  title: varchar("title", { length: 255 }),
+  size: varchar("size", { length: 20 }).default('medium'), // 'small', 'medium', 'large'
+  position: integer("position").notNull(), // 0-based index for ordering
+  config: jsonb("config"), // Widget-specific configuration
+  refreshInterval: integer("refresh_interval").default(300), // seconds, 0 = manual refresh
+  isVisible: boolean("is_visible").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("dashboard_widgets_dashboard_idx").on(table.dashboardId),
+  index("dashboard_widgets_tenant_idx").on(table.tenantId),
+  index("dashboard_widgets_type_idx").on(table.widgetType),
+]);
+
+export const insertDashboardWidgetSchema = createInsertSchema(dashboardWidgets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertDashboardWidget = z.infer<typeof insertDashboardWidgetSchema>;
+export type DashboardWidget = typeof dashboardWidgets.$inferSelect;
+
+// Dashboard Widget Presets - predefined widget collections for quick setup
+export const dashboardPresets = pgTable("dashboard_presets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 50 }).notNull(), // 'executive', 'accounting', 'operations', 'sales'
+  widgets: jsonb("widgets").notNull(), // Array of {widgetType, title, size, config}
+  isDefault: boolean("is_default").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertDashboardPresetSchema = createInsertSchema(dashboardPresets).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertDashboardPreset = z.infer<typeof insertDashboardPresetSchema>;
+export type DashboardPreset = typeof dashboardPresets.$inferSelect;
+
+// Dashboard Relations
+export const dashboardsRelations = relations(dashboards, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [dashboards.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [dashboards.userId],
+    references: [users.id],
+  }),
+  widgets: many(dashboardWidgets),
+}));
+
+export const dashboardWidgetsRelations = relations(dashboardWidgets, ({ one }) => ({
+  dashboard: one(dashboards, {
+    fields: [dashboardWidgets.dashboardId],
+    references: [dashboards.id],
+  }),
+  tenant: one(tenants, {
+    fields: [dashboardWidgets.tenantId],
+    references: [tenants.id],
   }),
 }));

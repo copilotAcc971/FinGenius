@@ -99,6 +99,7 @@ const TransactionAlertsPage = lazy(() => import("@/features/compliance/pages/tra
 
 // Dashboard Pages
 const Dashboard = lazy(() => import("@/features/dashboard/pages/dashboard-page"));
+const CustomizableDashboard = lazy(() => import("@/features/dashboard/pages/customizable-dashboard-page"));
 
 // Documents Pages
 const Documents = lazy(() => import("@/features/documents/pages/documents-page"));
@@ -167,7 +168,7 @@ function Router() {
       ) : (
         <>
           {/* Dashboard & Core Pages */}
-          <SuspenseRoute path="/" component={Dashboard} />
+          <SuspenseRoute path="/" component={CustomizableDashboard} />
           
           {/* Income Section */}
           <SuspenseRoute path="/income/invoices" component={InvoicesPage} />

@@ -14186,6 +14186,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ====== DASHBOARD API ROUTES ======
+  // Get default dashboard with widgets
+  app.get('/api/dashboards/default', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId;
+      const userId = req.user?.id;
+      
+      // Return mock dashboard with default widgets for now
+      res.json({
+        id: `dashboard-${tenantId}`,
+        name: 'Default Dashboard',
+        widgets: [
+          { id: 'w1', widgetType: 'cash_position', title: 'Cash Position', position: 0, data: { total: 125000, operating: 100000, reserved: 25000 } },
+          { id: 'w2', widgetType: 'ar_aging', title: 'A/R Aging', position: 1, data: { current: 50000, days30: 15000, days60: 8000, days90: 2000 } },
+          { id: 'w3', widgetType: 'ap_aging', title: 'A/P Aging', position: 2, data: { due: 35000, overdue: 5000, upcoming: 12000 } },
+          { id: 'w4', widgetType: 'revenue_trend', title: 'Revenue Trend', position: 3, data: { thisMonth: 250000, lastMonth: 220000, trend: 13.6 } },
+          { id: 'w5', widgetType: 'expense_trend', title: 'Expense Trend', position: 4, data: { thisMonth: 120000, budget: 150000, trend: -8.2 } },
+          { id: 'w6', widgetType: 'profit_loss_snapshot', title: 'P&L Snapshot', position: 5, data: { revenue: 250000, expenses: 120000, netIncome: 130000 } },
+          { id: 'w7', widgetType: 'pending_approvals', title: 'Pending Approvals', position: 6, data: { journalEntries: 3, payments: 2, expenseClaims: 1 } },
+          { id: 'w8', widgetType: 'key_metrics', title: 'Key Metrics', position: 7, data: { grossMargin: 52, quickRatio: 1.8, dso: 28, dpo: 35 } },
+        ]
+      });
+    } catch (error: any) {
+      console.error('[Dashboard] Error fetching dashboard:', error);
+      res.status(500).json({ message: error.message || 'Failed to fetch dashboard' });
+    }
+  });
+
+  // Update dashboard widgets
+  app.patch('/api/dashboards/default', isAuthenticated, verifyTenantAccess, async (req: any, res) => {
+    try {
+      const { widgets } = req.body;
+      const tenantId = req.tenantId;
+      
+      // Stub: save widgets (in production, would save to database)
+      console.log('[Dashboard] Dashboard updated with widgets:', widgets);
+      
+      res.json({
+        message: 'Dashboard updated successfully',
+        widgetCount: widgets?.length || 0
+      });
+    } catch (error: any) {
+      console.error('[Dashboard] Error updating dashboard:', error);
+      res.status(500).json({ message: error.message || 'Failed to update dashboard' });
+    }
+  });
+
   // ====== LEAN WEBHOOK HANDLER ======
   // Receives payment execution events and transaction updates from Lean Technologies
   // Verify webhook signature with LEAN_WEBHOOK_SECRET
