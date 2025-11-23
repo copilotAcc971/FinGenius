@@ -4,12 +4,12 @@ import { useAuth } from "@/shared/hooks/useAuth";
 import { useQueryTabState } from "@/shared/hooks/useQueryTabState";
 
 // Import existing sales page components
-import Invoices from "@/features/invoices/pages/invoices-page";
-import Quotes from "@/features/quotes/pages/quotes-page";
-import SalesOrders from "@/features/sales-orders/pages/sales-orders-page";
-import CreditNotes from "@/features/credit-notes/pages/credit-notes-page";
-import RecurringInvoices from "@/features/invoices/pages/recurring-invoices-page";
-import RetainerInvoices from "@/features/invoices/pages/retainer-invoices-page";
+import Invoices from "@/features/income/pages/invoices-page";
+import Quotes from "@/features/income/pages/quotes-page";
+import SalesOrders from "@/features/income/pages/sales-orders-page";
+import CreditNotes from "@/features/income/pages/credit-notes-page";
+import RecurringInvoices from "@/features/income/pages/recurring-invoices-page";
+import RetainerInvoices from "@/features/income/pages/retainer-invoices-page";
 
 export default function ConsolidatedSales() {
   const { currentTenant } = useTenant();

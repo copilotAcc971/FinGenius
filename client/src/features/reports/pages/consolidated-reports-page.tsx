@@ -6,8 +6,8 @@ import { useQueryTabState } from "@/shared/hooks/useQueryTabState";
 // Import existing report page components
 import FinancialReports from "@/features/reports/pages/financial-reports-page";
 import ChartOfAccountsReport from "@/features/reports/pages/chart-of-accounts-report-page";
-import ARAgingReport from "@/features/customers/pages/ar-aging-page";
-import APAgingReport from "@/features/vendors/pages/ap-aging-page";
+import ARAgingReport from "@/features/income/pages/ar-aging-page";
+import APAgingReport from "@/features/expenses/pages/ap-aging-page";
 import CustomReportBuilder from "@/features/reports/pages/custom-report-builder-page";
 import ScheduledReportsPage from "@/features/reports/pages/scheduled-reports-page";
 
