@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { handleHealthCheck, handleReadinessCheck, handleLivenessCheck } from "./middleware/health-routes";
 import Stripe from "stripe";
 import OpenAI from "openai";
 import { z } from "zod";
@@ -14345,6 +14346,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'Webhook processing failed' });
     }
   });
+
+  // ====== HEALTH CHECK ENDPOINTS (Deployment Ready) ======
+  // These endpoints are used by load balancers, orchestrators, and monitoring systems
+  
+  // GET /live - Liveness check (process is running)
+  app.get('/live', handleLivenessCheck);
+  
+  // GET /ready - Readiness check (ready to receive traffic)
+  app.get('/ready', handleReadinessCheck);
+  
+  // GET /health - Comprehensive health status
+  app.get('/health', handleHealthCheck);
 
   const httpServer = createServer(app);
   return httpServer;
