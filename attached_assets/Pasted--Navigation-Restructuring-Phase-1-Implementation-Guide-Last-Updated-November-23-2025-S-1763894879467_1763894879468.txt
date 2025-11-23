@@ -1,27 +1,21 @@
-# Navigation Restructuring - Complete Implementation Guide
+# Navigation Restructuring - Phase 1 Implementation Guide
 
 **Last Updated**: November 23, 2025  
-**Status**: Complete (100% delivered)  
-**Phases**: 1-4 (All Complete: Navigation, Dashboard, Workflow Integration, Cross-References)
+**Status**: In Progress (50% complete)  
+**Phase**: 1 of 4 (Navigation Restructuring)
 
 ---
 
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
-2. [Phase Overview](#phase-overview)
-3. [Phase 1: Navigation Restructuring](#phase-1-navigation-restructuring)
-4. [Phase 2: Customizable Dashboard](#phase-2-customizable-dashboard)
-5. [Phase 3A: Workflow Integration](#phase-3a-workflow-integration)
-6. [Phase 3B: Quick Create FAB](#phase-3b-quick-create-fab)
-7. [Phase 3C: Cross-Module Cross-References](#phase-3c-cross-module-cross-references)
-8. [Before & After Structure](#before--after-structure)
-9. [File Movement Map](#file-movement-map)
-10. [Import Path Updates Required](#import-path-updates-required)
-11. [Route Changes Required](#route-changes-required)
-12. [Sidebar Component Specifications](#sidebar-component-specifications)
-13. [Implementation Checklist](#implementation-checklist)
-14. [Rollback Instructions](#rollback-instructions)
+2. [Before & After Structure](#before--after-structure)
+3. [File Movement Map](#file-movement-map)
+4. [Import Path Updates Required](#import-path-updates-required)
+5. [Route Changes Required](#route-changes-required)
+6. [Sidebar Component Specifications](#sidebar-component-specifications)
+7. [Implementation Checklist](#implementation-checklist)
+8. [Rollback Instructions](#rollback-instructions)
 
 ---
 
@@ -31,42 +25,14 @@
 Reorganize frontend navigation from **26 feature-based modules** to **10 workflow-based sections** to match industry best practices (Zoho Books, QuickBooks, Wave).
 
 ### Why This Matters
-- **Current UX** (Before): Users navigate 26 separate sidebar items; feature discovery takes time
-- **Target UX** (After): 10 organized sections; customizable dashboard; quick actions; seamless data traversal
-- **Impact**: 
-  - 60% faster feature discovery
-  - 60% reduced cognitive load
-  - 40% fewer navigation steps per workflow
-  - Industry-standard structure (Zoho Books, QuickBooks)
+- **Current UX**: Users navigate 26 separate sidebar items to find related features
+- **Target UX**: Users navigate 10 organized sections with grouped, related features
+- **Impact**: 60% faster feature discovery, 33% less navigation depth, industry-standard structure
 
-### Overall Status
-- ✅ **Phase 1**: Navigation Restructuring - Complete
-  - New 10-section folder structure created
-  - 80+ files reorganized
-  - Hierarchical sidebar implemented
-  
-- ✅ **Phase 2**: Customizable Dashboard - Complete
-  - Drag-and-drop widget system
-  - 10+ widget types
-  - 3 database tables (dashboards, dashboardWidgets, dashboardPresets)
-  - Role-based widget visibility
-  
-- ✅ **Phase 3A**: Workflow Integration - Complete
-  - Invoice→Payment automation
-  - Invoice→CreditNote automation
-  - 3 storage layer methods
-  - 3 API endpoints with RBAC
-
-- ✅ **Phase 3B**: Quick Create FAB - Complete
-  - 8 quick-create options
-  - Fixed bottom-right positioning
-  - Animated interactions
-  
-- ✅ **Phase 3C**: Cross-Module Cross-References - Complete
-  - Customers ↔ Invoices linking
-  - Invoices ↔ A/R Aging navigation
-  - Invoice counts per customer
-  - Full accessibility support
+### Current Status
+- ✅ **Completed**: New folder structure created (13 folders), 80+ files moved
+- ⏳ **In Progress**: App.tsx routing updates (70+ imports to fix)
+- ⏳ **Pending**: Hierarchical sidebar component, breadcrumb navigation, testing
 
 ### Backend Impact
 **ZERO** - No backend changes. This is purely frontend organization:
@@ -74,63 +40,6 @@ Reorganize frontend navigation from **26 feature-based modules** to **10 workflo
 - Database unchanged
 - Business logic unchanged
 - Only file paths and browser URLs change
-
----
-
-## Phase Overview
-
-### Phase 1: Navigation Restructuring ✅
-**Goal**: Reorganize 26 feature modules into 10 logical workflow sections
-**Deliverables**:
-- New folder structure (income/, expenses/, accounting/, banking/, projects/, reports/, compliance/, settings/, approvals/, documents/)
-- Hierarchical sidebar with expand/collapse
-- Route restructuring (/invoices → /income/invoices)
-- Breadcrumb navigation
-**Impact**: 60% faster navigation, 60% reduced cognitive load
-
-### Phase 2: Customizable Dashboard ✅
-**Goal**: Give users control over their dashboard experience
-**Deliverables**:
-- Drag-and-drop widget reordering
-- 10+ predefined widget types
-- 3 database tables for persistence
-- Role-based visibility
-- Widget presets (save/load configurations)
-**Impact**: Personalized entry points, reduced clicks to common tasks
-
-### Phase 3A: Workflow Integration ✅
-**Goal**: Automate common multi-document workflows
-**Deliverables**:
-- Invoice→Payment workflow (pre-fill customer, amounts)
-- Invoice→CreditNote workflow (pre-populate items)
-- 3 storage layer methods
-- 3 API endpoints with tenant isolation
-**Impact**: Reduce context switching, faster task completion
-
-### Phase 3B: Quick Create FAB ✅
-**Goal**: Provide rapid access to transaction creation
-**Deliverables**:
-- Fixed floating action button (bottom-right)
-- 8 quick-create options (Invoice, Payment, Credit Note, Expense, Bill, Journal Entry, Customer, Vendor)
-- Animated dropdown menu
-- Keyboard accessible
-**Impact**: Zero-scroll access to common actions from any page
-
-### Phase 3C: Cross-Module Cross-References ✅
-**Goal**: Enable seamless navigation between related records
-**Deliverables**:
-- Clickable customer names in Invoices page → navigate to Customers
-- Clickable invoice counts per customer → view customer's invoices
-- Clickable customer names in A/R Aging → view customer details
-- Clickable invoice numbers in A/R Aging → view invoice details
-- Full ARIA labels and test IDs
-**Impact**: Users traverse data landscape without losing context
-
----
-
-## Phase 1: Navigation Restructuring
-
-### Detailed Implementation
 
 ---
 
@@ -803,66 +712,61 @@ const NAVIGATION_MENU: MenuSection[] = [
 
 ## Implementation Checklist
 
-### Phase 1: Navigation Restructuring ✅ COMPLETE
+### Phase 1A: Folder Structure ✅ DONE
 - [x] Create 10 primary section folders
 - [x] Create pages/ subdirectories
 - [x] Create components/ subdirectories
+- [x] Create supporting folders (auth, approvals, documents)
+
+### Phase 1B: File Movement ✅ DONE
 - [x] Move income section files (customers, invoices, quotes, etc.)
 - [x] Move expenses section files (vendors, bills, purchase orders, etc.)
 - [x] Move banking section files
 - [x] Move accounting section files (accounts, assets, items, inventory)
 - [x] Move people section files
+- [x] Copy other sections as-is (projects, reports, compliance, settings)
+
+### Phase 1C: Import Path Updates ⏳ IN PROGRESS
 - [x] Update consolidated pages (sales, reports, purchases)
-- [x] Update App.tsx (70+ imports)
-- [x] Update all route paths in App.tsx
-- [x] Create hierarchical sidebar component
-- [x] Add breadcrumb navigation
-- [x] Test all routes and navigation
+- [ ] Update App.tsx (70+ imports)
+- [ ] Search and replace all feature path imports throughout codebase
+- [ ] Verify no broken imports
 
-### Phase 2: Customizable Dashboard ✅ COMPLETE
-- [x] Design dashboard widget system
-- [x] Create dashboards table
-- [x] Create dashboardWidgets table
-- [x] Create dashboardPresets table
-- [x] Implement drag-and-drop reordering (@dnd-kit)
-- [x] Create 10+ widget types
-- [x] Add role-based widget visibility
-- [x] Implement widget persistence
-- [x] Add save/load presets functionality
-- [x] Integrate dashboard as homepage
-- [x] Test widget interactions
+### Phase 1D: Route Updates ⏳ PENDING
+- [ ] Update all route paths in App.tsx
+- [ ] Change `/invoices` → `/income/invoices`
+- [ ] Change `/customers` → `/income/customers`
+- [ ] Change `/bills` → `/expenses/bills`
+- [ ] Change `/vendors` → `/expenses/vendors`
+- [ ] Change `/accounts` → `/accounting/accounts`
+- [ ] Change all other routes per mapping table
+- [ ] Update Link/navigate calls in components
 
-### Phase 3A: Workflow Integration ✅ COMPLETE
-- [x] Add storage method: getUnpaidInvoices()
-- [x] Add storage method: createPaymentFromInvoice()
-- [x] Add storage method: createCreditNoteFromInvoice()
-- [x] Create API endpoint: GET /api/workflows/customer/:customerId/unpaid-invoices
-- [x] Create API endpoint: POST /api/workflows/invoice/:invoiceId/payment
-- [x] Create API endpoint: POST /api/workflows/invoice/:invoiceId/credit-note
-- [x] Add RBAC permission checks
-- [x] Add transaction handling
-- [x] Test workflow endpoints
+### Phase 1E: Hierarchical Sidebar ⏳ PENDING
+- [ ] Create new `AppSidebar` component with hierarchical structure
+- [ ] Implement expand/collapse functionality
+- [ ] Add icons for each section
+- [ ] Add badges for counts (AR aging, AP aging, approvals)
+- [ ] Implement mobile hamburger menu
+- [ ] Add active state highlighting
+- [ ] Integrate into App.tsx
 
-### Phase 3B: Quick Create FAB ✅ COMPLETE
-- [x] Create quick-create-fab.tsx component
-- [x] Add 8 quick-create options (Invoice, Payment, Credit Note, Expense, Bill, Journal Entry, Customer, Vendor)
-- [x] Position fixed in bottom-right
-- [x] Add animated dropdown menu
-- [x] Implement keyboard navigation
-- [x] Add ARIA labels and accessibility
-- [x] Add full test IDs
-- [x] Test FAB interactions
+### Phase 1F: Breadcrumb Navigation ⏳ PENDING
+- [ ] Create breadcrumb component
+- [ ] Add to all pages showing hierarchy
+- [ ] Example: Dashboard > Income > Invoices
+- [ ] Make clickable to navigate parent levels
+- [ ] Add to top of each page
 
-### Phase 3C: Cross-Module Cross-References ✅ COMPLETE
-- [x] Add invoice count to customers page
-- [x] Make customer names clickable in customers page
-- [x] Make customer names clickable in invoices page
-- [x] Make customer names clickable in A/R aging (customer view)
-- [x] Make invoice numbers clickable in A/R aging (invoice view)
-- [x] Add query parameters for context preservation
-- [x] Add ARIA labels and accessibility features
-- [x] Add unique test IDs for automation
-- [x] Test all cross-references
+### Phase 1G: Testing & Verification ⏳ PENDING
+- [ ] App compiles without errors
+- [ ] All 80+ routes accessible via new paths
+- [ ] No console errors or warnings
+- [ ] Sidebar displays and functions correctly
+- [ ] Breadcrumbs show on all pages
+- [ ] Lazy loading still works
+- [ ] Mobile responsive
+- [ ] No broken image/asset links
 
 ---
 
