@@ -21,6 +21,7 @@ import { GlobalTenantEvents } from "@/shared/components/common/GlobalTenantEvent
 import { AICopilotWidget } from "@/shared/components/ai-copilot/ai-copilot-widget";
 import { KeyboardShortcutsModal } from "@/shared/components/ui/keyboard-shortcuts-modal";
 import { useKeyboardShortcuts } from "@/shared/hooks/useKeyboardShortcuts";
+import { QuickCreateFAB } from "@/components/quick-create-fab";
 
 // Lazy load all page components
 // Shared Pages
@@ -372,6 +373,8 @@ function AppContent() {
               </div>
             </div>
           </SidebarProvider>
+          {/* Quick Create FAB - Always available for authenticated users */}
+          <QuickCreateFAB />
           {/* AI Copilot Widget - Always available for authenticated users */}
           <AICopilotWidget />
         </RBACProvider>
