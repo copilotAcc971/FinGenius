@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLocation } from 'wouter';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/shared/components/ui/button';
 import { Plus, FileText, Users, DollarSign, CreditCard, Receipt, Zap } from 'lucide-react';
 import {
   DropdownMenu,
@@ -9,8 +9,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+} from '@/shared/components/ui/dropdown-menu';
+import { cn } from '@/shared/lib/utils';
 
 interface QuickCreateOption {
   label: string;
