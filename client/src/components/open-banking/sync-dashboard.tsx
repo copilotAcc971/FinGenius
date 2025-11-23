@@ -27,7 +27,6 @@ import {
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import Decimal from 'decimal.js';
 
 interface SyncAttempt {
   id: string;

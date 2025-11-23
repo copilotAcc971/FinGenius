@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, MoreHorizontal, Edit, Trash2 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -23,7 +23,7 @@ import { useAuth } from "@/shared/hooks/useAuth";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import type { BankReconciliation, Account } from "@shared/schema";
-import { BankReconciliationDialog } from "@/features/banking/components/bank-reconciliation-dialog";
+const BankReconciliationDialog = lazy(() => import("@/features/banking/components/bank-reconciliation-dialog").then(m => ({ default: m.BankReconciliationDialog })));
 
 export default function BankReconciliations() {
   const [showDialog, setShowDialog] = useState(false);
@@ -266,11 +266,15 @@ export default function BankReconciliations() {
         </div>
       )}
 
-      <BankReconciliationDialog
-        open={showDialog}
-        onOpenChange={setShowDialog}
-        reconciliation={editingReconciliation}
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <BankReconciliationDialog
+            open={showDialog}
+            onOpenChange={setShowDialog}
+            reconciliation={editingReconciliation}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

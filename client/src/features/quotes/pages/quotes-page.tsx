@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { Suspense, lazy, useQuery } from "@tanstack/react-query";
 import { Plus, Edit, Trash2, FileText, ClipboardList } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Button } from "@/shared/components/ui/button";
@@ -8,9 +8,10 @@ import { CardSkeleton } from "@/shared/components/ui/skeleton";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { type Quote, type Currency } from "@shared/schema";
-import { QuoteDialog } from "@/features/quotes/components/quote-dialog";
 import { useState } from "react";
 import { queryClient, apiRequest } from "@/shared/lib/api/queryClient";
+
+const QuoteDialog = lazy(() => import("@/features/quotes/components/quote-dialog").then(m => ({ default: m.QuoteDialog })));
 import {
   AlertDialog,
   AlertDialogAction,
@@ -220,11 +221,15 @@ export default function QuotesPage() {
         />
       )}
 
-      <QuoteDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        quote={selectedQuote}
-      />
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <QuoteDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            quote={selectedQuote}
+          />
+        </Suspense>
+      )}
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

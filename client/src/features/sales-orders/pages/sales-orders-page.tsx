@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { Suspense, lazy, useQuery } from "@tanstack/react-query";
 import { Plus, Edit, Trash2, FileText, Truck } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Button } from "@/shared/components/ui/button";
@@ -8,10 +8,11 @@ import { CardSkeleton } from "@/shared/components/ui/skeleton";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { type SalesOrder, type Currency } from "@shared/schema";
-import { SalesOrderDialog } from "@/features/sales-orders/components/sales-order-dialog";
 import { useState } from "react";
 import { queryClient, apiRequest } from "@/shared/lib/api/queryClient";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
+
+const SalesOrderDialog = lazy(() => import("@/features/sales-orders/components/sales-order-dialog").then(m => ({ default: m.SalesOrderDialog })));
 import {
   AlertDialog,
   AlertDialogAction,
@@ -223,11 +224,15 @@ export default function SalesOrdersPage() {
         />
       )}
 
-      <SalesOrderDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        order={selectedOrder}
-      />
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <SalesOrderDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            order={selectedOrder}
+          />
+        </Suspense>
+      )}
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { Suspense, lazy, useQuery } from "@tanstack/react-query";
 import { Plus, Edit, Trash2 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -6,8 +6,9 @@ import { Badge } from "@/shared/components/ui/badge";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { type RetainerInvoice, type Currency } from "@shared/schema";
-import { RetainerInvoiceDialog } from "@/features/invoices/components/retainer-invoice-dialog";
 import { useState } from "react";
+
+const RetainerInvoiceDialog = lazy(() => import("@/features/invoices/components/retainer-invoice-dialog").then(m => ({ default: m.RetainerInvoiceDialog })));
 import { queryClient, apiRequest } from "@/shared/lib/api/queryClient";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
 import {
@@ -237,11 +238,15 @@ export default function RetainerInvoicesPage() {
         </Card>
       )}
 
-      <RetainerInvoiceDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        retainerInvoice={selectedRetainer}
-      />
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <RetainerInvoiceDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            retainerInvoice={selectedRetainer}
+          />
+        </Suspense>
+      )}
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

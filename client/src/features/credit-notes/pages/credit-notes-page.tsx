@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { Suspense, lazy, useQuery } from "@tanstack/react-query";
 import { Plus, Edit, Trash2, DollarSign, FileX } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -8,9 +8,10 @@ import { CardSkeleton } from "@/shared/components/ui/skeleton";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { type CreditNote, type Currency } from "@shared/schema";
-import { CreditNoteDialog } from "@/features/credit-notes/components/credit-note-dialog";
-import { ApplyCreditDialog } from "@/features/payments/components/apply-credit-dialog";
 import { useState } from "react";
+
+const CreditNoteDialog = lazy(() => import("@/features/credit-notes/components/credit-note-dialog").then(m => ({ default: m.CreditNoteDialog })));
+const ApplyCreditDialog = lazy(() => import("@/features/payments/components/apply-credit-dialog").then(m => ({ default: m.ApplyCreditDialog })));
 import { queryClient, apiRequest } from "@/shared/lib/api/queryClient";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
 import {
@@ -211,17 +212,25 @@ export default function CreditNotesPage() {
         />
       )}
 
-      <CreditNoteDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        creditNote={selectedCreditNote}
-      />
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <CreditNoteDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            creditNote={selectedCreditNote}
+          />
+        </Suspense>
+      )}
 
-      <ApplyCreditDialog
-        open={applyDialogOpen}
-        onOpenChange={setApplyDialogOpen}
-        creditNote={creditNoteToApply}
-      />
+      {applyDialogOpen && (
+        <Suspense fallback={null}>
+          <ApplyCreditDialog
+            open={applyDialogOpen}
+            onOpenChange={setApplyDialogOpen}
+            creditNote={creditNoteToApply}
+          />
+        </Suspense>
+      )}
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

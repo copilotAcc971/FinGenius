@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, MoreHorizontal, Edit, Trash2, ShoppingCart } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -26,8 +26,9 @@ import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import { purchaseOrderColumns, renderColgroup, getColumnClassName } from "@/shared/lib/utils/table-columns";
 import type { PurchaseOrder, Vendor, Currency } from "@shared/schema";
-import { PurchaseOrderDialog } from "@/features/purchase-orders/components/purchase-order-dialog";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
+
+const PurchaseOrderDialog = lazy(() => import("@/features/purchase-orders/components/purchase-order-dialog").then(m => ({ default: m.PurchaseOrderDialog })));
 
 export default function PurchaseOrders() {
   const [showDialog, setShowDialog] = useState(false);
@@ -249,14 +250,18 @@ export default function PurchaseOrders() {
         </div>
       )}
 
-      <PurchaseOrderDialog
-        open={showDialog}
-        onOpenChange={(open) => {
-          setShowDialog(open);
-          if (!open) setEditingPO(null);
-        }}
-        purchaseOrder={editingPO}
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <PurchaseOrderDialog
+            open={showDialog}
+            onOpenChange={(open) => {
+              setShowDialog(open);
+              if (!open) setEditingPO(null);
+            }}
+            purchaseOrder={editingPO}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

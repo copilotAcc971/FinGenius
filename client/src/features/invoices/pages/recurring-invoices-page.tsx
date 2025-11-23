@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { Suspense, lazy, useQuery } from "@tanstack/react-query";
 import { Plus, Edit, Trash2, Play, Pause, FileText } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -6,8 +6,9 @@ import { Badge } from "@/shared/components/ui/badge";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { type RecurringInvoice, type Currency } from "@shared/schema";
-import { RecurringInvoiceDialog } from "@/features/invoices/components/recurring-invoice-dialog";
 import { useState } from "react";
+
+const RecurringInvoiceDialog = lazy(() => import("@/features/invoices/components/recurring-invoice-dialog").then(m => ({ default: m.RecurringInvoiceDialog })));
 import { queryClient, apiRequest } from "@/shared/lib/api/queryClient";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
 import {
@@ -274,11 +275,15 @@ export default function RecurringInvoicesPage() {
         </Card>
       )}
 
-      <RecurringInvoiceDialog 
-        open={dialogOpen} 
-        onOpenChange={setDialogOpen} 
-        recurringInvoice={selectedRecurring}
-      />
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <RecurringInvoiceDialog 
+            open={dialogOpen} 
+            onOpenChange={setDialogOpen} 
+            recurringInvoice={selectedRecurring}
+          />
+        </Suspense>
+      )}
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

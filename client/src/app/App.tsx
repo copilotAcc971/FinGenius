@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { Switch, Route } from "wouter";
 import { queryClient } from "@/shared/lib/api/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import { UserMenu } from "@/shared/components/layout/user-menu";
 import { CommandPalette } from "@/shared/components/layout/command-palette";
 import { Breadcrumbs } from "@/shared/components/layout/breadcrumbs";
 import { TenantBadge } from "@/shared/components/layout/tenant-badge";
+import { PageSkeleton } from "@/shared/components/layout/page-skeleton";
 import { useAuth } from "@/shared/hooks/useAuth";
 import { TenantProvider } from "@/shared/contexts/TenantContext";
 import { RBACProvider } from "@/shared/contexts/rbac-context";
@@ -20,57 +22,162 @@ import { AICopilotWidget } from "@/shared/components/ai-copilot/ai-copilot-widge
 import { KeyboardShortcutsModal } from "@/shared/components/ui/keyboard-shortcuts-modal";
 import { useKeyboardShortcuts } from "@/shared/hooks/useKeyboardShortcuts";
 
-import NotFound from "@/shared/pages/not-found-page";
-import Landing from "@/features/auth/pages/landing-page";
-import Dashboard from "@/features/dashboard/pages/dashboard-page";
-import Customers from "@/features/customers/pages/customers-page";
-import Vendors from "@/features/vendors/pages/vendors-page";
-import Items from "@/features/items/pages/items-page";
-import ItemFormPage from "@/features/items/pages/item-form-page";
-import StockAdjustmentsPage from "@/features/items/pages/stock-adjustments-page";
-import InventoryReportsPage from "@/features/items/pages/inventory-reports-page";
-import NrvAssessmentPage from "@/features/inventory/pages/nrv-assessment-page";
-import Taxes from "@/features/taxes/pages/taxes-page";
-import Accounts from "@/features/accounts/pages/accounts-page";
-import AccountBalances from "@/features/accounts/pages/account-balances-page";
-import ConsolidatedSales from "@/features/sales/pages/consolidated-sales-page";
-import ConsolidatedPurchases from "@/features/purchases/pages/consolidated-purchases-page";
-import ConsolidatedPayments from "@/features/payments/pages/consolidated-payments-page";
-import Documents from "@/features/documents/pages/documents-page";
-import Settings from "@/features/settings/pages/settings-page";
-import CompanyProfile from "@/features/settings/pages/company-profile-page";
-import JournalEntries from "@/features/accounts/pages/journal-entries-page";
-import JournalEntryDetailPage from "@/features/accounts/pages/journal-entry-detail-page";
-import Assets from "@/features/assets/pages/assets-page";
-import FixedAssets from "@/features/assets/pages/fixed-assets-page";
-import PurchaseOrders from "@/features/purchase-orders/pages/purchase-orders-page";
-import RoleManagement from "@/features/settings/pages/role-management-page";
-import UserManagement from "@/features/settings/pages/user-management-page";
-import CurrenciesPage from "@/features/settings/pages/currencies-page";
-import WorkflowForm from "@/features/approvals/pages/workflow-form-page";
-import ConsolidatedBanking from "@/features/banking/pages/consolidated-banking-page";
-import ConsolidatedApprovals from "@/features/approvals/pages/consolidated-approvals-page";
-import EmployeeExpenses from "@/features/expenses/pages/employee-expenses-page";
-import ProjectDetail from "@/features/projects/pages/project-detail-page";
-import ProjectProfitabilityReport from "@/features/reports/pages/project-profitability-report-page";
-import ConsolidatedReports from "@/features/reports/pages/consolidated-reports-page";
-import ConsolidatedProjects from "@/features/projects/pages/consolidated-projects-page";
-import AdvancedTableDemo from "@/shared/pages/advanced-table-demo-page";
-import AuditLogsPage from "@/pages/audit-logs-page";
-import ComplianceDashboardPage from "@/features/compliance/pages/compliance-dashboard-page";
-import KYCVerificationsPage from "@/features/compliance/pages/kyc-verifications-page";
-import SanctionsScreeningPage from "@/features/compliance/pages/sanctions-screening-page";
-import TransactionAlertsPage from "@/features/compliance/pages/transaction-alerts-page";
-import SARReportsPage from "@/features/compliance/pages/sar-reports-page";
-import AlertRulesPage from "@/features/compliance/pages/alert-rules-page";
-import FinancialStatementNotesPage from "@/features/reports/pages/financial-statement-notes-page";
-import AlertsCenterPage from "@/pages/alerts-center";
-import CreditPassportPage from "@/pages/credit-passport";
-import InboundDocumentsPage from "@/pages/inbound-documents";
-import AIProvidersPage from "@/pages/settings/ai-providers";
-import CopilotPage from "@/pages/copilot";
-import ReportsPage from "@/pages/reports";
-import CompliancePage from "@/pages/compliance";
+// Lazy load all page components
+// Shared Pages
+const NotFound = lazy(() => import("@/shared/pages/not-found-page"));
+const AdvancedTableDemo = lazy(() => import("@/shared/pages/advanced-table-demo-page"));
+
+// Top-Level Pages
+const AlertsCenterPage = lazy(() => import("@/pages/alerts-center"));
+const AuditLogsPage = lazy(() => import("@/pages/audit-logs-page"));
+const CompliancePage = lazy(() => import("@/pages/compliance"));
+const CopilotPage = lazy(() => import("@/pages/copilot"));
+const CreditPassportPage = lazy(() => import("@/pages/credit-passport"));
+const InboundDocumentsPage = lazy(() => import("@/pages/inbound-documents"));
+const ReportsPage = lazy(() => import("@/pages/reports"));
+const AIProvidersPage = lazy(() => import("@/pages/settings/ai-providers"));
+
+// Report Pages
+const BalanceSheetPage = lazy(() => import("@/pages/reports/balance-sheet-page"));
+const CashFlowPage = lazy(() => import("@/pages/reports/cash-flow-page"));
+const ProfitLossPage = lazy(() => import("@/pages/reports/profit-loss-page"));
+const TrialBalancePage = lazy(() => import("@/pages/reports/trial-balance-page"));
+
+// Auth Pages
+const Landing = lazy(() => import("@/features/auth/pages/landing-page"));
+
+// Accounts Pages
+const Accounts = lazy(() => import("@/features/accounts/pages/accounts-page"));
+const AccountBalances = lazy(() => import("@/features/accounts/pages/account-balances-page"));
+const JournalEntries = lazy(() => import("@/features/accounts/pages/journal-entries-page"));
+const JournalEntryDetailPage = lazy(() => import("@/features/accounts/pages/journal-entry-detail-page"));
+
+// Approvals Pages
+const ConsolidatedApprovals = lazy(() => import("@/features/approvals/pages/consolidated-approvals-page"));
+const PendingApprovalsPage = lazy(() => import("@/features/approvals/pages/pending-approvals-page"));
+const WorkflowForm = lazy(() => import("@/features/approvals/pages/workflow-form-page"));
+const WorkflowsPage = lazy(() => import("@/features/approvals/pages/workflows-page"));
+
+// Assets Pages
+const Assets = lazy(() => import("@/features/assets/pages/assets-page"));
+const FixedAssets = lazy(() => import("@/features/assets/pages/fixed-assets-page"));
+
+// Banking Pages
+const BankConnectionsPage = lazy(() => import("@/features/banking/pages/bank-connections-page"));
+const BankReconciliationsPage = lazy(() => import("@/features/banking/pages/bank-reconciliations-page"));
+const ConsolidatedBanking = lazy(() => import("@/features/banking/pages/consolidated-banking-page"));
+
+// Bills Pages
+const BillsPage = lazy(() => import("@/features/bills/pages/bills-page"));
+
+// Compliance Pages
+const AlertRulesPage = lazy(() => import("@/features/compliance/pages/alert-rules-page"));
+const ComplianceDashboardPage = lazy(() => import("@/features/compliance/pages/compliance-dashboard-page"));
+const KYCVerificationsPage = lazy(() => import("@/features/compliance/pages/kyc-verifications-page"));
+const SanctionsScreeningPage = lazy(() => import("@/features/compliance/pages/sanctions-screening-page"));
+const SARReportsPage = lazy(() => import("@/features/compliance/pages/sar-reports-page"));
+const TransactionAlertsPage = lazy(() => import("@/features/compliance/pages/transaction-alerts-page"));
+
+// Credit Notes Pages
+const CreditNotesPage = lazy(() => import("@/features/credit-notes/pages/credit-notes-page"));
+
+// Customers Pages
+const ARAgingPage = lazy(() => import("@/features/customers/pages/ar-aging-page"));
+const Customers = lazy(() => import("@/features/customers/pages/customers-page"));
+
+// Dashboard Pages
+const Dashboard = lazy(() => import("@/features/dashboard/pages/dashboard-page"));
+
+// Documents Pages
+const Documents = lazy(() => import("@/features/documents/pages/documents-page"));
+
+// Expenses Pages
+const EmployeeExpenses = lazy(() => import("@/features/expenses/pages/employee-expenses-page"));
+const ExpensesPage = lazy(() => import("@/features/expenses/pages/expenses-page"));
+
+// Inventory Pages
+const NrvAssessmentPage = lazy(() => import("@/features/inventory/pages/nrv-assessment-page"));
+
+// Invoices Pages
+const InvoicesPage = lazy(() => import("@/features/invoices/pages/invoices-page"));
+const RecurringInvoicesPage = lazy(() => import("@/features/invoices/pages/recurring-invoices-page"));
+const RetainerInvoicesPage = lazy(() => import("@/features/invoices/pages/retainer-invoices-page"));
+
+// Items Pages
+const InventoryReportsPage = lazy(() => import("@/features/items/pages/inventory-reports-page"));
+const ItemFormPage = lazy(() => import("@/features/items/pages/item-form-page"));
+const Items = lazy(() => import("@/features/items/pages/items-page"));
+const StockAdjustmentsPage = lazy(() => import("@/features/items/pages/stock-adjustments-page"));
+
+// Payments Pages
+const ConsolidatedPayments = lazy(() => import("@/features/payments/pages/consolidated-payments-page"));
+const CustomerPaymentsPage = lazy(() => import("@/features/payments/pages/customer-payments-page"));
+const PaymentsPage = lazy(() => import("@/features/payments/pages/payments-page"));
+
+// Projects Pages
+const ConsolidatedProjects = lazy(() => import("@/features/projects/pages/consolidated-projects-page"));
+const ProjectDetail = lazy(() => import("@/features/projects/pages/project-detail-page"));
+const ProjectsPage = lazy(() => import("@/features/projects/pages/projects-page"));
+const TimesheetsPage = lazy(() => import("@/features/projects/pages/timesheets-page"));
+const TimeTrackingPage = lazy(() => import("@/features/projects/pages/time-tracking-page"));
+
+// Purchase Orders Pages
+const PurchaseOrdersPage = lazy(() => import("@/features/purchase-orders/pages/purchase-orders-page"));
+
+// Purchases Pages
+const ConsolidatedPurchases = lazy(() => import("@/features/purchases/pages/consolidated-purchases-page"));
+
+// Quotes Pages
+const QuotesPage = lazy(() => import("@/features/quotes/pages/quotes-page"));
+
+// Reports Pages
+const ChartOfAccountsReportPage = lazy(() => import("@/features/reports/pages/chart-of-accounts-report-page"));
+const ConsolidatedReportsPage = lazy(() => import("@/features/reports/pages/consolidated-reports-page"));
+const CustomReportBuilderPage = lazy(() => import("@/features/reports/pages/custom-report-builder-page"));
+const FinancialReportsPage = lazy(() => import("@/features/reports/pages/financial-reports-page"));
+const FinancialStatementNotesPage = lazy(() => import("@/features/reports/pages/financial-statement-notes-page"));
+const ProjectProfitabilityReport = lazy(() => import("@/features/reports/pages/project-profitability-report-page"));
+const ProjectReportsPage = lazy(() => import("@/features/reports/pages/project-reports-page"));
+const ConsolidatedReports = lazy(() => import("@/features/reports/pages/reports-page"));
+const ScheduledReportsPage = lazy(() => import("@/features/reports/pages/scheduled-reports-page"));
+
+// Sales Pages
+const ConsolidatedSales = lazy(() => import("@/features/sales/pages/consolidated-sales-page"));
+
+// Sales Orders Pages
+const SalesOrdersPage = lazy(() => import("@/features/sales-orders/pages/sales-orders-page"));
+
+// Settings Pages
+const CompanyProfile = lazy(() => import("@/features/settings/pages/company-profile-page"));
+const CurrenciesPage = lazy(() => import("@/features/settings/pages/currencies-page"));
+const RoleManagement = lazy(() => import("@/features/settings/pages/role-management-page"));
+const Settings = lazy(() => import("@/features/settings/pages/settings-page"));
+const UserManagement = lazy(() => import("@/features/settings/pages/user-management-page"));
+
+// Taxes Pages
+const Taxes = lazy(() => import("@/features/taxes/pages/taxes-page"));
+
+// Vendors Pages
+const APAgingPage = lazy(() => import("@/features/vendors/pages/ap-aging-page"));
+const Vendors = lazy(() => import("@/features/vendors/pages/vendors-page"));
+
+// Helper component to wrap routes with Suspense
+interface RouteProps {
+  path: string;
+  component: React.ComponentType<any>;
+  params?: string;
+}
+
+const SuspenseRoute = ({ path, component: Component, params }: RouteProps) => (
+  <Route 
+    path={path}
+    component={(props: any) => (
+      <Suspense fallback={<PageSkeleton />}>
+        <Component {...props} />
+      </Suspense>
+    )}
+  />
+);
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -78,62 +185,139 @@ function Router() {
   return (
     <Switch>
       {isLoading || !isAuthenticated ? (
-        <Route path="/" component={Landing} />
+        <SuspenseRoute path="/" component={Landing} />
       ) : (
         <>
-          <Route path="/" component={Dashboard} />
-          <Route path="/customers" component={Customers} />
-          <Route path="/vendors" component={Vendors} />
-          <Route path="/items" component={Items} />
-          <Route path="/inventory/items" component={Items} />
-          <Route path="/inventory/items/new" component={ItemFormPage} />
-          <Route path="/inventory/items/:id/edit" component={ItemFormPage} />
-          <Route path="/inventory/adjustments" component={StockAdjustmentsPage} />
-          <Route path="/inventory/reports" component={InventoryReportsPage} />
-          <Route path="/inventory/nrv-assessments" component={NrvAssessmentPage} />
-          <Route path="/taxes" component={Taxes} />
-          <Route path="/accounts" component={Accounts} />
-          <Route path="/account-balances" component={AccountBalances} />
-          <Route path="/journal-entries/:id" component={JournalEntryDetailPage} />
-          <Route path="/journal-entries" component={JournalEntries} />
-          <Route path="/approvals" component={ConsolidatedApprovals} />
-          <Route path="/workflows/:id" component={WorkflowForm} />
-          <Route path="/assets" component={Assets} />
-          <Route path="/fixed-assets" component={FixedAssets} />
-          <Route path="/banking" component={ConsolidatedBanking} />
-          <Route path="/sales" component={ConsolidatedSales} />
-          <Route path="/purchases" component={ConsolidatedPurchases} />
-          <Route path="/employee-expenses" component={EmployeeExpenses} />
-          <Route path="/payments" component={ConsolidatedPayments} />
-          <Route path="/reports/projects/profitability" component={ProjectProfitabilityReport} />
-          <Route path="/projects/:id" component={ProjectDetail} />
-          <Route path="/projects" component={ConsolidatedProjects} />
-          <Route path="/documents" component={Documents} />
-          <Route path="/reports/financial-statement-notes" component={FinancialStatementNotesPage} />
-          <Route path="/reports" component={ConsolidatedReports} />
-          <Route path="/company-profile" component={CompanyProfile} />
-          <Route path="/settings" component={Settings} />
-          <Route path="/settings/roles" component={RoleManagement} />
-          <Route path="/settings/users" component={UserManagement} />
-          <Route path="/settings/currencies" component={CurrenciesPage} />
-          <Route path="/settings/ai-providers" component={AIProvidersPage} />
-          <Route path="/audit-logs" component={AuditLogsPage} />
-          <Route path="/compliance" component={ComplianceDashboardPage} />
-          <Route path="/compliance/kyc" component={KYCVerificationsPage} />
-          <Route path="/compliance/sanctions" component={SanctionsScreeningPage} />
-          <Route path="/compliance/alerts" component={TransactionAlertsPage} />
-          <Route path="/compliance/sar" component={SARReportsPage} />
-          <Route path="/compliance/rules" component={AlertRulesPage} />
-          <Route path="/alerts-center" component={AlertsCenterPage} />
-          <Route path="/credit-passport" component={CreditPassportPage} />
-          <Route path="/inbound-documents" component={InboundDocumentsPage} />
-          <Route path="/copilot" component={CopilotPage} />
-          <Route path="/reports" component={ReportsPage} />
-          <Route path="/compliance-dashboard" component={CompliancePage} />
-          <Route path="/demo/advanced-table" component={AdvancedTableDemo} />
+          {/* Dashboard & Core Pages */}
+          <SuspenseRoute path="/" component={Dashboard} />
+          
+          {/* Customers */}
+          <SuspenseRoute path="/customers" component={Customers} />
+          <SuspenseRoute path="/customers/ar-aging" component={ARAgingPage} />
+          
+          {/* Vendors */}
+          <SuspenseRoute path="/vendors" component={Vendors} />
+          <SuspenseRoute path="/vendors/ap-aging" component={APAgingPage} />
+          
+          {/* Inventory & Items */}
+          <SuspenseRoute path="/items" component={Items} />
+          <SuspenseRoute path="/inventory/items" component={Items} />
+          <SuspenseRoute path="/inventory/items/new" component={ItemFormPage} />
+          <SuspenseRoute path="/inventory/items/:id/edit" component={ItemFormPage} />
+          <SuspenseRoute path="/inventory/adjustments" component={StockAdjustmentsPage} />
+          <SuspenseRoute path="/inventory/reports" component={InventoryReportsPage} />
+          <SuspenseRoute path="/inventory/nrv-assessments" component={NrvAssessmentPage} />
+          
+          {/* Taxes */}
+          <SuspenseRoute path="/taxes" component={Taxes} />
+          
+          {/* Accounts & Journals */}
+          <SuspenseRoute path="/accounts" component={Accounts} />
+          <SuspenseRoute path="/account-balances" component={AccountBalances} />
+          <SuspenseRoute path="/journal-entries" component={JournalEntries} />
+          <SuspenseRoute path="/journal-entries/:id" component={JournalEntryDetailPage} />
+          
+          {/* Approvals & Workflows */}
+          <SuspenseRoute path="/approvals" component={ConsolidatedApprovals} />
+          <SuspenseRoute path="/approvals/pending" component={PendingApprovalsPage} />
+          <SuspenseRoute path="/workflows" component={WorkflowsPage} />
+          <SuspenseRoute path="/workflows/:id" component={WorkflowForm} />
+          
+          {/* Assets */}
+          <SuspenseRoute path="/assets" component={Assets} />
+          <SuspenseRoute path="/fixed-assets" component={FixedAssets} />
+          
+          {/* Banking */}
+          <SuspenseRoute path="/banking" component={ConsolidatedBanking} />
+          <SuspenseRoute path="/banking/connections" component={BankConnectionsPage} />
+          <SuspenseRoute path="/banking/reconciliations" component={BankReconciliationsPage} />
+          
+          {/* Invoices */}
+          <SuspenseRoute path="/invoices" component={InvoicesPage} />
+          <SuspenseRoute path="/invoices/recurring" component={RecurringInvoicesPage} />
+          <SuspenseRoute path="/invoices/retainer" component={RetainerInvoicesPage} />
+          
+          {/* Bills */}
+          <SuspenseRoute path="/bills" component={BillsPage} />
+          
+          {/* Credit Notes */}
+          <SuspenseRoute path="/credit-notes" component={CreditNotesPage} />
+          
+          {/* Quotes */}
+          <SuspenseRoute path="/quotes" component={QuotesPage} />
+          
+          {/* Purchase Orders */}
+          <SuspenseRoute path="/purchase-orders" component={PurchaseOrdersPage} />
+          
+          {/* Sales */}
+          <SuspenseRoute path="/sales" component={ConsolidatedSales} />
+          
+          {/* Purchases */}
+          <SuspenseRoute path="/purchases" component={ConsolidatedPurchases} />
+          
+          {/* Payments */}
+          <SuspenseRoute path="/payments" component={PaymentsPage} />
+          <SuspenseRoute path="/payments/consolidated" component={ConsolidatedPayments} />
+          <SuspenseRoute path="/payments/customer" component={CustomerPaymentsPage} />
+          
+          {/* Expenses */}
+          <SuspenseRoute path="/expenses" component={ExpensesPage} />
+          <SuspenseRoute path="/employee-expenses" component={EmployeeExpenses} />
+          
+          {/* Projects */}
+          <SuspenseRoute path="/projects" component={ProjectsPage} />
+          <SuspenseRoute path="/projects/consolidated" component={ConsolidatedProjects} />
+          <SuspenseRoute path="/projects/:id" component={ProjectDetail} />
+          <SuspenseRoute path="/projects/timesheets" component={TimesheetsPage} />
+          <SuspenseRoute path="/projects/time-tracking" component={TimeTrackingPage} />
+          
+          {/* Reports */}
+          <SuspenseRoute path="/reports" component={ConsolidatedReportsPage} />
+          <SuspenseRoute path="/reports/all" component={ConsolidatedReports} />
+          <SuspenseRoute path="/reports/balance-sheet" component={BalanceSheetPage} />
+          <SuspenseRoute path="/reports/cash-flow" component={CashFlowPage} />
+          <SuspenseRoute path="/reports/profit-loss" component={ProfitLossPage} />
+          <SuspenseRoute path="/reports/trial-balance" component={TrialBalancePage} />
+          <SuspenseRoute path="/reports/chart-of-accounts" component={ChartOfAccountsReportPage} />
+          <SuspenseRoute path="/reports/financial" component={FinancialReportsPage} />
+          <SuspenseRoute path="/reports/financial-statement-notes" component={FinancialStatementNotesPage} />
+          <SuspenseRoute path="/reports/projects/profitability" component={ProjectProfitabilityReport} />
+          <SuspenseRoute path="/reports/projects" component={ProjectReportsPage} />
+          <SuspenseRoute path="/reports/custom-builder" component={CustomReportBuilderPage} />
+          <SuspenseRoute path="/reports/scheduled" component={ScheduledReportsPage} />
+          
+          {/* Documents */}
+          <SuspenseRoute path="/documents" component={Documents} />
+          
+          {/* Compliance */}
+          <SuspenseRoute path="/compliance" component={ComplianceDashboardPage} />
+          <SuspenseRoute path="/compliance/kyc" component={KYCVerificationsPage} />
+          <SuspenseRoute path="/compliance/sanctions" component={SanctionsScreeningPage} />
+          <SuspenseRoute path="/compliance/alerts" component={TransactionAlertsPage} />
+          <SuspenseRoute path="/compliance/sar" component={SARReportsPage} />
+          <SuspenseRoute path="/compliance/rules" component={AlertRulesPage} />
+          <SuspenseRoute path="/compliance-dashboard" component={CompliancePage} />
+          
+          {/* Settings */}
+          <SuspenseRoute path="/settings" component={Settings} />
+          <SuspenseRoute path="/company-profile" component={CompanyProfile} />
+          <SuspenseRoute path="/settings/roles" component={RoleManagement} />
+          <SuspenseRoute path="/settings/users" component={UserManagement} />
+          <SuspenseRoute path="/settings/currencies" component={CurrenciesPage} />
+          <SuspenseRoute path="/settings/ai-providers" component={AIProvidersPage} />
+          
+          {/* Alerts & Other */}
+          <SuspenseRoute path="/alerts-center" component={AlertsCenterPage} />
+          <SuspenseRoute path="/audit-logs" component={AuditLogsPage} />
+          <SuspenseRoute path="/credit-passport" component={CreditPassportPage} />
+          <SuspenseRoute path="/inbound-documents" component={InboundDocumentsPage} />
+          <SuspenseRoute path="/copilot" component={CopilotPage} />
+          
+          {/* Demo Pages */}
+          <SuspenseRoute path="/demo/advanced-table" component={AdvancedTableDemo} />
         </>
       )}
-      <Route component={NotFound} />
+      <SuspenseRoute path="/*" component={NotFound} />
     </Switch>
   );
 }

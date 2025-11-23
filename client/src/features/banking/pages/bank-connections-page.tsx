@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, RefreshCw, Trash2, MoreHorizontal, AlertCircle, Landmark } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -33,8 +33,9 @@ import { useTenant } from "@/shared/hooks/useTenant";
 import { useToast } from "@/shared/hooks/use-toast";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import type { OpenBankingConnection } from "@shared/schema";
-import { ConnectBankDialog } from "@/features/banking/components/connect-bank-dialog";
 import { format } from "date-fns";
+
+const ConnectBankDialog = lazy(() => import("@/features/banking/components/connect-bank-dialog").then(m => ({ default: m.ConnectBankDialog })));
 
 export default function BankConnections() {
   const [showConnectDialog, setShowConnectDialog] = useState(false);
@@ -249,10 +250,14 @@ export default function BankConnections() {
         </div>
       )}
 
-      <ConnectBankDialog
-        open={showConnectDialog}
-        onOpenChange={setShowConnectDialog}
-      />
+      {showConnectDialog && (
+        <Suspense fallback={null}>
+          <ConnectBankDialog
+            open={showConnectDialog}
+            onOpenChange={setShowConnectDialog}
+          />
+        </Suspense>
+      )}
 
       <AlertDialog open={!!disconnectingId} onOpenChange={() => setDisconnectingId(null)}>
         <AlertDialogContent>

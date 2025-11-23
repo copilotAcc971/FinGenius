@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DollarSign, Plus, Edit, Trash2, CreditCard } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -29,12 +29,13 @@ import { TableSkeleton, CardSkeleton } from "@/shared/components/ui/skeleton";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useAuth } from "@/shared/hooks/useAuth";
-import { CustomerPaymentDialog } from "@/features/payments/components/customer-payment-dialog";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
 import { customerPaymentColumns, renderColgroup, getColumnClassName } from "@/shared/lib/utils/table-columns";
 import type { CustomerPaymentWithOptimistic, Customer, Invoice, Currency } from "@shared/schema";
+
+const CustomerPaymentDialog = lazy(() => import("@/features/payments/components/customer-payment-dialog").then(m => ({ default: m.CustomerPaymentDialog })));
 
 export default function CustomerPayments() {
   const { currentTenant } = useTenant();
@@ -299,11 +300,15 @@ export default function CustomerPayments() {
         </div>
       )}
 
-      <CustomerPaymentDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        payment={selectedPayment}
-      />
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <CustomerPaymentDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            payment={selectedPayment}
+          />
+        </Suspense>
+      )}
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent data-testid="dialog-delete-payment">

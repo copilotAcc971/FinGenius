@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { Suspense, lazy, useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, CheckCircle, AlertTriangle, FileText } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -10,9 +10,10 @@ import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { AdvancedDataTable } from "@/shared/components/tables/advanced-data-table";
 import type { AdvancedColumnDef } from "@/shared/lib/utils/advanced-table-types";
 import type { NrvAssessment, Item } from "@shared/schema";
-import { NrvAssessmentDialog } from "../components/nrv-assessment-dialog";
 import { format } from "date-fns";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/components/ui/card";
+
+const NrvAssessmentDialog = lazy(() => import("../components/nrv-assessment-dialog").then(m => ({ default: m.NrvAssessmentDialog })));
 
 export default function NrvAssessmentPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -289,11 +290,15 @@ export default function NrvAssessmentPage() {
         </CardContent>
       </Card>
 
-      <NrvAssessmentDialog
-        open={dialogOpen}
-        onOpenChange={handleDialogClose}
-        item={selectedItem}
-      />
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <NrvAssessmentDialog
+            open={dialogOpen}
+            onOpenChange={handleDialogClose}
+            item={selectedItem}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

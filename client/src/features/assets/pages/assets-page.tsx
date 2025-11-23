@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Search, MoreHorizontal, Edit, Trash2, Building } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -26,7 +26,8 @@ import { useAuth } from "@/shared/hooks/useAuth";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import type { Asset } from "@shared/schema";
-import { AssetDialog } from "@/features/assets/components/asset-dialog";
+
+const AssetDialog = lazy(() => import("@/features/assets/components/asset-dialog").then(m => ({ default: m.AssetDialog })));
 
 export default function Assets() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -275,11 +276,15 @@ export default function Assets() {
         </div>
       )}
 
-      <AssetDialog
-        open={showDialog}
-        onOpenChange={setShowDialog}
-        asset={editingAsset}
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <AssetDialog
+            open={showDialog}
+            onOpenChange={setShowDialog}
+            asset={editingAsset}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

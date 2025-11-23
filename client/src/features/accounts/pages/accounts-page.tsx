@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Search, MoreHorizontal, Edit, Trash2, Layers } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -26,7 +26,8 @@ import { useAuth } from "@/shared/hooks/useAuth";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import type { Account } from "@shared/schema";
-import { AccountDialog } from "@/features/accounts/components/account-dialog";
+
+const AccountDialog = lazy(() => import("@/features/accounts/components/account-dialog").then(m => ({ default: m.AccountDialog })));
 
 export default function Accounts() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -245,14 +246,18 @@ export default function Accounts() {
         </div>
       )}
 
-      <AccountDialog
-        open={showDialog}
-        onOpenChange={(open) => {
-          setShowDialog(open);
-          if (!open) setEditingAccount(null);
-        }}
-        account={editingAccount}
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <AccountDialog
+            open={showDialog}
+            onOpenChange={(open) => {
+              setShowDialog(open);
+              if (!open) setEditingAccount(null);
+            }}
+            account={editingAccount}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

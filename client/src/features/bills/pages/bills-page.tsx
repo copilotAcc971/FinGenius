@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, MoreVertical, Pencil, Trash2, Upload, CheckCircle2, Loader2, Receipt } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -26,13 +26,14 @@ import { TableSkeleton, CardSkeleton } from "@/shared/components/ui/skeleton";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useAuth } from "@/shared/hooks/useAuth";
-import { BillDialog } from "@/features/bills/components/bill-dialog";
-import { BulkBillUpload } from "@/features/bills/components/bulk-bill-upload";
 import { PendingBadge } from "@/shared/components/ui/pending-badge";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import type { Bill, BillWithOptimistic, Vendor, Currency } from "@shared/schema";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
 import { billColumns, renderColgroup, getColumnClassName } from "@/shared/lib/utils/table-columns";
+
+const BillDialog = lazy(() => import("@/features/bills/components/bill-dialog").then(m => ({ default: m.BillDialog })));
+const BulkBillUpload = lazy(() => import("@/features/bills/components/bulk-bill-upload").then(m => ({ default: m.BulkBillUpload })));
 
 export default function Bills() {
   const { currentTenant } = useTenant();
@@ -313,18 +314,24 @@ export default function Bills() {
         </div>
       )}
 
-      <BillDialog 
-        open={showDialog} 
-        onOpenChange={setShowDialog} 
-        bill={editingBill} 
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <BillDialog 
+            open={showDialog} 
+            onOpenChange={setShowDialog} 
+            bill={editingBill} 
+          />
+        </Suspense>
+      )}
 
-      {currentTenant?.id && (
-        <BulkBillUpload
-          open={showBulkUpload}
-          onOpenChange={setShowBulkUpload}
-          tenantId={currentTenant.id}
-        />
+      {showBulkUpload && currentTenant?.id && (
+        <Suspense fallback={null}>
+          <BulkBillUpload
+            open={showBulkUpload}
+            onOpenChange={setShowBulkUpload}
+            tenantId={currentTenant.id}
+          />
+        </Suspense>
       )}
     </div>
   );

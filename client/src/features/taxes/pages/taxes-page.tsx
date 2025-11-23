@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Search, MoreHorizontal, Edit, Trash2, Percent } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -25,7 +25,8 @@ import { useAuth } from "@/shared/hooks/useAuth";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import type { Tax } from "@shared/schema";
-import { TaxDialog } from "@/features/taxes/components/tax-dialog";
+
+const TaxDialog = lazy(() => import("@/features/taxes/components/tax-dialog").then(m => ({ default: m.TaxDialog })));
 
 export default function Taxes() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -225,14 +226,18 @@ export default function Taxes() {
         </div>
       )}
 
-      <TaxDialog
-        open={showDialog}
-        onOpenChange={(open) => {
-          setShowDialog(open);
-          if (!open) setEditingTax(null);
-        }}
-        tax={editingTax}
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <TaxDialog
+            open={showDialog}
+            onOpenChange={(open) => {
+              setShowDialog(open);
+              if (!open) setEditingTax(null);
+            }}
+            tax={editingTax}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

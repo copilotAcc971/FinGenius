@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Search, MoreHorizontal, Edit, Trash2, Users } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -27,8 +27,9 @@ import { useAuth } from "@/shared/hooks/useAuth";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import type { Customer, CustomerWithOptimistic } from "@shared/schema";
-import { CustomerDialog } from "@/features/customers/components/customer-dialog";
 import { customerColumns, renderColgroup, getColumnClassName } from "@/shared/lib/utils/table-columns";
+
+const CustomerDialog = lazy(() => import("@/features/customers/components/customer-dialog").then(m => ({ default: m.CustomerDialog })));
 
 export default function Customers() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -222,14 +223,18 @@ export default function Customers() {
         </div>
       )}
 
-      <CustomerDialog
-        open={showDialog}
-        onOpenChange={(open) => {
-          setShowDialog(open);
-          if (!open) setEditingCustomer(null);
-        }}
-        customer={editingCustomer}
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <CustomerDialog
+            open={showDialog}
+            onOpenChange={(open) => {
+              setShowDialog(open);
+              if (!open) setEditingCustomer(null);
+            }}
+            customer={editingCustomer}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

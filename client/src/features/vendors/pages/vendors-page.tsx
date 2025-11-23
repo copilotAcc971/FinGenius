@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Search, MoreHorizontal, Edit, Trash2, Building2 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -28,7 +28,8 @@ import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import { vendorColumns, renderColgroup, getColumnClassName } from "@/shared/lib/utils/table-columns";
 import type { Vendor, VendorWithOptimistic } from "@shared/schema";
-import { VendorDialog } from "@/features/vendors/components/vendor-dialog";
+
+const VendorDialog = lazy(() => import("@/features/vendors/components/vendor-dialog").then(m => ({ default: m.VendorDialog })));
 
 export default function Vendors() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -227,14 +228,18 @@ export default function Vendors() {
         </div>
       )}
 
-      <VendorDialog
-        open={showDialog}
-        onOpenChange={(open) => {
-          setShowDialog(open);
-          if (!open) setEditingVendor(null);
-        }}
-        vendor={editingVendor}
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <VendorDialog
+            open={showDialog}
+            onOpenChange={(open) => {
+              setShowDialog(open);
+              if (!open) setEditingVendor(null);
+            }}
+            vendor={editingVendor}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

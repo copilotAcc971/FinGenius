@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, MoreHorizontal, Edit, Trash2, Mail, Download, Loader2, CheckCircle2, FileText } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
@@ -26,12 +26,13 @@ import { useAuth } from "@/shared/hooks/useAuth";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import type { Invoice, InvoiceWithOptimistic, Customer, Currency } from "@shared/schema";
-import { InvoiceDialog } from "@/features/invoices/components/invoice-dialog";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";
 import { invoiceColumns, renderColgroup, getColumnClassName } from "@/shared/lib/utils/table-columns";
 import { useOptimisticCreate } from "@/shared/hooks/optimistic-ui/useOptimisticCreate";
 import { PendingBadge } from "@/shared/components/ui/pending-badge";
 import { cn } from "@/shared/lib/utils/utils";
+
+const InvoiceDialog = lazy(() => import("@/features/invoices/components/invoice-dialog").then(m => ({ default: m.InvoiceDialog })));
 
 export default function Invoices() {
   const [showDialog, setShowDialog] = useState(false);
@@ -368,14 +369,18 @@ export default function Invoices() {
         </div>
       )}
 
-      <InvoiceDialog
-        open={showDialog}
-        onOpenChange={(open) => {
-          setShowDialog(open);
-          if (!open) setEditingInvoice(null);
-        }}
-        invoice={editingInvoice}
-      />
+      {showDialog && (
+        <Suspense fallback={null}>
+          <InvoiceDialog
+            open={showDialog}
+            onOpenChange={(open) => {
+              setShowDialog(open);
+              if (!open) setEditingInvoice(null);
+            }}
+            invoice={editingInvoice}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

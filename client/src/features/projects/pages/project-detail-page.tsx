@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { Edit, Trash2, ArrowLeft, Plus, Check, X, Clock as ClockIcon } from "lucide-react";
@@ -22,7 +22,7 @@ import { useRBAC } from "@/shared/contexts/rbac-context";
 import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
 import type { Project, Customer, TimeEntry, ProjectTask, ProjectMilestone, User, ProjectBudget, ProjectExpense, ProjectInvoice } from "@shared/schema";
 import { format } from "date-fns";
-import { CreateProjectInvoiceDialog } from "@/features/invoices/components/create-project-invoice-dialog";
+const CreateProjectInvoiceDialog = lazy(() => import("@/features/invoices/components/create-project-invoice-dialog").then(m => ({ default: m.CreateProjectInvoiceDialog })));
 
 export default function ProjectDetail() {
   const params = useParams();
@@ -797,13 +797,15 @@ export default function ProjectDetail() {
             </CardContent>
           </Card>
           
-          {customer && (
-            <CreateProjectInvoiceDialog
-              open={createInvoiceDialogOpen}
-              onOpenChange={setCreateInvoiceDialogOpen}
-              project={project}
-              customer={customer}
-            />
+          {customer && createInvoiceDialogOpen && (
+            <Suspense fallback={null}>
+              <CreateProjectInvoiceDialog
+                open={createInvoiceDialogOpen}
+                onOpenChange={setCreateInvoiceDialogOpen}
+                project={project}
+                customer={customer}
+              />
+            </Suspense>
           )}
         </TabsContent>
 
