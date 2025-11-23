@@ -24,7 +24,7 @@ import { TableSkeleton } from "@/shared/components/ui/skeleton";
 import { useTenant } from "@/shared/hooks/useTenant";
 import { useToast } from "@/shared/hooks/use-toast";
 import { useAuth } from "@/shared/hooks/useAuth";
-import { apiRequest, queryClient } from "@/shared/lib/api/queryClient";
+import { apiRequest, queryClient, prefetchQuery } from "@/shared/lib/api/queryClient";
 import { isUnauthorizedError } from "@/shared/lib/auth/authUtils";
 import type { Invoice, InvoiceWithOptimistic, Customer, Currency } from "@shared/schema";
 import { formatCurrency } from "@/shared/lib/utils/currency-utils";

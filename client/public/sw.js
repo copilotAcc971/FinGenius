@@ -1,11 +1,18 @@
-const CACHE_NAME = 'copilot-accountant-v1';
+const CACHE_NAME = 'copilot-accountant-v2';
 const OFFLINE_QUEUE_NAME = 'offline-queue';
+const STATIC_CACHE_NAME = 'static-v2';
+const DYNAMIC_CACHE_NAME = 'dynamic-v2';
+
+// Static assets - cache first strategy
 const CACHE_URLS = [
   '/',
   '/index.html',
   '/favicon.png',
+  // Add common fonts
+  'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
 ];
 
+// API routes - network first with cache fallback
 const CACHEABLE_ROUTES = [
   '/api/tenants',
   '/api/auth/user',
@@ -13,7 +20,21 @@ const CACHEABLE_ROUTES = [
   '/api/bills',
   '/api/customers',
   '/api/vendors',
+  '/api/items',
+  '/api/journal-entries',
+  '/api/chart-of-accounts',
+  '/api/currencies',
+  '/api/taxes',
+  '/api/dashboard',
+  '/api/reports',
 ];
+
+// Cache expiration times (in milliseconds)
+const CACHE_EXPIRATION = {
+  static: 7 * 24 * 60 * 60 * 1000, // 7 days for static assets
+  api: 5 * 60 * 1000, // 5 minutes for API responses
+  dynamic: 24 * 60 * 60 * 1000, // 24 hours for dynamic content
+};
 
 self.addEventListener('install', (event) => {
   console.log('[Service Worker] Installing...');

@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import compression from "compression";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startFXRatesUpdateJob } from "./jobs/fx-rates-update";
@@ -18,6 +19,19 @@ import { logBypassStatus, RBAC_BYPASS_ENABLED } from './rbac/dev-bypass';
 import { ensureVapidKeys } from './services/vapid-generator';
 
 const app = express();
+
+// Enable compression for all responses (30-50% size reduction)
+app.use(compression({
+  filter: (req, res) => {
+    // Compress everything except already-compressed formats
+    const type = res.getHeader('Content-Type');
+    if (type && typeof type === 'string') {
+      return !type.includes('image/') && !type.includes('video/');
+    }
+    return true;
+  },
+  level: 6, // Balance between compression ratio and speed
+}));
 
 // CRITICAL: Mount webhook routers BEFORE express.json() to preserve raw body for HMAC
 app.use('/api/open-banking/webhooks', webhookRouter);

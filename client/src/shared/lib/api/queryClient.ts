@@ -113,11 +113,53 @@ export const queryClient = new QueryClient({
       queryFn: defaultQueryFn,
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: Infinity,
-      retry: false,
+      // Aggressive caching: 5 minutes stale time for most data
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      // Keep data in cache for 10 minutes after component unmount
+      gcTime: 10 * 60 * 1000, // 10 minutes (formerly cacheTime)
+      retry: (failureCount, error: any) => {
+        // Retry network errors up to 2 times, but not auth errors
+        if (error?.status === 401) return false;
+        if (error?.message?.includes('Network')) return failureCount < 2;
+        return false;
+      },
+      // Network mode: Use cached data when offline
+      networkMode: 'offlineFirst',
     },
     mutations: {
       retry: false,
+      // Network mode for mutations
+      networkMode: 'offlineFirst',
     },
   },
 });
+
+// Prefetch helper for likely next actions
+export async function prefetchQuery<T>(queryKey: any[], staleTime?: number) {
+  return queryClient.prefetchQuery({
+    queryKey,
+    staleTime: staleTime || 5 * 60 * 1000,
+  });
+}
+
+// Helper to invalidate related queries
+export function invalidateRelatedQueries(patterns: string[]) {
+  patterns.forEach(pattern => {
+    queryClient.invalidateQueries({ 
+      queryKey: [pattern],
+      refetchType: 'active', // Only refetch if query is active
+    });
+  });
+}
+
+// Optimistic update helper
+export function optimisticUpdate<T>(
+  queryKey: any[],
+  updater: (oldData: T) => T
+) {
+  const previousData = queryClient.getQueryData<T>(queryKey);
+  if (previousData) {
+    queryClient.setQueryData(queryKey, updater(previousData));
+  }
+  return previousData;
+}

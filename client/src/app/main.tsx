@@ -1,15 +1,13 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "../styles/index.css";
+import { errorLogger } from "@/shared/utils/error-logger";
 
-// Add error handling
-window.addEventListener('error', (event) => {
-  console.error('[Main] Uncaught error:', event.error);
-});
+// Initialize error logging
+console.log('[Main] Initializing error logger...');
 
-window.addEventListener('unhandledrejection', (event) => {
-  console.error('[Main] Unhandled promise rejection:', event.reason);
-});
+// Add performance monitoring
+const startTime = performance.now();
 
 console.log('[Main] Starting React app...');
 
@@ -25,9 +23,30 @@ try {
   console.log('[Main] Rendering App component...');
   root.render(<App />);
   
-  console.log('[Main] App component rendered successfully');
+  const loadTime = performance.now() - startTime;
+  console.log(`[Main] App component rendered successfully in ${loadTime.toFixed(2)}ms`);
+  
+  // Log performance metrics
+  if (window.performance && window.performance.timing) {
+    const timing = window.performance.timing;
+    const pageLoadTime = timing.loadEventEnd - timing.navigationStart;
+    const connectTime = timing.responseEnd - timing.requestStart;
+    const renderTime = timing.domComplete - timing.domLoading;
+    
+    console.group('📊 Performance Metrics');
+    console.log(`Page Load Time: ${pageLoadTime}ms`);
+    console.log(`Server Response Time: ${connectTime}ms`);
+    console.log(`DOM Render Time: ${renderTime}ms`);
+    console.log(`React Mount Time: ${loadTime.toFixed(2)}ms`);
+    console.groupEnd();
+  }
 } catch (error) {
-  console.error('[Main] Failed to mount React app:', error);
+  errorLogger.logError({
+    message: `Failed to mount React app: ${error}`,
+    stack: error?.stack,
+    component: 'main',
+  });
+  
   // Show error to user
   const rootElement = document.getElementById("root");
   if (rootElement) {
@@ -38,6 +57,9 @@ try {
           <h1 style="font-size: 24px; font-weight: 600; margin-bottom: 10px;">Failed to Load Application</h1>
           <p style="color: #666; margin-bottom: 20px;">An error occurred while initializing the application. Please refresh the page to try again.</p>
           <pre style="text-align: left; background: #f4f4f4; padding: 10px; border-radius: 4px; font-size: 12px; overflow: auto;">${error}</pre>
+          <button onclick="window.location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #000; color: #fff; border: none; border-radius: 4px; cursor: pointer;">
+            Refresh Page
+          </button>
         </div>
       </div>
     `;
