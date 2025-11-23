@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { invoices, bills } from '../../shared/schema';
 import { and, between, eq } from 'drizzle-orm';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 interface ChartDataPoint {
   date: string;

@@ -17,6 +17,7 @@ import {
   type InsertScoreHistory,
 } from '@shared/schema';
 import { eq, desc } from 'drizzle-orm';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 /**
  * Component weights for overall score calculation

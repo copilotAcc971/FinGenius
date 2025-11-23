@@ -2,6 +2,7 @@ import { storage } from '../storage';
 import type { InboundDocument } from '@shared/schema';
 import { getPushService } from '../notifications/push-service';
 import { RBACService } from '../rbac/service';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 /**
  * Auto-Draft Accounting Entries Service

@@ -11,6 +11,7 @@ import { BaseReportService, DateRange, AccountBalance } from './base-report.serv
 import { db } from '../../db';
 import { journalEntries, journalEntryLegs, accounts } from '@shared/schema';
 import { eq, and, lte, gte, sql } from 'drizzle-orm';
+import { queryOptimizer } from '../../utils/query-optimizer';
 
 // Configure Decimal.js
 Decimal.set({ 

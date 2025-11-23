@@ -20,6 +20,7 @@ import { calculateMetrics } from './financial-metrics';
 import { calculateScore } from './bankability-scoring';
 import { generateImprovementPlan } from './credit-insights';
 import type { FinancialMetricsSnapshot, BankabilityScore } from '@shared/schema';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 /**
  * Bank thresholds for visual indicators

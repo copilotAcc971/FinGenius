@@ -719,8 +719,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Customer routes
   app.get('/api/customers', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('customers.read'), async (req: any, res) => {
     try {
-      const customers = await storage.getCustomersByTenant(req.tenantId);
-      res.json(customers);
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      
+      const actualOffset = page ? (page - 1) * limit : offset;
+      
+      const result = await storage.getCustomersByTenant(req.tenantId, { limit, offset: actualOffset });
+      res.json(result);
     } catch (error) {
       console.error("Error fetching customers:", error);
       res.status(500).json({ message: "Failed to fetch customers" });
@@ -915,8 +921,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Vendor routes
   app.get('/api/vendors', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('vendors.read'), async (req: any, res) => {
     try {
-      const vendors = await storage.getVendorsByTenant(req.tenantId);
-      res.json(vendors);
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      
+      const actualOffset = page ? (page - 1) * limit : offset;
+      
+      const result = await storage.getVendorsByTenant(req.tenantId, { limit, offset: actualOffset });
+      res.json(result);
     } catch (error) {
       console.error("Error fetching vendors:", error);
       res.status(500).json({ message: "Failed to fetch vendors" });
@@ -1132,8 +1144,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Account routes
   app.get('/api/accounts', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('accounts.read'), async (req: any, res) => {
     try {
-      const accounts = await storage.getAccounts(req.tenantId);
-      res.json(accounts);
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      
+      const actualOffset = page ? (page - 1) * limit : offset;
+      
+      const result = await storage.getAccounts(req.tenantId, { limit, offset: actualOffset });
+      res.json(result);
     } catch (error) {
       console.error("Error fetching accounts:", error);
       res.status(500).json({ message: "Failed to fetch accounts" });
@@ -1707,8 +1725,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Item routes
   app.get('/api/items', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('items.read'), async (req: any, res) => {
     try {
-      const items = await storage.getItems(req.tenantId);
-      res.json(items);
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      
+      const actualOffset = page ? (page - 1) * limit : offset;
+      
+      const result = await storage.getItems(req.tenantId, { limit, offset: actualOffset });
+      res.json(result);
     } catch (error) {
       console.error("Error fetching items:", error);
       res.status(500).json({ message: "Failed to fetch items" });
@@ -2253,7 +2277,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Invoice routes
   app.get('/api/invoices', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('invoices.read'), async (req: any, res) => {
     try {
-      const { limit, sortBy = 'createdAt', sortOrder = 'desc', status } = req.query;
+      const pageLimit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      const { sortBy = 'createdAt', sortOrder = 'desc', status } = req.query;
+      
+      const actualOffset = page ? (page - 1) * pageLimit : offset;
       
       const conditions = [
         eq(invoices.tenantId, req.tenantId),
@@ -2289,9 +2318,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : query.orderBy(desc(orderColumn));
       }
       
-      if (limit) {
-        query = query.limit(parseInt(limit as string));
-      }
+      query = query.limit(pageLimit).offset(actualOffset);
       
       const result = await query;
       res.json(result);
@@ -3562,8 +3589,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/quotes", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
-      const quotes = await storage.getQuotes(tenantId);
-      res.json(quotes);
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      
+      const actualOffset = page ? (page - 1) * limit : offset;
+      
+      const result = await storage.getQuotes(tenantId, { limit, offset: actualOffset });
+      res.json(result);
     } catch (error: any) {
       console.error('Error fetching quotes:', error);
       res.status(500).json({ message: error.message });
@@ -5484,6 +5517,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/journal-entries", isAuthenticated, verifyTenantAccess, async (req: any, res) => {
     try {
       const tenantId = req.tenantId!;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      
+      const actualOffset = page ? (page - 1) * limit : offset;
       
       // Create alias for second users table join (for postedBy)
       const postedByUser = alias(users, 'posted_by_user');
@@ -5545,7 +5583,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .leftJoin(postedByUser, eq(journalEntries.postedBy, postedByUser.id))
         .leftJoin(approvalRequests, eq(journalEntries.workflowRequestId, approvalRequests.id))
         .where(eq(journalEntries.tenantId, tenantId))
-        .orderBy(desc(journalEntries.entryDate));
+        .orderBy(desc(journalEntries.entryDate))
+        .limit(limit)
+        .offset(actualOffset);
       
       // Get all workflowRequestIds to fetch approval history
       const workflowRequestIds = entries
@@ -6805,7 +6845,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Bill routes
   app.get('/api/bills', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('bills.read'), async (req: any, res) => {
     try {
-      const { limit, sortBy = 'createdAt', sortOrder = 'desc', dueSoon } = req.query;
+      const pageLimit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const pageNum = parseInt(req.query.page as string);
+      const { sortBy = 'createdAt', sortOrder = 'desc', dueSoon } = req.query;
+      
+      const actualOffset = pageNum ? (pageNum - 1) * pageLimit : offset;
       
       const conditions = [eq(bills.tenantId, req.tenantId)];
       
@@ -6840,9 +6885,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : query.orderBy(desc(orderColumn));
       }
       
-      if (limit) {
-        query = query.limit(parseInt(limit as string));
-      }
+      query = query.limit(pageLimit).offset(actualOffset);
       
       const result = await query;
       res.json(result);
@@ -7572,8 +7615,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Purchase Order routes
   app.get('/api/purchase-orders', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('purchase_orders.read'), async (req: any, res) => {
     try {
-      const purchaseOrders = await storage.getPurchaseOrders(req.tenantId);
-      res.json(purchaseOrders);
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      
+      const actualOffset = page ? (page - 1) * limit : offset;
+      
+      const result = await storage.getPurchaseOrders(req.tenantId, { limit, offset: actualOffset });
+      res.json(result);
     } catch (error) {
       console.error("Error fetching purchase orders:", error);
       res.status(500).json({ message: "Failed to fetch purchase orders" });
@@ -7903,8 +7952,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Payment routes
   app.get('/api/payments', isAuthenticated, verifyTenantAccess, loadAuthContext, requirePermission('payments.read'), async (req: any, res) => {
     try {
-      const payments = await storage.getPaymentsByTenant(req.tenantId);
-      res.json(payments);
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const page = parseInt(req.query.page as string);
+      
+      const actualOffset = page ? (page - 1) * limit : offset;
+      
+      const result = await storage.getPaymentsByTenant(req.tenantId, { limit, offset: actualOffset });
+      res.json(result);
     } catch (error) {
       console.error("Error fetching payments:", error);
       res.status(500).json({ message: "Failed to fetch payments" });

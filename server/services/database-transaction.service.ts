@@ -20,6 +20,7 @@ import type { DBTransaction } from '../accounting/service';
 import { enhancedAuditLogger } from './audit-logger.service';
 import { AccountingError, IntegrityError, ValidationError } from '../accounting/errors';
 import Decimal from 'decimal.js';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ 

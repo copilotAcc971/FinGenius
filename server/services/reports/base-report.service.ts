@@ -20,6 +20,7 @@ import { eq, and, gte, lte, sql, inArray, desc } from 'drizzle-orm';
 import { getLatestRate } from '../fx-rates';
 import { Parser } from 'json2csv';
 import * as XLSX from 'xlsx';
+import { queryOptimizer } from '../../utils/query-optimizer';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ 

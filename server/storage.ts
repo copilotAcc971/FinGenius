@@ -305,6 +305,30 @@ export interface CostLayerConsumption {
   totalCost: string;
 }
 
+/**
+ * Pagination Options for list operations
+ * Helps reduce N+1 queries by limiting result sets
+ */
+export interface PaginationOptions {
+  limit?: number;  // Default 50, max 1000
+  offset?: number; // Default 0
+  page?: number;   // Alternative: page-based (1-indexed), calculates offset = (page - 1) * limit
+}
+
+/**
+ * Pagination Result Metadata
+ */
+export interface PaginatedResult<T> {
+  data: T[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
+}
+
 export interface IStorage {
   // User operations
   getUser(id: string): Promise<User | undefined>;
@@ -1353,12 +1377,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Customer operations
-  async getCustomersByTenant(tenantId: string): Promise<Customer[]> {
-    return await db
+  async getCustomersByTenant(tenantId: string, pagination: PaginationOptions = {}): Promise<PaginatedResult<Customer>> {
+    const { limit = 50, offset = 0 } = pagination;
+    const safeLimit = Math.min(limit, 1000);
+    
+    const results = await db
       .select()
       .from(customers)
       .where(eq(customers.tenantId, tenantId))
-      .orderBy(desc(customers.createdAt));
+      .orderBy(desc(customers.createdAt))
+      .limit(safeLimit)
+      .offset(offset);
+    
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(customers)
+      .where(eq(customers.tenantId, tenantId));
+    
+    return {
+      data: results,
+      pagination: {
+        total: count,
+        page: Math.floor(offset / safeLimit) + 1,
+        limit: safeLimit,
+        offset,
+        hasMore: offset + safeLimit < count,
+      },
+    };
   }
 
   async getCustomer(id: string, tenantId: string): Promise<Customer | undefined> {
@@ -1466,12 +1511,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Vendor operations
-  async getVendorsByTenant(tenantId: string): Promise<Vendor[]> {
-    return await db
+  async getVendorsByTenant(tenantId: string, pagination: PaginationOptions = {}): Promise<PaginatedResult<Vendor>> {
+    const { limit = 50, offset = 0 } = pagination;
+    const safeLimit = Math.min(limit, 1000);
+    
+    const results = await db
       .select()
       .from(vendors)
       .where(eq(vendors.tenantId, tenantId))
-      .orderBy(desc(vendors.createdAt));
+      .orderBy(desc(vendors.createdAt))
+      .limit(safeLimit)
+      .offset(offset);
+    
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(vendors)
+      .where(eq(vendors.tenantId, tenantId));
+    
+    return {
+      data: results,
+      pagination: {
+        total: count,
+        page: Math.floor(offset / safeLimit) + 1,
+        limit: safeLimit,
+        offset,
+        hasMore: offset + safeLimit < count,
+      },
+    };
   }
 
   async getVendor(id: string, tenantId: string): Promise<Vendor | undefined> {
@@ -1714,12 +1780,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Item operations
-  async getItems(tenantId: string): Promise<Item[]> {
-    return await db
+  async getItems(tenantId: string, pagination: PaginationOptions = {}): Promise<PaginatedResult<Item>> {
+    const { limit = 50, offset = 0 } = pagination;
+    const safeLimit = Math.min(limit, 1000);
+    
+    const results = await db
       .select()
       .from(items)
       .where(eq(items.tenantId, tenantId))
-      .orderBy(desc(items.createdAt));
+      .orderBy(desc(items.createdAt))
+      .limit(safeLimit)
+      .offset(offset);
+    
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(items)
+      .where(eq(items.tenantId, tenantId));
+    
+    return {
+      data: results,
+      pagination: {
+        total: count,
+        page: Math.floor(offset / safeLimit) + 1,
+        limit: safeLimit,
+        offset,
+        hasMore: offset + safeLimit < count,
+      },
+    };
   }
 
   async getItem(id: string, tenantId: string): Promise<Item | undefined> {
@@ -2183,18 +2270,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Invoice operations
-  async getInvoicesByTenant(tenantId: string, includeDeleted: boolean = false): Promise<Invoice[]> {
-    const conditions = [eq(invoices.tenantId, tenantId)];
+  async getInvoicesByTenant(tenantId: string, pagination: PaginationOptions = {}, includeDeleted: boolean = false): Promise<PaginatedResult<Invoice>> {
+    const { limit = 50, offset = 0 } = pagination;
+    const safeLimit = Math.min(limit, 1000);
     
+    const conditions = [eq(invoices.tenantId, tenantId)];
     if (!includeDeleted) {
       conditions.push(isNull(invoices.deletedAt));
     }
     
-    return await db
+    const results = await db
       .select()
       .from(invoices)
       .where(and(...conditions))
-      .orderBy(desc(invoices.invoiceDate));
+      .orderBy(desc(invoices.invoiceDate))
+      .limit(safeLimit)
+      .offset(offset);
+    
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(invoices)
+      .where(and(...conditions));
+    
+    return {
+      data: results,
+      pagination: {
+        total: count,
+        page: Math.floor(offset / safeLimit) + 1,
+        limit: safeLimit,
+        offset,
+        hasMore: offset + safeLimit < count,
+      },
+    };
   }
 
   async getInvoice(id: string, tenantId: string): Promise<Invoice | undefined> {
@@ -2527,12 +2634,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Bill operations
-  async getBillsByTenant(tenantId: string): Promise<Bill[]> {
-    return await db
+  async getBillsByTenant(tenantId: string, pagination: PaginationOptions = {}): Promise<PaginatedResult<Bill>> {
+    const { limit = 50, offset = 0 } = pagination;
+    const safeLimit = Math.min(limit, 1000);
+    
+    const results = await db
       .select()
       .from(bills)
       .where(eq(bills.tenantId, tenantId))
-      .orderBy(desc(bills.billDate));
+      .orderBy(desc(bills.billDate))
+      .limit(safeLimit)
+      .offset(offset);
+    
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(bills)
+      .where(eq(bills.tenantId, tenantId));
+    
+    return {
+      data: results,
+      pagination: {
+        total: count,
+        page: Math.floor(offset / safeLimit) + 1,
+        limit: safeLimit,
+        offset,
+        hasMore: offset + safeLimit < count,
+      },
+    };
   }
 
   async getBill(id: string, tenantId: string): Promise<Bill | undefined> {
@@ -3201,12 +3329,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Payment operations
-  async getPaymentsByTenant(tenantId: string): Promise<Payment[]> {
-    return await db
+  async getPaymentsByTenant(tenantId: string, pagination: PaginationOptions = {}): Promise<PaginatedResult<Payment>> {
+    const { limit = 50, offset = 0 } = pagination;
+    const safeLimit = Math.min(limit, 1000);
+    
+    const results = await db
       .select()
       .from(payments)
       .where(eq(payments.tenantId, tenantId))
-      .orderBy(desc(payments.createdAt));
+      .orderBy(desc(payments.createdAt))
+      .limit(safeLimit)
+      .offset(offset);
+    
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(payments)
+      .where(eq(payments.tenantId, tenantId));
+    
+    return {
+      data: results,
+      pagination: {
+        total: count,
+        page: Math.floor(offset / safeLimit) + 1,
+        limit: safeLimit,
+        offset,
+        hasMore: offset + safeLimit < count,
+      },
+    };
   }
 
   async createPayment(paymentData: InsertPayment, tx?: typeof db): Promise<Payment> {
@@ -5126,12 +5275,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Journal Entry operations
-  async getJournalEntries(tenantId: string): Promise<JournalEntry[]> {
-    return await db
+  async getJournalEntries(tenantId: string, pagination: PaginationOptions = {}): Promise<PaginatedResult<JournalEntry>> {
+    const { limit = 50, offset = 0 } = pagination;
+    const safeLimit = Math.min(limit, 1000);
+    
+    const results = await db
       .select()
       .from(journalEntries)
       .where(eq(journalEntries.tenantId, tenantId))
-      .orderBy(desc(journalEntries.entryDate));
+      .orderBy(desc(journalEntries.entryDate))
+      .limit(safeLimit)
+      .offset(offset);
+    
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(journalEntries)
+      .where(eq(journalEntries.tenantId, tenantId));
+    
+    return {
+      data: results,
+      pagination: {
+        total: count,
+        page: Math.floor(offset / safeLimit) + 1,
+        limit: safeLimit,
+        offset,
+        hasMore: offset + safeLimit < count,
+      },
+    };
   }
 
   async getJournalEntry(id: string, tenantId: string): Promise<JournalEntry | undefined> {

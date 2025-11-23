@@ -4,6 +4,8 @@ import { db } from '../db';
 import { eq, and } from 'drizzle-orm';
 import * as schema from '@shared/schema';
 import crypto from 'crypto';
+import { cacheManager, invalidateTenantCache, DEFAULT_TTLS } from '../cache/cache-manager';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 // Initialize the base audit logger
 const auditLogger = new AuditLogger(storage);
@@ -474,16 +476,21 @@ export class AuditLoggerService {
     // Check if the same user created and approved an entity
     // This is a simplified check - production would have more complex rules
     if (operation === 'approve' && (entityType === 'journal_entry' || entityType === 'invoice' || entityType === 'bill')) {
-      // Check if the user created this entity
-      const creationLog = await storage.getAuditLogs({
-        tenantId,
-        userId,
-        action: 'create',
-        entityType,
-        entityId,
-      });
+      // Check if the user created this entity using paginated query
+      const creationLogs = await queryOptimizer.measureQuery(
+        `checkSegregationOfDuties_${entityType}`,
+        async () => storage.getAuditLogs({
+          tenantId,
+          userId,
+          action: 'create',
+          entityType,
+          entityId,
+          limit: 10,
+          offset: 0,
+        })
+      ).then(r => r.result);
 
-      if (creationLog && creationLog.length > 0) {
+      if (creationLogs && creationLogs.length > 0) {
         // User is trying to approve their own creation - violation
         await this.logSystemEvent({
           type: 'permission_denied',

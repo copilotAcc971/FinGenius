@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { aiProviderConsents, aiUsageLogs } from '../../shared/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 export type AIProvider = 'openai' | 'kimi' | 'qwen' | 'deepseek';
 

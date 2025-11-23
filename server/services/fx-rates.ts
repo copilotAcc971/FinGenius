@@ -3,6 +3,8 @@ import { storage } from '../storage';
 import type { InsertExchangeRate } from '@shared/schema';
 import * as xml2js from 'xml2js';
 import { PythonOCRService } from './python-ocr-wrapper';
+import { cacheFXRates, getFXRates, invalidateFXRates, DEFAULT_TTLS } from '../cache/cache-manager';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 const TIMEOUT_MS = 10000;
 const MAX_RETRIES = 3;

@@ -32,6 +32,7 @@ import { eq, and, sql, desc, gte, lte, or, isNull } from 'drizzle-orm';
 import { JournalEntryService } from './journal-entry.service';
 import { enhancedAuditLogger } from './audit-logger.service';
 import { BusinessRulesError } from './business-rules.service';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 // Configure Decimal.js for financial precision
 Decimal.set({

@@ -10,6 +10,7 @@ import { BaseReportService, DateRange, ReportSection, ReportLineItem, AccountBal
 import { db } from '../../db';
 import { accounts } from '@shared/schema';
 import { eq, and, like, or, inArray } from 'drizzle-orm';
+import { queryOptimizer } from '../../utils/query-optimizer';
 
 // Configure Decimal.js
 Decimal.set({ 

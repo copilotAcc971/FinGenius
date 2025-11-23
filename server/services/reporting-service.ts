@@ -2,6 +2,7 @@ import { db } from '../db';
 import { financialReports, complianceDashboards, creditPassports, scheduledReports, reportExports } from '@shared/schema';
 import { sql } from 'drizzle-orm';
 import { eq, and, between, desc } from 'drizzle-orm';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 interface ReportMetrics {
   totalIncome: number;

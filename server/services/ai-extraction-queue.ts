@@ -4,6 +4,8 @@ import { DocumentProcessor } from '../ai-copilot/document-processor';
 import { createDraftFromExtraction } from './auto-draft-service';
 import type { InboundDocument } from '@shared/schema';
 import { getPushService } from '../notifications/push-service';
+import { queryOptimizer } from '../utils/query-optimizer';
+import { cacheQueue, DEFAULT_TTLS } from '../cache/cache-manager';
 
 /**
  * AI Extraction Job Queue

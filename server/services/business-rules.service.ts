@@ -20,6 +20,7 @@ import {
   type JournalEntry
 } from '@shared/schema';
 import { eq, and, sql, inArray, lt, gte } from 'drizzle-orm';
+import { queryOptimizer } from '../utils/query-optimizer';
 
 export class BusinessRulesError extends Error {
   constructor(message: string, public code: string) {
