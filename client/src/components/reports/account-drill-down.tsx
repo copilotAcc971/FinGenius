@@ -10,7 +10,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@/shared/components/ui/dialog';
 import {
   Table,
   TableBody,
@@ -18,13 +18,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+} from '@/shared/components/ui/table';
+import { ScrollArea } from '@/shared/components/ui/scroll-area';
+import { Button } from '@/shared/components/ui/button';
+import { Skeleton } from '@/shared/components/ui/skeleton';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
-import { apiRequest } from '@/lib/queryClient';
+import { apiRequest } from '@/shared/lib/api/queryClient';
 import { useQuery } from '@tanstack/react-query';
 
 interface JournalEntryLine {

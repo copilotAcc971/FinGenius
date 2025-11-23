@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/shared/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -9,18 +9,18 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+} from '@/shared/components/ui/dialog';
+import { Label } from '@/shared/components/ui/label';
 import { Calendar } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { queryClient, apiRequest } from '@/lib/queryClient';
-import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { useToast } from '@/shared/hooks/use-toast';
+import { queryClient, apiRequest } from '@/shared/lib/api/queryClient';
+import { Calendar as CalendarComponent } from '@/shared/components/ui/calendar';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
+} from '@/shared/components/ui/popover';
+import { cn } from '@/shared/lib/utils/utils';
 
 interface FxTranslationStatus {
   translationApplied: boolean;

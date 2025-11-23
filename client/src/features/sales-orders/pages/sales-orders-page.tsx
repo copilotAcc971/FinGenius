@@ -1,4 +1,5 @@
-import { Suspense, lazy, useQuery } from "@tanstack/react-query";
+import { Suspense, lazy } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Edit, Trash2, FileText, Truck } from "lucide-react";
 import { EmptyState } from "@/shared/components/ui/empty-state";
 import { Button } from "@/shared/components/ui/button";

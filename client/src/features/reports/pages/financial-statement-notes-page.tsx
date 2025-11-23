@@ -20,7 +20,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils/utils';
 import type { FinancialStatementNote } from '@shared/schema';
 
 const noteSchema = z.object({

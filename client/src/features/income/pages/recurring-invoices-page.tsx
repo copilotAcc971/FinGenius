@@ -1,4 +1,5 @@
-import { Suspense, lazy, useQuery } from "@tanstack/react-query";
+import { Suspense, lazy } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Edit, Trash2, Play, Pause, FileText } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";

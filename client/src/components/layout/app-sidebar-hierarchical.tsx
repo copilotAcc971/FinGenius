@@ -19,7 +19,7 @@ import {
   TrendingUp,
   TrendingDown,
   Landmark,
-  Ledger,
+  BookOpen,
   Users,
   Briefcase,
   BarChart3,
@@ -41,7 +41,6 @@ import {
   CheckSquare,
   Send,
   LayoutList,
-  BookOpen,
   Box,
   ArrowUpDown,
   ArchiveX,
@@ -172,7 +171,7 @@ const NAVIGATION_MENU: MenuSectionConfig[] = [
   },
   {
     label: 'Accounting',
-    icon: <Ledger className="h-5 w-5" />,
+    icon: <BookOpen className="h-5 w-5" />,
     children: [
       {
         label: 'Chart of Accounts',

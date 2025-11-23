@@ -5,11 +5,11 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
+import { Alert, AlertDescription } from '@/shared/components/ui/alert';
+import { Skeleton } from '@/shared/components/ui/skeleton';
+import { Badge } from '@/shared/components/ui/badge';
+import { Separator } from '@/shared/components/ui/separator';
 import { 
   CheckCircle2, 
   AlertTriangle,
@@ -21,12 +21,12 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+} from '@/shared/components/ui/collapsible';
 import { ReportHeader } from '@/components/reports/report-header';
 import { ReportFilters } from '@/components/reports/report-filters';
 import { ReportExport } from '@/components/reports/report-export';
 import { AccountDrillDown } from '@/components/reports/account-drill-down';
-import { apiRequest } from '@/lib/queryClient';
+import { apiRequest } from '@/shared/lib/api/queryClient';
 import { useTenant } from '@/shared/hooks/useTenant';
 import Decimal from 'decimal.js';
 

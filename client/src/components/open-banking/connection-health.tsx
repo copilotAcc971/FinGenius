@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { queryClient, apiRequest } from '@/lib/api/queryClient';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Skeleton } from '@/components/ui/skeleton';
+import { queryClient, apiRequest } from '@/shared/lib/api/queryClient';
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
+import { Button } from '@/shared/components/ui/button';
+import { Badge } from '@/shared/components/ui/badge';
+import { Alert, AlertDescription } from '@/shared/components/ui/alert';
+import { Skeleton } from '@/shared/components/ui/skeleton';
 import { 
   WifiIcon, 
   WifiOffIcon, 
@@ -20,7 +20,7 @@ import {
   ShieldAlertIcon,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/shared/hooks/use-toast';
 
 interface CircuitBreakerState {
   state: 'closed' | 'open' | 'half-open';

@@ -3,8 +3,8 @@
  * Displays company info, report title, and date range
  */
 
-import { Card } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
+import { Card } from '@/shared/components/ui/card';
+import { Separator } from '@/shared/components/ui/separator';
 import { format } from 'date-fns';
 
 interface ReportHeaderProps {

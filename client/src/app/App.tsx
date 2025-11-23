@@ -38,11 +38,11 @@ const InboundDocumentsPage = lazy(() => import("@/pages/inbound-documents"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
 const AIProvidersPage = lazy(() => import("@/pages/settings/ai-providers"));
 
-// Report Pages
-const BalanceSheetPage = lazy(() => import("@/pages/reports/balance-sheet-page"));
-const CashFlowPage = lazy(() => import("@/pages/reports/cash-flow-page"));
-const ProfitLossPage = lazy(() => import("@/pages/reports/profit-loss-page"));
-const TrialBalancePage = lazy(() => import("@/pages/reports/trial-balance-page"));
+// Report Pages - Temporarily disabled due to import issues
+// const BalanceSheetPage = lazy(() => import("@/pages/reports/balance-sheet-page"));
+// const CashFlowPage = lazy(() => import("@/pages/reports/cash-flow-page"));
+// const ProfitLossPage = lazy(() => import("@/pages/reports/profit-loss-page"));
+// const TrialBalancePage = lazy(() => import("@/pages/reports/trial-balance-page"));
 
 // Auth Pages
 const Landing = lazy(() => import("@/features/auth/pages/landing-page"));

@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/shared/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,9 +12,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '@/shared/components/ui/dropdown-menu';
 import { Download, FileSpreadsheet, FileText, FileJson, Printer } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/shared/hooks/use-toast';
 
 interface ReportExportProps {
   reportType: 'profit-loss' | 'balance-sheet' | 'trial-balance' | 'cash-flow';
