@@ -3,9 +3,10 @@ import { Switch, Route, useLocation } from "wouter";
 import { SidebarProvider, SidebarTrigger } from "@/shared/components/ui/sidebar";
 import { PageSkeleton } from "@/shared/components/layout/page-skeleton";
 import { useAuth } from "@/shared/hooks/useAuth";
-import { useTenant, TenantProvider } from "@/shared/contexts/TenantContext";
-import { RBACProvider } from "@/shared/contexts/rbac-context";
+import { useTenant } from "@/shared/contexts/TenantContext";
 import { Toaster } from "@/shared/components/ui/toaster";
+
+console.log('[SimplifiedApp] Module loading...');
 
 // Simplified loading component
 const Loading = () => (
@@ -252,9 +253,11 @@ function ProtectedLayout() {
 }
 
 export default function SimplifiedApp() {
+  console.log('[SimplifiedApp] Function called');
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
+    console.log('[SimplifiedApp] Component mounted');
     const handleError = (event: ErrorEvent) => {
       console.error('[SimplifiedApp] Error:', event.error);
       setError(event.error);
@@ -269,6 +272,7 @@ export default function SimplifiedApp() {
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
 
     return () => {
+      console.log('[SimplifiedApp] Component unmounting');
       window.removeEventListener('error', handleError);
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };

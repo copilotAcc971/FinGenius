@@ -1,19 +1,17 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "../styles/index.css";
-import { errorLogger } from "@/shared/utils/error-logger";
 
-// Initialize error logging
-console.log('[Main] Initializing error logger...');
+// Simple console logging
+console.log('[Main] Starting React app initialization...');
 
-// Add performance monitoring
-const startTime = performance.now();
-
-console.log('[Main] Starting React app...');
-
+// Main app mounting
 try {
   const rootElement = document.getElementById("root");
+  console.log('[Main] Looking for root element...');
+  
   if (!rootElement) {
+    console.error('[Main] Root element not found!');
     throw new Error("Root element not found");
   }
   
@@ -23,29 +21,9 @@ try {
   console.log('[Main] Rendering App component...');
   root.render(<App />);
   
-  const loadTime = performance.now() - startTime;
-  console.log(`[Main] App component rendered successfully in ${loadTime.toFixed(2)}ms`);
-  
-  // Log performance metrics
-  if (window.performance && window.performance.timing) {
-    const timing = window.performance.timing;
-    const pageLoadTime = timing.loadEventEnd - timing.navigationStart;
-    const connectTime = timing.responseEnd - timing.requestStart;
-    const renderTime = timing.domComplete - timing.domLoading;
-    
-    console.group('📊 Performance Metrics');
-    console.log(`Page Load Time: ${pageLoadTime}ms`);
-    console.log(`Server Response Time: ${connectTime}ms`);
-    console.log(`DOM Render Time: ${renderTime}ms`);
-    console.log(`React Mount Time: ${loadTime.toFixed(2)}ms`);
-    console.groupEnd();
-  }
+  console.log('[Main] App component rendered successfully!');
 } catch (error) {
-  errorLogger.logError({
-    message: `Failed to mount React app: ${error}`,
-    stack: error?.stack,
-    component: 'main',
-  });
+  console.error('[Main] Failed to mount React app:', error);
   
   // Show error to user
   const rootElement = document.getElementById("root");
@@ -66,29 +44,4 @@ try {
   }
 }
 
-// Service Worker registration (non-blocking)
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      const registration = await navigator.serviceWorker.register('/sw.js', {
-        scope: '/',
-      });
-      console.log('[PWA] Service Worker registered successfully:', registration.scope);
-
-      registration.addEventListener('updatefound', () => {
-        const newWorker = registration.installing;
-        console.log('[PWA] Service Worker update found');
-        
-        if (newWorker) {
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('[PWA] New Service Worker available - page refresh recommended');
-            }
-          });
-        }
-      });
-    } catch (error) {
-      console.error('[PWA] Service Worker registration failed:', error);
-    }
-  });
-}
+console.log('[Main] Main.tsx module fully loaded');
